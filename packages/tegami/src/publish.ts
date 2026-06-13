@@ -1,10 +1,8 @@
-import type { TegamiContext } from "./context";
-import type { ChangelogEntry } from "./markdown";
+import { x } from "tinyexec";
+import { filterChangelogsByIds, type TegamiContext } from "./context";
+import { ChangelogEntry, PublishPlan } from "./schemas";
 import { createGitTag } from "./utils/git";
-import { readPublishRegistry, validateManifestVersion } from "./utils/manifest";
-import { publishPackage, type NpmClient } from "./utils/npm";
-import type { PublishPlan } from "./utils/publish-plan";
-import { formatRegistry } from "./utils/registry";
+import type { NpmClient } from "./types";
 
 export interface PublishOptions {
   /** Validate the publish plan without publishing packages, creating tags, or running release plugins. */
@@ -18,35 +16,40 @@ export interface PublishOptions {
 export interface PublishResult {
   /** Path to the publish plan that was executed. */
   planPath: string;
+  plan: PublishPlan;
   state: "success" | "failed";
   packages: PackagePublishResult[];
 }
 
-export interface PackagePublishResult {
+export type PackagePublishResult = (
+  | {
+      state: "failed";
+      error?: string;
+    }
+  | {
+      state: "success";
+    }
+) & {
   name: string;
-  path: string;
   version: string;
   distTag: string;
-  /** Changelog entries persisted in the publish plan. */
-  changelogs: ChangelogEntry[];
   gitTag: string | false;
-  state: "success" | "failed";
-  reason?: string;
-  error?: string;
-}
+  changelogs: ChangelogEntry[];
+};
 
 export async function publishFromPlan(
   context: TegamiContext,
   plan: PublishPlan,
 ): Promise<PublishResult> {
   const packages = await publishStoredPlan(plan, context);
-  await createGitTags(plan, context, packages);
-
-  return {
+  const result: PublishResult = {
+    plan,
     planPath: context.planPath,
     state: packages.some((pkg) => pkg.state === "failed") ? "failed" : "success",
     packages,
   };
+
+  return createGitTags(plan, context, result);
 }
 
 async function publishStoredPlan(
@@ -55,56 +58,70 @@ async function publishStoredPlan(
 ): Promise<PackagePublishResult[]> {
   const results: PackagePublishResult[] = [];
 
-  for (const pkg of plan.packages) {
-    if (!pkg.publish) continue;
+  for (const packagePlan of plan.packages) {
+    if (!packagePlan.publish) continue;
+    const pkg = context.graph.get(packagePlan.name);
+    if (!pkg) continue;
+    const changelogs = filterChangelogsByIds(plan.changelogs, packagePlan.changelogIds);
 
     if (!context.publish.dryRun) {
-      const registry = await readPublishRegistry(pkg.path);
-      const published = await context.registryClient.packageVersionExists(pkg.name, pkg.version, {
-        cwd: pkg.path,
-        registry,
-      });
+      const published = await context.registryClient.packageVersionExists(
+        packagePlan.name,
+        packagePlan.version,
+      );
 
       if (published) {
         results.push({
-          name: pkg.name,
-          path: pkg.path,
-          version: pkg.version,
-          distTag: pkg.distTag,
-          changelogs: pkg.changelogs,
-          gitTag: pkg.gitTag,
+          name: packagePlan.name,
+          version: packagePlan.version,
+          distTag: packagePlan.distTag,
+          gitTag: packagePlan.gitTag,
           state: "success",
-          reason: `Version already exists in the npm registry${formatRegistry(registry)}.`,
+          changelogs,
         });
         continue;
       }
     }
 
     try {
-      await validateManifestVersion(pkg.path, pkg.name, pkg.version);
+      if (pkg.manifest.name !== packagePlan.name) {
+        throw new Error(
+          `Expected package ${packagePlan.name}, found ${pkg.manifest.name ?? "unknown"}.`,
+        );
+      }
+
+      if (pkg.manifest.version !== packagePlan.version) {
+        throw new Error(
+          `Expected ${packagePlan.name}@${packagePlan.version}, found ${pkg.manifest.version ?? "unknown"}.`,
+        );
+      }
 
       if (!context.publish.dryRun) {
-        await publishPackage(pkg.path, pkg.distTag, pkg.access, context.npmClient);
+        const args = ["publish", "--tag", packagePlan.distTag];
+
+        await x(context.npmClient, args, {
+          nodeOptions: {
+            cwd: pkg.path,
+          },
+          throwOnError: true,
+        });
       }
 
       results.push({
-        name: pkg.name,
-        path: pkg.path,
-        version: pkg.version,
-        distTag: pkg.distTag,
-        changelogs: pkg.changelogs,
-        gitTag: pkg.gitTag,
+        name: packagePlan.name,
+        version: packagePlan.version,
+        distTag: packagePlan.distTag,
+        gitTag: packagePlan.gitTag,
         state: "success",
-        reason: "Dry run.",
+        changelogs,
       });
     } catch (error) {
       results.push({
-        name: pkg.name,
-        path: pkg.path,
-        version: pkg.version,
-        distTag: pkg.distTag,
-        changelogs: pkg.changelogs,
-        gitTag: pkg.gitTag,
+        name: packagePlan.name,
+        version: packagePlan.version,
+        distTag: packagePlan.distTag,
+        changelogs,
+        gitTag: packagePlan.gitTag,
         state: "failed",
         error: error instanceof Error ? error.message : String(error),
       });
@@ -117,24 +134,35 @@ async function publishStoredPlan(
 async function createGitTags(
   plan: PublishPlan,
   context: TegamiContext,
-  results: PackagePublishResult[],
-): Promise<void> {
-  if (context.publish.dryRun || context.publish.gitTags === false) return;
-  if (results.some((pkg) => pkg.state === "failed")) return;
+  result: PublishResult,
+): Promise<PublishResult> {
+  const { publish: publishConfig, graph } = context;
+  if (publishConfig.dryRun || publishConfig.gitTags === false || result.state === "failed")
+    return result;
 
-  for (const pkg of plan.packages) {
-    if (!pkg.publish || !pkg.gitTag) continue;
+  for (const release of plan.packages) {
+    if (!release.publish || !release.gitTag) continue;
 
     try {
-      await createGitTag(pkg.path, pkg.gitTag);
+      await createGitTag(graph.get(release.name)!.path, release.gitTag);
     } catch (error) {
-      const result = results.find((item) => item.name === pkg.name);
-      if (!result) throw error;
+      return {
+        ...result,
+        state: "failed",
+        packages: result.packages.map((pkgResult) => {
+          if (pkgResult.name === release.name) {
+            return {
+              ...pkgResult,
+              state: "failed",
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
 
-      result.state = "failed";
-      result.error = error instanceof Error ? error.message : String(error);
-      return;
+          return pkgResult;
+        }),
+      };
     }
   }
-}
 
+  return result;
+}

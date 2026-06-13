@@ -1,9 +1,10 @@
 import { join, resolve } from "node:path";
 import { detect } from "package-manager-detector";
 import type { PublishOptions } from "./publish";
-import type { TegamiOptions } from "./types";
-import type { NpmClient } from "./utils/npm";
-import { RegistryClient, type PackageRegistryClient } from "./utils/registry";
+import type { NpmClient, TegamiOptions } from "./types";
+import { RegistryClient } from "./utils/registry";
+import { discoverWorkspace, type PackageGraph } from "./workspace";
+import { ChangelogEntry } from "./schemas";
 
 export interface TegamiContext {
   cwd: string;
@@ -12,7 +13,8 @@ export interface TegamiContext {
   options: TegamiOptions;
   publish: Required<Pick<PublishOptions, "dryRun">> & PublishOptions;
   npmClient: NpmClient;
-  registryClient: PackageRegistryClient;
+  graph: PackageGraph;
+  registryClient: RegistryClient;
 }
 
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {
@@ -22,9 +24,8 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
     dryRun: options.publish?.dryRun ?? false,
   };
   const npmClient = await resolveNpmClient(cwd, publish.npmClient);
-  const registryClient = new RegistryClient({
-    npmClient,
-  });
+  const graph = await discoverWorkspace(cwd);
+  const registryClient = new RegistryClient(cwd, npmClient, graph);
 
   return {
     cwd,
@@ -33,8 +34,13 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
     options,
     publish,
     npmClient,
+    graph,
     registryClient,
   };
+}
+
+export function filterChangelogsByIds(all: ChangelogEntry[], ids: Set<string>): ChangelogEntry[] {
+  return all.filter((entry) => ids.has(entry.id));
 }
 
 async function resolveNpmClient(cwd: string, npmClient: NpmClient | undefined): Promise<NpmClient> {

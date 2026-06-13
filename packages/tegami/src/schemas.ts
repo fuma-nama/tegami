@@ -5,9 +5,25 @@ export const changelogFrontmatterSchema = z.object({
   packages: z.array(z.string()).default([]),
 });
 
-export type ChangelogFrontmatter = z.infer<typeof changelogFrontmatterSchema>;
-
 const stringRecordSchema = z.record(z.string(), z.string());
+
+const jsonCodec = <T extends z.core.$ZodType>(schema: T) =>
+  z.codec(z.string(), schema, {
+    decode: (jsonString, ctx) => {
+      try {
+        return JSON.parse(jsonString);
+      } catch (err: any) {
+        ctx.issues.push({
+          code: "invalid_format",
+          format: "json",
+          input: jsonString,
+          message: err.message,
+        });
+        return z.NEVER;
+      }
+    },
+    encode: (value) => JSON.stringify(value),
+  });
 
 export const workspacePatternsSchema = z
   .union([
@@ -37,4 +53,57 @@ export const packageManifestSchema = z.looseObject({
   optionalDependencies: stringRecordSchema.optional(),
 });
 
-export type PackageManifestData = z.infer<typeof packageManifestSchema>;
+export type PackageManifest = z.infer<typeof packageManifestSchema>;
+
+/** Parsed release note entry from a changelog markdown file. */
+export const changelogEntrySchema = z.object({
+  id: z.string(),
+  file: z.string(),
+  subject: z.string().optional(),
+  packages: z.array(z.string()),
+  type: z.enum(["major", "minor", "patch"]),
+  title: z.string(),
+  content: z.string(),
+});
+
+export const packagePlanSchema = z.object({
+  name: z.string(),
+  version: z.string(),
+  changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
+    encode: (v) => Array.from(v),
+    decode: (v) => new Set(v),
+  }),
+  distTag: z.string(),
+  gitTag: z.union([z.string(), z.literal(false)]),
+  publish: z.boolean(),
+});
+
+export const publishPlanSchema = jsonCodec(
+  z
+    .object({
+      id: z.string(),
+      createdAt: z.iso.datetime(),
+      changelogs: z.array(changelogEntrySchema),
+      packages: z.array(packagePlanSchema),
+    })
+    .superRefine((plan, context) => {
+      const seen = new Set<string>();
+
+      for (const [index, pkg] of plan.packages.entries()) {
+        if (!seen.has(pkg.name)) {
+          seen.add(pkg.name);
+          continue;
+        }
+
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate package in publish plan: ${pkg.name}`,
+          path: ["packages", index, "name"],
+        });
+      }
+    }),
+);
+
+export type PublishPlan = z.output<typeof publishPlanSchema>;
+export type PackagePlan = z.output<typeof packagePlanSchema>;
+export type ChangelogEntry = z.output<typeof changelogEntrySchema>;

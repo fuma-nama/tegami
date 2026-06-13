@@ -1,22 +1,13 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Heading, Root, RootContent } from "mdast";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { remark } from "remark";
-import { changelogFrontmatterSchema } from "./schemas";
+import { type ChangelogEntry, changelogFrontmatterSchema } from "./schemas";
 import { isNodeError } from "./utils/error";
 import type { BumpType } from "./utils/semver";
 import { frontmatter } from "./utils/frontmatter";
-
-/** Parsed release note entry from a changelog markdown file. */
-export interface ChangelogEntry {
-  file: string;
-  subject?: string;
-  packages: string[];
-  type: BumpType;
-  title: string;
-  content: string;
-}
 
 export async function readChangelogEntries(
   cwd: string,
@@ -56,6 +47,7 @@ export function parseChangelogFile(file: string, content: string): ChangelogEntr
     if (!type) continue;
 
     entries.push({
+      id: changelogId(file, entries.length),
       file,
       subject: data.subject,
       packages: data.packages,
@@ -68,27 +60,22 @@ export function parseChangelogFile(file: string, content: string): ChangelogEntr
   return entries;
 }
 
-function getHeadingSections(tree: Root): Array<{
+function changelogId(file: string, index: number): string {
+  return createHash("sha256").update(`${file}\u0000${index}`).digest("hex").slice(0, 12);
+}
+
+interface HeadingSection {
   heading: Heading;
   children: RootContent[];
-}> {
-  const sections: {
-    heading: Heading;
-    children: RootContent[];
-  }[] = [];
-  let current:
-    | {
-        heading: Heading;
-        children: RootContent[];
-      }
-    | undefined;
+}
+
+function getHeadingSections(tree: Root): HeadingSection[] {
+  const sections: HeadingSection[] = [];
+  let current: HeadingSection | undefined;
 
   for (const child of tree.children) {
     if (child.type === "heading") {
-      current = {
-        heading: child,
-        children: [],
-      };
+      current = { heading: child, children: [] };
       sections.push(current);
       continue;
     }
@@ -139,4 +126,3 @@ function headingToBump(depth: number): BumpType | undefined {
   if (depth === 3) return "patch";
   return undefined;
 }
-

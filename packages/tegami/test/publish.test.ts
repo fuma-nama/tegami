@@ -7,7 +7,7 @@ import { tegami } from "../src";
 import { createTegamiContext } from "../src/context";
 import type { PublishOptions } from "../src/publish";
 import { publishFromPlan } from "../src/publish";
-import { parsePublishPlan, type PublishPlan } from "../src/utils/publish-plan";
+import { publishPlanSchema } from "../src/schemas";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -26,13 +26,13 @@ afterEach(async () => {
 
 describe("publish plans", () => {
   test("skips registry and publish commands for dry runs", async () => {
-    const { planPath } = await createPublishFixture({
+    const { cwd, planPath } = await createPublishFixture({
       registry: "https://registry.example.test",
     });
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         dryRun: true,
       }),
     );
@@ -42,14 +42,13 @@ describe("publish plans", () => {
       expect.objectContaining({
         name: "@acme/core",
         state: "success",
-        reason: "Dry run.",
       }),
     ]);
     expect(exec).not.toHaveBeenCalled();
   });
 
   test("does not republish versions that already exist in the registry", async () => {
-    const { packagePath, planPath } = await createPublishFixture({
+    const { cwd, planPath } = await createPublishFixture({
       registry: "https://registry.example.test",
     });
 
@@ -57,7 +56,7 @@ describe("publish plans", () => {
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         dryRun: false,
         gitTags: false,
         npmClient: "npm",
@@ -69,7 +68,6 @@ describe("publish plans", () => {
       expect.objectContaining({
         name: "@acme/core",
         state: "success",
-        reason: "Version already exists in the npm registry (https://registry.example.test).",
       }),
     ]);
 
@@ -86,16 +84,17 @@ describe("publish plans", () => {
       ],
       {
         nodeOptions: {
-          cwd: packagePath,
+          cwd,
         },
       },
     );
   });
 
   test("derives package changelogs from top-level plan changelogs", async () => {
-    const { planPath } = await createPublishFixture();
+    const { cwd, planPath } = await createPublishFixture();
     const plan = await readJson<{
       changelogs: Array<{
+        id: string;
         file: string;
         packages: string[];
         type: "major" | "minor" | "patch";
@@ -103,14 +102,12 @@ describe("publish plans", () => {
         content: string;
       }>;
       packages: Array<{
-        reasons: Array<{
-          type: "changelog";
-          file: string;
-        }>;
+        changelogIds: string[];
       }>;
     }>(planPath);
     plan.changelogs = [
       {
+        id: "change-1",
         file: "/repo/.tegami/change.md",
         packages: ["core"],
         type: "minor",
@@ -118,17 +115,12 @@ describe("publish plans", () => {
         content: "Some description.",
       },
     ];
-    plan.packages[0]!.reasons = [
-      {
-        type: "changelog",
-        file: "/repo/.tegami/change.md",
-      },
-    ];
+    plan.packages[0]!.changelogIds = ["change-1"];
     await writeJson(planPath, plan);
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         dryRun: true,
       }),
     );
@@ -137,7 +129,7 @@ describe("publish plans", () => {
   });
 
   test("creates git tags after all packages publish successfully", async () => {
-    const { corePath, uiPath, planPath } = await createMultiPackagePublishFixture();
+    const { cwd, corePath, uiPath, planPath } = await createMultiPackagePublishFixture();
 
     exec.mockImplementation((_command, args = []) => {
       if (args.at(0) === "view") {
@@ -162,7 +154,7 @@ describe("publish plans", () => {
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         npmClient: "npm",
       }),
     );
@@ -208,7 +200,7 @@ describe("publish plans", () => {
   });
 
   test("does not create git tags when any package publish fails", async () => {
-    const { planPath } = await createMultiPackagePublishFixture();
+    const { cwd, planPath } = await createMultiPackagePublishFixture();
 
     exec.mockImplementation((_command, args = [], options = {}) => {
       if (args.at(0) === "view") {
@@ -232,7 +224,7 @@ describe("publish plans", () => {
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         npmClient: "npm",
       }),
     );
@@ -249,7 +241,7 @@ describe("publish plans", () => {
   });
 
   test("publishes versions that are missing from the registry", async () => {
-    const { packagePath, planPath } = await createPublishFixture();
+    const { cwd, packagePath, planPath } = await createPublishFixture();
 
     exec.mockImplementation((_command, args = []) => {
       if (args.at(0) === "view") {
@@ -268,7 +260,7 @@ describe("publish plans", () => {
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         dryRun: false,
         gitTags: false,
         npmClient: "pnpm",
@@ -289,7 +281,7 @@ describe("publish plans", () => {
       ["view", "@acme/core@1.0.1", "version", "--json"],
       {
         nodeOptions: {
-          cwd: packagePath,
+          cwd,
         },
       },
     );
@@ -303,7 +295,7 @@ describe("publish plans", () => {
   });
 
   test("publishes legacy plans without using status as source of truth", async () => {
-    const { planPath } = await createPublishFixture({
+    const { cwd, planPath } = await createPublishFixture({
       legacyStatus: "completed",
     });
 
@@ -324,7 +316,7 @@ describe("publish plans", () => {
 
     const result = await publishFixture(
       planPath,
-      await createPublishContext(planPath, {
+      await createPublishContext(cwd, planPath, {
         dryRun: false,
         gitTags: false,
         npmClient: "npm",
@@ -358,6 +350,7 @@ describe("publish plans", () => {
 async function createPublishFixture(
   options: { registry?: string; legacyStatus?: "pending" | "completed" } = {},
 ): Promise<{
+  cwd: string;
   packagePath: string;
   planPath: string;
 }> {
@@ -368,6 +361,7 @@ async function createPublishFixture(
 
   await mkdir(packagePath, { recursive: true });
   await mkdir(join(cwd, ".tegami"), { recursive: true });
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
   await writeJson(join(packagePath, "package.json"), {
     name: "@acme/core",
     version: "1.0.1",
@@ -387,13 +381,9 @@ async function createPublishFixture(
     packages: [
       {
         name: "@acme/core",
-        path: packagePath,
-        oldVersion: "1.0.0",
         version: "1.0.1",
-        type: "patch",
-        reasons: [],
+        changelogIds: [],
         distTag: "latest",
-        private: false,
         gitTag: false,
         publish: true,
       },
@@ -403,12 +393,14 @@ async function createPublishFixture(
   await writeJson(planPath, storedPlan);
 
   return {
+    cwd,
     packagePath,
     planPath,
   };
 }
 
 async function createMultiPackagePublishFixture(): Promise<{
+  cwd: string;
   corePath: string;
   uiPath: string;
   planPath: string;
@@ -422,6 +414,7 @@ async function createMultiPackagePublishFixture(): Promise<{
   await mkdir(corePath, { recursive: true });
   await mkdir(uiPath, { recursive: true });
   await mkdir(join(cwd, ".tegami"), { recursive: true });
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
   await writeJson(join(corePath, "package.json"), {
     name: "@acme/core",
     version: "1.0.1",
@@ -434,39 +427,31 @@ async function createMultiPackagePublishFixture(): Promise<{
     id: "tegami-test",
     createdAt: "2026-01-01T00:00:00.000Z",
     changelogs: [],
-    packages: [
-      packageRelease(corePath, "@acme/core"),
-      packageRelease(uiPath, "@acme/ui"),
-    ],
+    packages: [packageRelease("@acme/core"), packageRelease("@acme/ui")],
   });
 
   return {
+    cwd,
     corePath,
     uiPath,
     planPath,
   };
 }
 
-function packageRelease(
-  packagePath: string,
-  name: string,
-): Omit<PublishPlan["packages"][number], "changelogs"> {
+function packageRelease(name: string) {
   return {
     name,
-    path: packagePath,
-    oldVersion: "1.0.0",
     version: "1.0.1",
-    type: "patch",
-    reasons: [],
+    changelogIds: [] as string[],
     distTag: "latest",
-    private: false,
     gitTag: `${name}@1.0.1`,
     publish: true,
   };
 }
 
-function createPublishContext(planPath: string, publish?: PublishOptions) {
+function createPublishContext(cwd: string, planPath: string, publish?: PublishOptions) {
   return createTegamiContext({
+    cwd,
     planPath,
     publish,
   });
@@ -476,7 +461,7 @@ async function publishFixture(
   planPath: string,
   context: Awaited<ReturnType<typeof createTegamiContext>>,
 ) {
-  return publishFromPlan(context, parsePublishPlan(await readFile(planPath, "utf8")));
+  return publishFromPlan(context, await publishPlanSchema.decode(await readFile(planPath, "utf8")));
 }
 
 async function readJson<T>(path: string): Promise<T> {

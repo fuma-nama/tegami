@@ -1,9 +1,18 @@
-import type { DraftPlanData, PackageOptions, PackageRelease } from "./draft";
+import type { TegamiContext } from "./context";
+import type { DraftPlan, PackageOptions } from "./draft";
 import type { PublishOptions, PublishResult } from "./publish";
+import type { ChangelogEntry } from "./schemas";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
-  generate(release: PackageRelease): string | Promise<string>;
+  generate(
+    this: TegamiContext,
+    opts: {
+      packageName: string;
+      version: string;
+      changelogs: ChangelogEntry[];
+    },
+  ): string | Promise<string>;
 }
 
 export interface TegamiOptions {
@@ -25,7 +34,9 @@ export interface TegamiOptions {
 export interface TegamiPlugin {
   name: string;
   /** Called after Tegami builds the initial draft plan and before it is returned. */
-  initPlan?(plan: DraftPlanData): void | Promise<void>;
+  initPlan?(plan: DraftPlan): void | Promise<void>;
   /** Called after publishing finishes. */
   afterPublish?(result: PublishResult): void | Promise<void>;
 }
+
+export type NpmClient = "npm" | "pnpm";

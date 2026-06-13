@@ -55,8 +55,9 @@ export function githubRelease(options: GithubReleaseOptions = {}): TegamiPlugin 
 }
 
 function defaultNotes(pkg: PackagePublishResult): string {
-  if (pkg.changelogs.length > 0) {
-    return pkg.changelogs
+  const entries = pkg.changelogs;
+  if (entries.length > 0) {
+    return entries
       .map((entry) => [`### ${entry.title}`, entry.content].filter(Boolean).join("\n\n"))
       .join("\n\n");
   }

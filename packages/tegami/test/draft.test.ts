@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import type { PackageManifest } from "../src/workspace";
+import type { PackageManifest } from "../src/schemas";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -37,16 +37,13 @@ describe("draft publish plans", () => {
 
     const draft = await paper.draft();
 
-    expect(draft.packages.map((pkg) => [pkg.name, pkg.version, pkg.type])).toEqual([
-      ["@acme/core", "1.1.0", "minor"],
-      ["@acme/ui", "1.1.0", "minor"],
+    expect(draft.packages.map((pkg) => [pkg.name, pkg.version])).toEqual([
+      ["@acme/core", "1.1.0"],
+      ["@acme/ui", "1.1.0"],
     ]);
-    expect(draft.packages[0]?.reasons).toEqual([
-      {
-        type: "changelog",
-        file: join(cwd, ".tegami/change.md"),
-      },
-    ]);
+    const changelogId = draft.changelogs[0]?.id;
+    expect(changelogId).toEqual(expect.any(String));
+    expect(Array.from(draft.packages[0]!.changelogIds)).toEqual([changelogId]);
 
     const storedPlan = await draft.createPublishPlan();
 
@@ -67,6 +64,7 @@ describe("draft publish plans", () => {
 
     const plan = await readJson<{
       changelogs: Array<{
+        id: string;
         file: string;
       }>;
       packages: Array<{
@@ -74,15 +72,15 @@ describe("draft publish plans", () => {
         version: string;
         distTag: string;
         changelogs?: unknown;
-        reasons: Array<{
-          type: string;
-          file: string;
-        }>;
+        changelogIds: string[];
       }>;
     }>(join(cwd, ".tegami/publish-plan.json"));
 
+    const storedChangelogId = plan.changelogs[0]?.id;
+    expect(storedChangelogId).toEqual(expect.any(String));
     expect(plan.changelogs).toEqual([
       expect.objectContaining({
+        id: storedChangelogId,
         file: join(cwd, ".tegami/change.md"),
       }),
     ]);
@@ -91,18 +89,13 @@ describe("draft publish plans", () => {
         name: "@acme/core",
         version: "1.1.0",
         distTag: "alpha",
-        reasons: [
-          {
-            type: "changelog",
-            file: join(cwd, ".tegami/change.md"),
-          },
-        ],
+        changelogIds: [storedChangelogId],
       }),
     );
     expect(plan.packages.every((pkg) => pkg.changelogs === undefined)).toBe(true);
   });
 
-  test("adds a manual package release with explicit version and reasons", async () => {
+  test("omits packages without pending changelogs from the draft", async () => {
     const cwd = await createWorkspace({
       changelog: false,
     });
@@ -110,30 +103,7 @@ describe("draft publish plans", () => {
 
     const draft = await tegami({ cwd }).draft();
 
-    draft.addPackage({
-      name: "@acme/core",
-      version: "1.0.1",
-      reasons: [
-        {
-          type: "dependency",
-          package: "@acme/ui",
-        },
-      ],
-    });
-
-    expect(draft.packages).toContainEqual(
-      expect.objectContaining({
-        name: "@acme/core",
-        version: "1.0.1",
-        type: "patch",
-        reasons: [
-          {
-            type: "dependency",
-            package: "@acme/ui",
-          },
-        ],
-      }),
-    );
+    expect(draft.packages).toEqual([]);
   });
 
   test("uses a custom log generator", async () => {
@@ -143,8 +113,8 @@ describe("draft publish plans", () => {
     const draft = await tegami({
       cwd,
       generator: {
-        generate(release) {
-          return `## custom ${release.name}@${release.version}`;
+        generate({ packageName, version }) {
+          return `## custom ${packageName}@${version}`;
         },
       },
     }).draft();
@@ -167,13 +137,9 @@ describe("draft publish plans", () => {
       packages: [
         {
           name: "@acme/core",
-          path: join(cwd, "packages/core"),
-          oldVersion: "1.0.0",
           version: "1.0.1",
-          type: "patch",
-          reasons: [],
+          changelogIds: [],
           distTag: "latest",
-          private: false,
           gitTag: "@acme/core@1.0.1",
           publish: true,
         },
@@ -191,26 +157,6 @@ describe("draft publish plans", () => {
     expect(await readJson<PackageManifest>(join(cwd, "packages/core/package.json"))).toMatchObject({
       version: "1.0.0",
     });
-  });
-
-  test("does not allow overriding an existing package release", async () => {
-    const cwd = await createWorkspace();
-    tempDirs.push(cwd);
-
-    const draft = await tegami({ cwd }).draft();
-
-    expect(() =>
-      draft.addPackage({
-        name: "@acme/core",
-        version: "2.0.0",
-        reasons: [
-          {
-            type: "dependency",
-            package: "@acme/ui",
-          },
-        ],
-      }),
-    ).toThrow(/already in the draft/);
   });
 
   test("discovers packages with nested workspace globs", async () => {
@@ -269,7 +215,7 @@ async function createWorkspace(options: { changelog?: boolean } = {}): Promise<s
     await writeFile(
       join(cwd, ".tegami/change.md"),
       `---
-packages: ["core", "ui"]
+packages: ["@acme/core", "@acme/ui"]
 ---
 
 ## Add shared API

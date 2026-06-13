@@ -1,46 +1,27 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { x } from "tinyexec";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { PublishPlan } from "../src";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { PublishPlan } from "../src/schemas";
 import { RegistryClient } from "../src/utils/registry";
+import { PackageGraph, type WorkspacePackage } from "../src/workspace";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
 }));
 
 const exec = vi.mocked(x);
-const tempDirs: string[] = [];
 
 beforeEach(() => {
   exec.mockReset();
 });
 
-afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
-});
-
 describe("registry client", () => {
-  test("caches package version lookups", async () => {
-    const client = new RegistryClient({
-      npmClient: "pnpm",
-    });
+  test("caches package version lookups and reads the registry from the graph", async () => {
+    const client = new RegistryClient("/repo", "pnpm", graph("https://registry.example.test"));
 
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
-    await expect(
-      client.packageVersion("@acme/core", "1.0.1", {
-        cwd: "/repo/packages/core",
-        registry: "https://registry.example.test",
-      }),
-    ).resolves.toBe("1.0.1");
-    await expect(
-      client.packageVersionExists("@acme/core", "1.0.1", {
-        cwd: "/repo/packages/core",
-        registry: "https://registry.example.test",
-      }),
-    ).resolves.toBe(true);
+    await expect(client.packageVersionExists("@acme/core", "1.0.1")).resolves.toBe(true);
+    await expect(client.packageVersionExists("@acme/core", "1.0.1")).resolves.toBe(true);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith(
@@ -55,34 +36,14 @@ describe("registry client", () => {
       ],
       {
         nodeOptions: {
-          cwd: "/repo/packages/core",
+          cwd: "/repo",
         },
       },
     );
   });
 
-  test("caches package existence lookups", async () => {
-    const client = new RegistryClient({
-      npmClient: "npm",
-    });
-
-    exec.mockResolvedValue(execResult({ stdout: '"@acme/core"\n' }));
-
-    await expect(client.packageExists("@acme/core")).resolves.toBe(true);
-    await expect(client.packageExists("@acme/core")).resolves.toBe(true);
-
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core", "name", "--json"], {
-      nodeOptions: {
-        cwd: undefined,
-      },
-    });
-  });
-
   test("returns false for missing package versions", async () => {
-    const client = new RegistryClient({
-      npmClient: "npm",
-    });
+    const client = new RegistryClient("/repo", "npm", graph());
 
     exec.mockResolvedValue(
       execResult({
@@ -95,25 +56,10 @@ describe("registry client", () => {
   });
 
   test("returns successful publish plan status", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "tegami-registry-"));
-    const packagePath = join(cwd, "packages/core");
-    tempDirs.push(cwd);
-
-    await mkdir(packagePath, { recursive: true });
-    await writeJson(join(packagePath, "package.json"), {
-      name: "@acme/core",
-      version: "1.0.1",
-      publishConfig: {
-        registry: "https://registry.example.test",
-      },
-    });
+    const client = new RegistryClient("/repo", "npm", graph("https://registry.example.test"));
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
-    const client = new RegistryClient({
-      npmClient: "npm",
-    });
-    const plan = storedPlan(packagePath);
-    const status = await client.publishPlanStatus(plan);
+    const status = await client.publishPlanStatus(storedPlan());
 
     expect(status).toEqual({
       state: "success",
@@ -130,22 +76,14 @@ describe("registry client", () => {
       ],
       {
         nodeOptions: {
-          cwd: packagePath,
+          cwd: "/repo",
         },
       },
     );
   });
 
   test("returns pending publish plan status", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "tegami-registry-"));
-    const packagePath = join(cwd, "packages/core");
-    tempDirs.push(cwd);
-
-    await mkdir(packagePath, { recursive: true });
-    await writeJson(join(packagePath, "package.json"), {
-      name: "@acme/core",
-      version: "1.0.1",
-    });
+    const client = new RegistryClient("/repo", "npm", graph());
     exec.mockResolvedValue(
       execResult({
         exitCode: 1,
@@ -153,15 +91,45 @@ describe("registry client", () => {
       }),
     );
 
-    const client = new RegistryClient({
-      npmClient: "npm",
-    });
-
-    await expect(client.publishPlanStatus(storedPlan(packagePath))).resolves.toEqual({
+    await expect(client.publishPlanStatus(storedPlan())).resolves.toEqual({
       state: "pending",
     });
   });
 });
+
+function graph(registry?: string): PackageGraph {
+  const pkg: WorkspacePackage = {
+    name: "@acme/core",
+    path: "/repo/packages/core",
+    version: "1.0.1",
+    private: false,
+    manifest: {
+      name: "@acme/core",
+      version: "1.0.1",
+      ...(registry ? { publishConfig: { registry } } : {}),
+    },
+  };
+
+  return new PackageGraph([pkg]);
+}
+
+function storedPlan(): PublishPlan {
+  return {
+    id: "tegami-test",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    changelogs: [],
+    packages: [
+      {
+        name: "@acme/core",
+        version: "1.0.1",
+        changelogIds: new Set(),
+        distTag: "latest",
+        gitTag: "@acme/core@1.0.1",
+        publish: true,
+      },
+    ],
+  };
+}
 
 type ExecResult = Awaited<ReturnType<typeof x>>;
 
@@ -172,31 +140,4 @@ function execResult(overrides: Partial<ExecResult> = {}): ExecResult {
     stderr: "",
     ...overrides,
   } as ExecResult;
-}
-
-function storedPlan(packagePath: string): PublishPlan {
-  return {
-    id: "tegami-test",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    changelogs: [],
-    packages: [
-      {
-        name: "@acme/core",
-        path: packagePath,
-        oldVersion: "1.0.0",
-        version: "1.0.1",
-        type: "patch",
-        reasons: [],
-        changelogs: [],
-        distTag: "latest",
-        private: false,
-        gitTag: "@acme/core@1.0.1",
-        publish: true,
-      },
-    ],
-  };
-}
-
-async function writeJson(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }

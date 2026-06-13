@@ -17,23 +17,10 @@ export async function version() {
   console.log(draft.changelogs);
 
   for (const pkg of draft.packages) {
-    console.log("will be published", pkg.name, pkg.version, pkg.reasons);
-    // Get parent changelog objects, the structure:
-    // plan -> changelogs -> packages
-    console.log(pkg.changelogs);
+    console.log("will be published", pkg.name, pkg.version);
+    // Changelog entries are stored once on the plan; packages reference them by id.
+    console.log(pkg.changelogIds);
   }
-
-  draft.addPackage({
-    // modify plan, all properties are readonly, must call special methods to modify
-    name: "my-pkg",
-    version: "1.0.0",
-    reasons: [
-      {
-        type: "changelog",
-        file: ".tegami/manual.md",
-      },
-    ],
-  });
 
   // generate .tegami/publish-plan.json and delete all changelogs
   // it refuses to create a new plan until the current one has finished publishing

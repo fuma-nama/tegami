@@ -2,11 +2,11 @@ import type { LogGenerator } from "../types";
 
 export function simpleGenerator(): LogGenerator {
   return {
-    generate(release) {
+    generate({ changelogs, version }) {
       const lines = [
-        `## ${release.version}`,
+        `## ${version}`,
         "",
-        ...release.changelogs.flatMap((entry) => [`### ${entry.title}`, "", entry.content, ""]),
+        ...changelogs.flatMap((entry) => [`### ${entry.title}`, "", entry.content, ""]),
       ];
 
       return lines.join("\n").trim();

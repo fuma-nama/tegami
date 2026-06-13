@@ -86,6 +86,7 @@ describe("github release plugin", () => {
           packageResult({
             changelogs: [
               {
+                id: "change-1",
                 file: "/repo/.tegami/change.md",
                 packages: ["core"],
                 type: "minor",
@@ -109,6 +110,12 @@ describe("github release plugin", () => {
 function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
   return {
     planPath: "/repo/.tegami/publish-plan.json",
+    plan: {
+      id: "tegami-test",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      changelogs: [],
+      packages: [],
+    },
     state: "success",
     packages: [],
     ...overrides,
@@ -120,7 +127,6 @@ function packageResult(
 ): PublishResult["packages"][number] {
   return {
     name: "@acme/core",
-    path: "/repo/packages/core",
     version: "1.0.1",
     distTag: "latest",
     changelogs: [],
