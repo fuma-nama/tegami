@@ -19,6 +19,7 @@ import type {
   TegamiPlugin,
 } from "../types";
 import { isNodeError } from "../utils/error";
+import { execFailure } from "../utils/exec";
 import { WorkspacePackage } from "../workspace";
 import { detect } from "package-manager-detector";
 
@@ -140,16 +141,25 @@ export class NpmRegistryClient implements RegistryClient {
   }
 
   async publish(pkg: WorkspacePackage, options: { distTag?: string } = {}) {
+    const client = await this.resolveClient();
     const args = ["publish"];
     const distTag = options.distTag ?? pkg.distTag;
     if (distTag) args.push("--tag", distTag);
+    if (client === "pnpm") args.push("--no-git-checks");
 
-    await x(await this.resolveClient(), args, {
+    const result = await x(client, args, {
       nodeOptions: {
         cwd: pkg.path,
       },
-      throwOnError: true,
     });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        execFailure(
+          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+          result,
+        ),
+      );
+    }
   }
 
   async publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus> {

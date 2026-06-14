@@ -1,10 +1,11 @@
 import type { LogGenerator } from "../types";
+import { formatPackageVersion } from "../utils/semver";
 
 export function simpleGenerator(): LogGenerator {
   return {
-    generate({ changelogs, version }) {
+    generate({ changelogs, version, packageName, distTag }) {
       const lines = [
-        `## ${version}`,
+        `## ${formatPackageVersion(packageName, version, distTag)}`,
         "",
         ...changelogs.flatMap((entry) => [`### ${entry.title}`, "", entry.content, ""]),
       ];

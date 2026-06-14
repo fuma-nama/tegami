@@ -184,6 +184,7 @@ export class DraftPlan {
     const generated = await generator.generate.call(this.context, {
       packageName: pkg.name,
       version: pkg.version,
+      distTag: plan.distTag,
       changelogs,
     });
 

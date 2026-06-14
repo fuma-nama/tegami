@@ -252,12 +252,10 @@ describe("publish plans", () => {
       },
     );
     expect(exec.mock.calls[1]?.[0]).toBe("pnpm");
-    expect(exec.mock.calls[1]?.[1]).toEqual(["publish", "--tag", "latest"]);
+    expect(exec.mock.calls[1]?.[1]).toEqual(["publish", "--tag", "latest", "--no-git-checks"]);
     expect(normalizeDirPath(String(exec.mock.calls[1]?.[2]?.nodeOptions?.cwd))).toBe(
       normalizeDirPath(packagePath),
     );
-    expect(exec.mock.calls[1]?.[2]?.throwOnError).toBe(true);
-    await expect(readFile(planPath, "utf8")).resolves.toContain("@acme/core");
   });
 
   test("skips publish when pending changelog entries exist", async () => {

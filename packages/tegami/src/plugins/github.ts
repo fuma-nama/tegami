@@ -4,6 +4,7 @@ import type { DraftPlan } from "../draft";
 import type { PackagePublishResult } from "../publish";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/exec";
+import { formatVersionBump, previousVersion } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
 import { isCI } from "../utils/constants";
 
@@ -222,7 +223,10 @@ function defaultVersionPRBody(draft: DraftPlan, context: TegamiContext): string 
     if (!pkg) continue;
 
     const publish = packagePlan.publish ? "" : " (no publish)";
-    packageLines.push(`- ${pkg.name}: ${packagePlan.type} → \`${pkg.version}\`${publish}`);
+    const previous = previousVersion(pkg.version, packagePlan.type);
+    packageLines.push(
+      `- ${formatVersionBump(pkg.name, previous, pkg.version, packagePlan.distTag)}${publish}`,
+    );
   }
 
   const changelogLines = draft

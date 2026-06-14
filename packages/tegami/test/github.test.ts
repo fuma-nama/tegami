@@ -376,7 +376,7 @@ describe("github version pull request", () => {
               "Version Packages",
               "--body",
               "## Summary
-        - @acme/core: minor → \`1.1.0\`
+        - @acme/core@1.0.0 → @acme/core@1.1.0
 
         ## Changelogs
         - Add feature

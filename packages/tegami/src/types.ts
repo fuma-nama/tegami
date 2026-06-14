@@ -14,6 +14,7 @@ export interface LogGenerator {
     opts: {
       packageName: string;
       version: string;
+      distTag?: string;
       changelogs: ChangelogEntry[];
     },
   ): string | Promise<string>;

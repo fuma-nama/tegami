@@ -99,7 +99,9 @@ describe("draft publish plans", () => {
         },
       }
     `);
-    expect(await readFile(join(cwd, "packages/core/CHANGELOG.md"), "utf8")).toContain("## 1.1.0");
+    expect(await readFile(join(cwd, "packages/core/CHANGELOG.md"), "utf8")).toContain(
+      "## @acme/core@1.1.0 (alpha)",
+    );
     await expect(readFile(join(cwd, ".tegami/change.md"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
