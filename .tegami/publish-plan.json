@@ -1,0 +1,1 @@
+{"id":"tegami-mqe3fps7","createdAt":"2026-06-14T18:04:09.415Z","changelogs":{"2026-06-15-mqe1m6rx.md:0":{"filename":"2026-06-15-mqe1m6rx.md","packages":["npm:tegami"],"type":"patch","title":"Test","content":"The first beta release of Tegami."}},"packages":{"npm:tegami":{"type":"patch","changelogIds":["2026-06-15-mqe1m6rx.md:0"],"distTag":"beta","publish":true}}}
