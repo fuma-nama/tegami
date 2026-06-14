@@ -9,11 +9,12 @@
     "format": "oxfmt",
     "test": "vitest",
     "types:check": "turbo run types:check",
-    "version": "changeset version",
-    "release": "changeset publish"
+    "tegami": "pnpm --filter tegami build && node scripts/tegami.mjs",
+    "changelog": "pnpm --filter tegami build && node scripts/tegami.mjs",
+    "version": "pnpm --filter tegami build && node scripts/tegami.mjs version",
+    "release": "pnpm --filter tegami build && node scripts/tegami.mjs publish"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.0",
     "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
     "turbo": "^2.9.18",
