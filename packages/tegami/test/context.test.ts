@@ -2,7 +2,9 @@ import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createTegamiContext } from "../src/context";
+import { NpmPackage } from "../src/providers/npm";
 import type { TegamiPlugin } from "../src/types";
+import { WorkspacePackage } from "../src/workspace";
 
 vi.mock("package-manager-detector", () => ({
   detect: vi.fn(),
@@ -30,8 +32,10 @@ describe("tegami context", () => {
       cwd: "/repo",
       npmClient: "npm",
     });
+    const pkg = npmPackage();
+    context.graph.add(pkg);
 
-    await context.registryClient.packageVersionExists("@acme/core", "1.0.0");
+    await context.getRegistryClient("npm").packageVersionExists(pkg, "1.0.0");
 
     expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
       nodeOptions: {
@@ -50,8 +54,10 @@ describe("tegami context", () => {
     const context = await createTegamiContext({
       cwd: "/repo",
     });
+    const pkg = npmPackage();
+    context.graph.add(pkg);
 
-    await context.registryClient.packageVersionExists("@acme/core", "1.0.0");
+    await context.getRegistryClient("npm").packageVersionExists(pkg, "1.0.0");
 
     expect(exec).toHaveBeenCalledWith("pnpm", ["view", "@acme/core@1.0.0", "version", "--json"], {
       nodeOptions: {
@@ -64,23 +70,21 @@ describe("tegami context", () => {
     });
   });
 
-  test("falls back to npm for unsupported package managers", async () => {
-    detectPackageManager.mockResolvedValue({
-      name: "yarn",
-      agent: "yarn",
-    });
-
+  test("throws for unsupported package managers", async () => {
     const context = await createTegamiContext({
       cwd: "/repo",
     });
 
-    await context.registryClient.packageVersionExists("@acme/core", "1.0.0");
-
-    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
-      nodeOptions: {
-        cwd: "/repo",
-      },
-    });
+    expect(() => context.getRegistryClient("yarn")).toThrow(
+      "No registry client is available for yarn.",
+    );
+    expect(() => context.getRegistryClient(workspacePackage("yarn"))).toThrow(
+      "No registry client is available for yarn.",
+    );
+    expect(() => context.getRegistryClient(workspacePackage("npm"))).toThrow(
+      "No registry client is available for npm.",
+    );
+    expect(exec).not.toHaveBeenCalled();
   });
 
   test("stores plugins in enforce order", async () => {
@@ -101,6 +105,8 @@ describe("tegami context", () => {
 
     expect(context.plugins.map((plugin) => plugin.name)).toMatchInlineSnapshot(`
       [
+        "npm",
+        "cargo",
         "pre-a",
         "pre-b",
         "default-a",
@@ -117,4 +123,26 @@ function plugin(name: string, enforce?: TegamiPlugin["enforce"]): TegamiPlugin {
     name,
     enforce,
   };
+}
+
+function workspacePackage(manager: string): WorkspacePackage {
+  return new TestPackage(manager);
+}
+
+class TestPackage extends WorkspacePackage {
+  readonly name = "pkg";
+  readonly path = "/repo/pkg";
+  readonly publish = true;
+  readonly version = "1.0.0";
+
+  constructor(readonly manager: string) {
+    super();
+  }
+}
+
+function npmPackage(): NpmPackage {
+  return new NpmPackage("/repo/packages/core", {
+    name: "@acme/core",
+    version: "1.0.0",
+  });
 }

@@ -6,7 +6,7 @@ import { BumpType, bumpVersion, maxBump } from "./utils/semver";
 import type { WorkspacePackage } from "./workspace";
 import type { ChangelogEntry } from "./markdown";
 import { PlanStore, planStoreSchema } from "./schemas";
-import * as semver from "semver";
+import type { Awaitable, PublishPlanStatus } from "./types";
 
 /** Per-package options applied when creating publish plans. */
 export interface PackageOptions {
@@ -23,34 +23,27 @@ export interface PackagePlan {
   publish: boolean;
 }
 
-const DEP_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-] as const;
-
 export class DraftPlan {
   #created = false;
 
   constructor(
     // id -> changelog
     private readonly changelogs: Map<string, ChangelogEntry>,
-    // package name -> plan
+    // package id -> plan
     private readonly packages: Map<string, PackagePlan>,
     private readonly context: TegamiContext,
   ) {}
 
-  getPackages() {
+  getPackageIds() {
     return Array.from(this.packages.keys());
   }
 
-  getPackage(name: string) {
-    return this.packages.get(name);
+  getPackage(id: string) {
+    return this.packages.get(id);
   }
 
-  setPackage(name: string, plan: Partial<PackagePlan> = {}) {
-    this.packages.set(name, {
+  setPackage(id: string, plan: Partial<PackagePlan> = {}) {
+    this.packages.set(id, {
       ...plan,
       changelogIds: plan.changelogIds ?? new Set(),
       publish: plan.publish ?? true,
@@ -58,8 +51,8 @@ export class DraftPlan {
     });
   }
 
-  deletePackage(name: string) {
-    return this.packages.delete(name);
+  deletePackage(id: string) {
+    return this.packages.delete(id);
   }
 
   getChangelogIds() {
@@ -118,7 +111,7 @@ export class DraftPlan {
     const parsed = planStoreSchema.safeDecode(content);
     if (!parsed.success) return;
 
-    const status = await this.context.registryClient.publishPlanStatus(parsed.data);
+    const status = await publishPlanStatus(this.context, parsed.data);
     if (status.state === "success") return;
 
     const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before creating a new plan.`;
@@ -128,64 +121,33 @@ export class DraftPlan {
   private async applyVersionChanges(): Promise<void> {
     const { graph } = this.context;
     const updatedPackages = new Map<string, { plan: PackagePlan; version: string }>();
-    const writes: Promise<void>[] = [];
+    const writes: Awaitable<void>[] = [];
 
-    for (const [name, plan] of this.packages) {
-      const pkg = graph.get(name);
+    for (const [id, plan] of this.packages) {
+      const pkg = graph.get(id);
       if (!pkg) continue;
 
-      updatedPackages.set(name, {
+      updatedPackages.set(id, {
         plan,
-        version: bumpVersion(pkg.manifest.version ?? "0.0.0", plan.type),
+        version: bumpVersion(pkg.version, plan.type),
       });
     }
 
-    const updateRange = async (
-      pkg: WorkspacePackage,
-      spec: DependencySpec,
-      next: semver.SemVer,
-    ): Promise<DependencySpec> => {
-      for (const plugin of this.context.plugins) {
-        const result = await plugin.onUpdateRange?.call(this.context, pkg, spec, next);
-        if (result) return result;
-      }
-
-      // ignore special syntax like "latest"
-      if (!semver.validRange(spec.range)) return spec;
-      const range = new semver.Range(spec.range);
-      // in range = keep
-      if (range.test(next)) return spec;
-
-      spec.range = next.format();
-      return spec;
-    };
-
     for (const pkg of graph.getPackages()) {
-      const updated = updatedPackages.get(pkg.name);
+      const updated = updatedPackages.get(pkg.id);
 
-      for (const field of DEP_FIELDS) {
-        const dependencies = pkg.manifest[field];
-        if (!dependencies) continue;
-
-        for (const [rawName, rawRange] of Object.entries(dependencies)) {
-          const spec = DependencySpec.parse(rawName, rawRange);
-          if (!spec) continue;
-          const updatedDep = updatedPackages.get(spec.name);
-          if (!updatedDep) continue;
-          const version = semver.parse(updatedDep.version);
-          if (!version) continue;
-
-          dependencies[rawName] = (await updateRange(pkg, spec, version)).format();
-        }
+      for (const [id, updatedDep] of updatedPackages) {
+        const target = graph.get(id);
+        if (target) await pkg.updateDependency?.(target, updatedDep.version, this.context);
       }
 
       if (updated) {
-        pkg.manifest.version = updated.version;
+        pkg.setVersion?.(updated.version);
         writes.push(this.appendChangelog(pkg, updated.plan));
       }
 
-      const packageJsonPath = join(pkg.path, "package.json");
-      writes.push(writeFile(packageJsonPath, `${JSON.stringify(pkg.manifest, null, 2)}\n`));
+      const write = pkg.write?.();
+      if (write) writes.push(write);
     }
 
     await Promise.all(writes);
@@ -217,7 +179,7 @@ export class DraftPlan {
 
     const generated = await generator.generate.call(this.context, {
       packageName: pkg.name,
-      version: pkg.manifest.version!,
+      version: pkg.version,
       changelogs,
     });
 
@@ -232,40 +194,19 @@ export class DraftPlan {
   }
 }
 
-export class DependencySpec {
-  constructor(
-    public name: string,
-    public range: string,
-    public protocol?: "npm" | "workspace",
-  ) {}
+async function publishPlanStatus(
+  context: TegamiContext,
+  plan: PlanStore,
+): Promise<PublishPlanStatus> {
+  for (const [id, pkgPlan] of Object.entries(plan.packages)) {
+    const pkg = context.graph.get(id);
+    if (!pkg || !pkgPlan.publish) continue;
 
-  format(): string {
-    if (this.protocol === "workspace") {
-      return `workspace:${this.range}`;
-    }
-
-    if (this.protocol === "npm") {
-      return `npm:${this.name}@${this.range}`;
-    }
-
-    return this.range;
+    const exists = await context.getRegistryClient(pkg).packageVersionExists(pkg, pkg.version);
+    if (!exists) return { state: "pending" };
   }
 
-  static parse(rawName: string, rawRange: string): DependencySpec | undefined {
-    if (rawRange.startsWith("workspace:")) {
-      return new DependencySpec(rawName, rawRange.slice("workspace:".length), "workspace");
-    }
-
-    if (rawRange.startsWith("npm:")) {
-      const spec = rawRange.slice("npm:".length);
-      const separator = spec.lastIndexOf("@");
-      if (separator <= 0) return undefined;
-
-      return new DependencySpec(spec.slice(0, separator), spec.slice(separator + 1), "npm");
-    }
-
-    return new DependencySpec(rawName, rawRange);
-  }
+  return { state: "success" };
 }
 
 export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiContext): DraftPlan {
@@ -276,23 +217,22 @@ export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiCon
     changelogMap.set(entry.id, entry);
 
     for (const requestedPackage of entry.packages) {
-      const pkg = context.graph.get(requestedPackage);
-      if (!pkg) continue;
+      for (const pkg of context.graph.getByName(requestedPackage)) {
+        let entries = byPackage.get(pkg);
+        if (!entries) {
+          entries = [];
+          byPackage.set(pkg, entries);
+        }
 
-      let entries = byPackage.get(pkg);
-      if (!entries) {
-        entries = [];
-        byPackage.set(pkg, entries);
+        entries.push(entry);
       }
-
-      entries.push(entry);
     }
   }
 
   const packages = new Map<string, PackagePlan>();
   for (const [pkg, entries] of byPackage.entries()) {
     const plan = createPackagePlan(pkg, entries, context);
-    if (plan) packages.set(pkg.name, plan);
+    if (plan) packages.set(pkg.id, plan);
   }
 
   return new DraftPlan(changelogMap, packages, context);
@@ -305,7 +245,8 @@ function createPackagePlan(
 ): PackagePlan | null {
   if (entries.length === 0) return null;
 
-  const packageOptions = context.options.packages?.[pkg.name] ?? {};
+  const packageOptions =
+    context.options.packages?.[pkg.id] ?? context.options.packages?.[pkg.name] ?? {};
   let type: BumpType = entries[0]!.type;
   const changelogIds = new Set<string>();
 
@@ -317,7 +258,7 @@ function createPackagePlan(
   return {
     type,
     changelogIds,
-    distTag: packageOptions.distTag ?? pkg.manifest.publishConfig?.tag,
-    publish: packageOptions.publish ?? !pkg.manifest.private,
+    distTag: packageOptions.distTag ?? pkg.distTag,
+    publish: packageOptions.publish ?? pkg.publish,
   };
 }

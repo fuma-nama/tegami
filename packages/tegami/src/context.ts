@@ -1,9 +1,8 @@
 import { join, resolve } from "node:path";
-import { detect } from "package-manager-detector";
-import type { TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
-import { type NpmClient, NpmRegistryClient } from "./registry/npm";
-import { discoverWorkspace, type PackageGraph } from "./workspace";
-import type { RegistryClient } from "./registry";
+import type { TegamiOptions, RegistryClient, TegamiPlugin, TegamiPluginOption } from "./types";
+import { cargo } from "./providers/cargo";
+import { npm } from "./providers/npm";
+import { PackageGraph, type WorkspacePackage } from "./workspace";
 
 export interface TegamiContext {
   cwd: string;
@@ -12,38 +11,49 @@ export interface TegamiContext {
   options: TegamiOptions;
   plugins: TegamiPlugin[];
   graph: PackageGraph;
-  registryClient: RegistryClient;
+  getRegistryClient(pkgOrId: WorkspacePackage | string): RegistryClient;
 }
 
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {
   const cwd = resolve(options.cwd ?? process.cwd());
-  const npmClient = options.npmClient ?? (await resolveNpmClient(cwd));
-  const graph = await discoverWorkspace(cwd);
-  const registryClient = new NpmRegistryClient(cwd, npmClient, graph);
+  const graph = new PackageGraph();
+  const registryClients: RegistryClient[] = [];
   const ctx: TegamiContext = {
     cwd,
     changelogDir: options.changelogDir ?? ".tegami",
     planPath: resolve(cwd, options.planPath ?? join(".tegami", "publish-plan.json")),
     options,
-    plugins: resolvePlugins(options.plugins),
+    plugins: resolvePlugins([npm(options.npmClient), cargo(), ...(options.plugins ?? [])]),
     graph,
-    registryClient,
+    getRegistryClient(pkgOrId) {
+      const client =
+        typeof pkgOrId === "string"
+          ? registryClients.find((client) => client.id === pkgOrId)
+          : registryClients.find((client) => client.supports?.(pkgOrId) ?? false);
+      if (!client) {
+        const id = typeof pkgOrId === "string" ? pkgOrId : pkgOrId.manager;
+        throw new Error(`No registry client is available for ${id}.`);
+      }
+
+      return client;
+    },
   };
 
   for (const plugin of ctx.plugins) {
     await plugin.init?.call(ctx);
   }
 
+  for (const plugin of ctx.plugins) {
+    await plugin.resolve?.call(ctx);
+  }
+
+  for (const plugin of ctx.plugins) {
+    const client = await plugin.createRegistryClient?.call(ctx);
+    if (Array.isArray(client)) registryClients.push(...client);
+    else if (client) registryClients.push(client);
+  }
+
   return ctx;
-}
-
-async function resolveNpmClient(cwd: string): Promise<NpmClient> {
-  const result = await detect({
-    cwd,
-  });
-
-  if (result?.name === "pnpm") return "pnpm";
-  return "npm";
 }
 
 const PLUGIN_ORDER = {

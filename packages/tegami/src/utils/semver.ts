@@ -1,4 +1,4 @@
-import { inc, valid, validRange } from "semver";
+import { inc } from "semver";
 
 export type BumpType = "major" | "minor" | "patch";
 

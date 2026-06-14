@@ -73,7 +73,7 @@ export const planStoreSchema = jsonCodec(
         content: z.string(),
       }),
     ),
-    /** package name -> package info */
+    /** package id -> package info */
     packages: z.record(
       z.string(),
       z.object({

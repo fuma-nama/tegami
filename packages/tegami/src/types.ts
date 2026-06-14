@@ -1,10 +1,11 @@
 import { SemVer } from "semver";
 import type { TegamiContext } from "./context";
-import type { DependencySpec, DraftPlan, PackageOptions } from "./draft";
+import type { DraftPlan, PackageOptions } from "./draft";
 import type { ChangelogEntry } from "./markdown";
 import type { PublishOptions, PublishResult } from "./publish";
-import type { NpmClient } from "./registry/npm";
+import type { NpmClient } from "./providers/npm";
 import type { WorkspacePackage } from "./workspace";
+import type { PlanStore } from "./schemas";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -42,6 +43,12 @@ export interface TegamiPlugin {
   enforce?: "pre" | "default" | "post";
   /** when Tegami initializes */
   init?(this: TegamiContext): Awaitable<void>;
+  /** Resolve workspace packages and dependency metadata into the shared graph. */
+  resolve?(this: TegamiContext): Awaitable<void>;
+  /** Register registry clients used to handle packages for different package managers. */
+  createRegistryClient?(
+    this: TegamiContext,
+  ): Awaitable<RegistryClient | RegistryClient[] | void | undefined>;
   /** Called after Tegami builds the initial draft plan and before it is returned. */
   initPlan?(this: TegamiContext, plan: DraftPlan): Awaitable<DraftPlan | void | undefined>;
   /** Called after publishing finishes. */
@@ -65,3 +72,21 @@ export interface TegamiPlugin {
 }
 
 export type Awaitable<T> = T | Promise<T>;
+
+export interface PublishPlanStatus {
+  state: "pending" | "success";
+  error?: string;
+}
+
+export interface RegistryClient {
+  id: string;
+  supports?(pkg: WorkspacePackage): boolean;
+  packageVersionExists(pkg: WorkspacePackage, version: string): Promise<boolean>;
+  publish(pkg: WorkspacePackage, options?: { distTag?: string }): Promise<void>;
+  publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus>;
+}
+
+export interface DependencySpec {
+  name: string;
+  range: string;
+}

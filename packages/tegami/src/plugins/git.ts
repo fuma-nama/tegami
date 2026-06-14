@@ -28,14 +28,14 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
       for (const pkg of result.packages) {
         try {
           const gitTag = `${pkg.name}@${pkg.version}`;
-          await createGitTag(graph.get(pkg.name)!.path, gitTag);
+          await createGitTag(graph.get(pkg.id)!.path, gitTag);
           pkg.gitTag = gitTag;
         } catch (error) {
           return {
             ...result,
             state: "failed",
             packages: result.packages.map((pkgResult) => {
-              if (pkgResult.name === pkg.name) {
+              if (pkgResult.id === pkg.id) {
                 return {
                   ...pkgResult,
                   state: "failed",

@@ -26,6 +26,7 @@ export type PackagePublishResult = (
       state: "success";
     }
 ) & {
+  id: string;
   name: string;
   version: string;
   distTag: string | undefined;
@@ -54,11 +55,11 @@ async function publishStoredPlan(
 ): Promise<PackagePublishResult[]> {
   const results: PackagePublishResult[] = [];
 
-  for (const [name, plan] of Object.entries(store.packages)) {
+  for (const [id, plan] of Object.entries(store.packages)) {
     if (!plan.publish) continue;
 
-    const pkg = context.graph.get(name);
-    if (!pkg || !pkg.manifest.version) continue;
+    const pkg = context.graph.get(id);
+    if (!pkg) continue;
 
     const changelogs: ChangelogEntry[] = [];
     for (const id of plan.changelogIds) {
@@ -72,15 +73,14 @@ async function publishStoredPlan(
     }
 
     if (!dryRun) {
-      const published = await context.registryClient.packageVersionExists(
-        pkg.name,
-        pkg.manifest.version,
-      );
+      const registryClient = context.getRegistryClient(pkg);
+      const published = await registryClient.packageVersionExists(pkg, pkg.version);
 
       if (published) {
         results.push({
+          id: pkg.id,
           name: pkg.name,
-          version: pkg.manifest.version,
+          version: pkg.version,
           distTag: plan.distTag,
           state: "success",
           changelogs,
@@ -91,23 +91,22 @@ async function publishStoredPlan(
 
     try {
       if (!dryRun) {
-        await context.registryClient.publish({
-          path: pkg.path,
-          distTag: plan.distTag,
-        });
+        await context.getRegistryClient(pkg).publish(pkg, { distTag: plan.distTag });
       }
 
       results.push({
+        id: pkg.id,
         name: pkg.name,
-        version: pkg.manifest.version,
+        version: pkg.version,
         distTag: plan.distTag,
         state: "success",
         changelogs,
       });
     } catch (error) {
       results.push({
+        id: pkg.id,
         name: pkg.name,
-        version: pkg.manifest.version,
+        version: pkg.version,
         distTag: plan.distTag,
         changelogs,
         state: "failed",

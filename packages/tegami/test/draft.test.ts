@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
@@ -36,14 +36,14 @@ describe("draft publish plans", () => {
     });
 
     const draft = await paper.draft();
-    const packages = draft.getPackages();
+    const packages = draft.getPackageIds();
     const changelogId = draft.getChangelogIds()[0];
 
     expect(changelogId).toEqual(expect.any(String));
     expect({
       packages,
-      core: normalizePackagePlan(draft.getPackage("@acme/core")),
-      ui: normalizePackagePlan(draft.getPackage("@acme/ui")),
+      core: normalizePackagePlan(draft.getPackage("npm:@acme/core")),
+      ui: normalizePackagePlan(draft.getPackage("npm:@acme/ui")),
     }).toMatchInlineSnapshot(`
       {
         "core": {
@@ -55,8 +55,8 @@ describe("draft publish plans", () => {
           "type": "minor",
         },
         "packages": [
-          "@acme/core",
-          "@acme/ui",
+          "npm:@acme/core",
+          "npm:@acme/ui",
         ],
         "ui": {
           "changelogIds": [
@@ -137,7 +137,7 @@ describe("draft publish plans", () => {
           },
         },
         "packages": {
-          "@acme/core": {
+          "npm:@acme/core": {
             "changelogIds": [
               "change.md:0",
             ],
@@ -145,7 +145,7 @@ describe("draft publish plans", () => {
             "publish": true,
             "type": "minor",
           },
-          "@acme/ui": {
+          "npm:@acme/ui": {
             "changelogIds": [
               "change.md:0",
             ],
@@ -154,8 +154,8 @@ describe("draft publish plans", () => {
           },
         },
         "rawPackageVersions": {
-          "@acme/core": undefined,
-          "@acme/ui": undefined,
+          "npm:@acme/core": undefined,
+          "npm:@acme/ui": undefined,
         },
       }
     `);
@@ -169,7 +169,7 @@ describe("draft publish plans", () => {
 
     const draft = await tegami({ cwd }).draft();
 
-    expect(draft.getPackages()).toEqual([]);
+    expect(draft.getPackageIds()).toEqual([]);
   });
 
   test("uses a custom log generator", async () => {
@@ -201,7 +201,7 @@ describe("draft publish plans", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       changelogs: {},
       packages: {
-        "@acme/core": {
+        "npm:@acme/core": {
           type: "patch",
           changelogIds: [],
           distTag: "latest",
@@ -247,8 +247,10 @@ describe("draft publish plans", () => {
 
     const graph = await tegami({ cwd }).graph();
 
-    expect(graph.get("@acme/nested")?.path).toBe(join(cwd, "examples/nested/pkg"));
-    expect(graph.get("@acme/ignored")).toBeUndefined();
+    expect(normalizeDirPath(graph.get("npm:@acme/nested")?.path ?? "")).toBe(
+      normalizeDirPath(join(cwd, "examples/nested/pkg")),
+    );
+    expect(graph.getByName("@acme/ignored")).toEqual([]);
   });
 });
 
@@ -319,4 +321,9 @@ function normalizePackagePlan(
     ...plan,
     changelogIds: Array.from(plan.changelogIds),
   };
+}
+
+function normalizeDirPath(path: string): string {
+  const normalized = normalize(path);
+  return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
 }

@@ -16,9 +16,9 @@ export async function version() {
   const draft = await paper.draft();
   console.log(draft.getChangelogIds());
 
-  for (const packageName of draft.getPackages()) {
-    const pkg = draft.getPackage(packageName);
-    console.log("will be planned", packageName, pkg?.type);
+  for (const id of draft.getPackageIds()) {
+    const pkg = draft.getPackage(id);
+    console.log("will be planned", id, pkg?.type);
     // Changelog entries are stored once on the plan; packages reference them by id.
     console.log(pkg?.changelogIds);
   }
@@ -34,9 +34,9 @@ export async function versionWithAutoDispose() {
   await using draft = await paper.draft();
   console.log(draft.getChangelogIds());
 
-  for (const packageName of draft.getPackages()) {
-    const pkg = draft.getPackage(packageName);
-    console.log("will be planned", packageName, pkg?.type);
+  for (const id of draft.getPackageIds()) {
+    const pkg = draft.getPackage(id);
+    console.log("will be planned", id, pkg?.type);
     // Changelog entries are stored once on the plan; packages reference them by id.
     console.log(pkg?.changelogIds);
   }
@@ -67,7 +67,7 @@ export async function withGraph() {
   // useful for advanced customization or for plugin authors
   const graph = await paper.graph();
 
-  graph.get("package-name");
+  graph.get("npm:package-name");
 }
 
 async function configureTrustedPublishing(packageId: string) {

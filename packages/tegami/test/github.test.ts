@@ -151,14 +151,19 @@ function publishContext() {
     plugins: [],
     publishOptions: {},
     graph: new PackageGraph([]),
-    registryClient: {
-      async packageVersionExists() {
-        return false;
-      },
-      async publish() {},
-      async publishPlanStatus() {
-        return { state: "success" as const };
-      },
+    getRegistryClient: registryClient,
+  };
+}
+
+function registryClient() {
+  return {
+    id: "test",
+    async packageVersionExists() {
+      return false;
+    },
+    async publish() {},
+    async publishPlanStatus() {
+      return { state: "success" as const };
     },
   };
 }
@@ -181,8 +186,10 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
 function packageResult(
   overrides: Partial<PublishResult["packages"][number]> = {},
 ): PublishResult["packages"][number] {
+  const name = overrides.name ?? "@acme/core";
   return {
-    name: "@acme/core",
+    id: `test:${name}`,
+    name,
     version: "1.0.1",
     distTag: "latest",
     changelogs: [],

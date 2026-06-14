@@ -1,8 +1,9 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { PlanStore } from "../src/schemas";
-import { NpmRegistryClient } from "../src/registry/npm";
-import { PackageGraph, type WorkspacePackage } from "../src/workspace";
+import { NpmRegistryClient } from "../src/providers/npm";
+import { NpmPackage } from "../src/providers/npm";
+import { PackageGraph } from "../src/workspace";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -16,12 +17,14 @@ beforeEach(() => {
 
 describe("registry client", () => {
   test("caches package version lookups and reads the registry from the graph", async () => {
-    const client = new NpmRegistryClient("/repo", "pnpm", graph("https://registry.example.test"));
+    const packageGraph = graph("https://registry.example.test");
+    const client = new NpmRegistryClient("/repo", "pnpm", packageGraph);
+    const pkg = packageGraph.get("npm:@acme/core")!;
 
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
-    await expect(client.packageVersionExists("@acme/core", "1.0.1")).resolves.toBe(true);
-    await expect(client.packageVersionExists("@acme/core", "1.0.1")).resolves.toBe(true);
+    await expect(client.packageVersionExists(pkg, "1.0.1")).resolves.toBe(true);
+    await expect(client.packageVersionExists(pkg, "1.0.1")).resolves.toBe(true);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith(
@@ -43,7 +46,9 @@ describe("registry client", () => {
   });
 
   test("returns false for missing package versions", async () => {
-    const client = new NpmRegistryClient("/repo", "npm", graph());
+    const packageGraph = graph();
+    const client = new NpmRegistryClient("/repo", "npm", packageGraph);
+    const pkg = packageGraph.get("npm:@acme/core")!;
 
     exec.mockResolvedValue(
       execResult({
@@ -52,7 +57,7 @@ describe("registry client", () => {
       }),
     );
 
-    await expect(client.packageVersionExists("@acme/core", "9.9.9")).resolves.toBe(false);
+    await expect(client.packageVersionExists(pkg, "9.9.9")).resolves.toBe(false);
   });
 
   test("returns successful publish plan status", async () => {
@@ -98,15 +103,11 @@ describe("registry client", () => {
 });
 
 function graph(registry?: string): PackageGraph {
-  const pkg: WorkspacePackage = {
+  const pkg = new NpmPackage("/repo/packages/core", {
     name: "@acme/core",
-    path: "/repo/packages/core",
-    manifest: {
-      name: "@acme/core",
-      version: "1.0.1",
-      ...(registry ? { publishConfig: { registry } } : {}),
-    },
-  };
+    version: "1.0.1",
+    ...(registry ? { publishConfig: { registry } } : {}),
+  });
 
   return new PackageGraph([pkg]);
 }
@@ -117,7 +118,7 @@ function storedPlan(): PlanStore {
     createdAt: "2026-01-01T00:00:00.000Z",
     changelogs: {},
     packages: {
-      "@acme/core": {
+      "npm:@acme/core": {
         type: "patch",
         changelogIds: new Set(),
         distTag: "latest",

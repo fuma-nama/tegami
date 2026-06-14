@@ -14,8 +14,8 @@
     "./generators/simple": "./dist/generators/simple.mjs",
     "./plugins/git": "./dist/plugins/git.mjs",
     "./plugins/github": "./dist/plugins/github.mjs",
-    "./registry": "./dist/registry/index.mjs",
-    "./registry/npm": "./dist/registry/npm.mjs",
+    "./providers/cargo": "./dist/providers/cargo.mjs",
+    "./providers/npm": "./dist/providers/npm.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -32,6 +32,7 @@
     "package-manager-detector": "^1.6.0",
     "remark": "^15.0.1",
     "semver": "^7.8.4",
+    "smol-toml": "^1.6.1",
     "tinyexec": "^1.2.4",
     "tinyglobby": "^0.2.17",
     "zod": "^4.4.3"

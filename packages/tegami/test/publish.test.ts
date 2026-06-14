@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
@@ -126,7 +126,7 @@ describe("publish plans", () => {
         content: "Some description.",
       },
     };
-    plan.packages["@acme/core"]!.changelogIds = ["change-1"];
+    plan.packages["npm:@acme/core"]!.changelogIds = ["change-1"];
     await writeJson(planPath, plan);
 
     const result = await publishFixture(
@@ -167,7 +167,7 @@ describe("publish plans", () => {
 
       if (args.at(0) === "publish") {
         const cwd = options.nodeOptions?.cwd;
-        if (typeof cwd === "string" && cwd.endsWith("packages/ui")) {
+        if (typeof cwd === "string" && normalizeDirPath(cwd).endsWith("packages/ui")) {
           throw new Error("publish failed");
         }
 
@@ -245,12 +245,12 @@ describe("publish plans", () => {
         },
       },
     );
-    expect(exec).toHaveBeenNthCalledWith(2, "pnpm", ["publish", "--tag", "latest"], {
-      nodeOptions: {
-        cwd: packagePath,
-      },
-      throwOnError: true,
-    });
+    expect(exec.mock.calls[1]?.[0]).toBe("pnpm");
+    expect(exec.mock.calls[1]?.[1]).toEqual(["publish", "--tag", "latest"]);
+    expect(normalizeDirPath(String(exec.mock.calls[1]?.[2]?.nodeOptions?.cwd))).toBe(
+      normalizeDirPath(packagePath),
+    );
+    expect(exec.mock.calls[1]?.[2]?.throwOnError).toBe(true);
     await expect(readFile(planPath, "utf8")).resolves.toContain("@acme/core");
   });
 
@@ -291,7 +291,7 @@ async function createPublishFixture(options: { registry?: string } = {}): Promis
     createdAt: "2026-01-01T00:00:00.000Z",
     changelogs: {},
     packages: {
-      "@acme/core": {
+      "npm:@acme/core": {
         type: "patch",
         changelogIds: [],
         distTag: "latest",
@@ -338,8 +338,8 @@ async function createMultiPackagePublishFixture(): Promise<{
     createdAt: "2026-01-01T00:00:00.000Z",
     changelogs: {},
     packages: {
-      "@acme/core": packageRelease(),
-      "@acme/ui": packageRelease(),
+      "npm:@acme/core": packageRelease(),
+      "npm:@acme/ui": packageRelease(),
     },
   });
 
@@ -402,4 +402,9 @@ function normalizeChangelog(
     ...changelog,
     packages: Array.from(changelog.packages),
   };
+}
+
+function normalizeDirPath(path: string): string {
+  const normalized = normalize(path);
+  return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
 }

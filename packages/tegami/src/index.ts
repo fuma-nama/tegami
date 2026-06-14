@@ -10,7 +10,13 @@ import { PackageGraph } from "./workspace";
 import { planStoreSchema } from "./schemas";
 
 export type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
-export type { LogGenerator, TegamiOptions, TegamiPlugin } from "./types";
+export type {
+  LogGenerator,
+  TegamiOptions,
+  TegamiPlugin,
+  RegistryClient,
+  TegamiPluginOption,
+} from "./types";
 export type { DraftPlan, PackageOptions, PackagePlan } from "./draft";
 export type { PackageGraph, WorkspacePackage } from "./workspace";
 

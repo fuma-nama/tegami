@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { git, createGitTag, gitTagExists } from "../src/plugins/git";
-import { PackageGraph, type WorkspacePackage } from "../src/workspace";
+import { PackageGraph, WorkspacePackage } from "../src/workspace";
 import type { PublishResult } from "../src";
 
 vi.mock("tinyexec", async (importOriginal) => {
@@ -188,27 +188,38 @@ function pluginContext(publishOptions: { dryRun?: boolean } = {}) {
       workspacePackage("@acme/core", "/repo/packages/core"),
       workspacePackage("@acme/ui", "/repo/packages/ui"),
     ]),
-    registryClient: {
-      async packageVersionExists() {
-        return false;
-      },
-      async publish() {},
-      async publishPlanStatus() {
-        return { state: "success" as const };
-      },
+    getRegistryClient: registryClient,
+  };
+}
+
+function registryClient() {
+  return {
+    id: "test",
+    async packageVersionExists() {
+      return false;
+    },
+    async publish() {},
+    async publishPlanStatus() {
+      return { state: "success" as const };
     },
   };
 }
 
 function workspacePackage(name: string, path: string): WorkspacePackage {
-  return {
-    name,
-    path,
-    manifest: {
-      name,
-      version: "1.0.1",
-    },
-  };
+  return new TestPackage(name, path);
+}
+
+class TestPackage extends WorkspacePackage {
+  readonly manager = "test";
+  readonly version = "1.0.1";
+  readonly publish = true;
+
+  constructor(
+    readonly name: string,
+    readonly path: string,
+  ) {
+    super();
+  }
 }
 
 function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
@@ -229,8 +240,10 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
 function packageResult(
   overrides: Partial<PublishResult["packages"][number]> = {},
 ): PublishResult["packages"][number] {
+  const name = overrides.name ?? "@acme/core";
   return {
-    name: "@acme/core",
+    id: `test:${name}`,
+    name,
     version: "1.0.1",
     distTag: "latest",
     changelogs: [],
