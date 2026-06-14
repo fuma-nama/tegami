@@ -1,7 +1,7 @@
-import { x } from "tinyexec";
-import { filterChangelogsByIds, type TegamiContext } from "./context";
-import { ChangelogEntry, PublishPlan } from "./schemas";
+import type { TegamiContext } from "./context";
 import { createGitTag } from "./utils/git";
+import type { ChangelogEntry } from "./markdown";
+import type { PlanStore } from "./schemas";
 
 export interface PublishOptions {
   /** Validate the publish plan without publishing packages, creating tags, or running release plugins. */
@@ -13,9 +13,11 @@ export interface PublishOptions {
 export interface PublishResult {
   /** Path to the publish plan that was executed. */
   planPath: string;
-  plan: PublishPlan;
   state: "success" | "failed";
   packages: PackagePublishResult[];
+
+  /** the persisted plan object. This is not a public API, can be changed without notice */
+  _rawPlan: PlanStore;
 }
 
 export type PackagePublishResult = (
@@ -29,52 +31,62 @@ export type PackagePublishResult = (
 ) & {
   name: string;
   version: string;
-  distTag: string;
-  gitTag: string | false;
+  distTag: string | undefined;
+  gitTag?: string;
   changelogs: ChangelogEntry[];
 };
 
 export async function publishFromPlan(
   context: TegamiContext,
-  plan: PublishPlan,
+  plan: PlanStore,
   options: PublishOptions = {},
 ): Promise<PublishResult> {
   const packages = await publishStoredPlan(plan, context, options);
   const result: PublishResult = {
-    plan,
     planPath: context.planPath,
     state: packages.some((pkg) => pkg.state === "failed") ? "failed" : "success",
     packages,
+    _rawPlan: plan,
   };
 
   return createGitTags(context, result, options);
 }
 
 async function publishStoredPlan(
-  plan: PublishPlan,
+  store: PlanStore,
   context: TegamiContext,
   { dryRun = false }: PublishOptions,
 ): Promise<PackagePublishResult[]> {
   const results: PackagePublishResult[] = [];
 
-  for (const packagePlan of plan.packages) {
-    if (!packagePlan.publish) continue;
-    const pkg = context.graph.get(packagePlan.name);
-    if (!pkg) continue;
-    const changelogs = filterChangelogsByIds(plan.changelogs, packagePlan.changelogIds);
+  for (const [name, plan] of Object.entries(store.packages)) {
+    if (!plan.publish) continue;
+
+    const pkg = context.graph.get(name);
+    if (!pkg || !pkg.manifest.version) continue;
+
+    const changelogs: ChangelogEntry[] = [];
+    for (const id of plan.changelogIds) {
+      const entry = store.changelogs[id];
+      if (entry)
+        changelogs.push({
+          ...entry,
+          packages: new Set(entry.packages),
+          id,
+        });
+    }
 
     if (!dryRun) {
       const published = await context.registryClient.packageVersionExists(
-        packagePlan.name,
-        packagePlan.version,
+        pkg.name,
+        pkg.manifest.version,
       );
 
       if (published) {
         results.push({
-          name: packagePlan.name,
-          version: packagePlan.version,
-          distTag: packagePlan.distTag,
-          gitTag: packagePlan.gitTag,
+          name: pkg.name,
+          version: pkg.manifest.version,
+          distTag: plan.distTag,
           state: "success",
           changelogs,
         });
@@ -83,44 +95,26 @@ async function publishStoredPlan(
     }
 
     try {
-      if (pkg.manifest.name !== packagePlan.name) {
-        throw new Error(
-          `Expected package ${packagePlan.name}, found ${pkg.manifest.name ?? "unknown"}.`,
-        );
-      }
-
-      if (pkg.manifest.version !== packagePlan.version) {
-        throw new Error(
-          `Expected ${packagePlan.name}@${packagePlan.version}, found ${pkg.manifest.version ?? "unknown"}.`,
-        );
-      }
-
       if (!dryRun) {
-        const args = ["publish", "--tag", packagePlan.distTag];
-
-        await x(context.npmClient, args, {
-          nodeOptions: {
-            cwd: pkg.path,
-          },
-          throwOnError: true,
+        await context.registryClient.publish({
+          path: pkg.path,
+          distTag: plan.distTag,
         });
       }
 
       results.push({
-        name: packagePlan.name,
-        version: packagePlan.version,
-        distTag: packagePlan.distTag,
-        gitTag: packagePlan.gitTag,
+        name: pkg.name,
+        version: pkg.manifest.version,
+        distTag: plan.distTag,
         state: "success",
         changelogs,
       });
     } catch (error) {
       results.push({
-        name: packagePlan.name,
-        version: packagePlan.version,
-        distTag: packagePlan.distTag,
+        name: pkg.name,
+        version: pkg.manifest.version,
+        distTag: plan.distTag,
         changelogs,
-        gitTag: packagePlan.gitTag,
         state: "failed",
         error: error instanceof Error ? error.message : String(error),
       });
@@ -138,17 +132,17 @@ async function createGitTags(
   const { graph } = context;
   if (dryRun || !gitTags || result.state === "failed") return result;
 
-  for (const release of result.plan.packages) {
-    if (!release.publish || !release.gitTag) continue;
-
+  for (const pkg of result.packages) {
     try {
-      await createGitTag(graph.get(release.name)!.path, release.gitTag);
+      const gitTag = `${pkg.name}@${pkg.version}`;
+      await createGitTag(graph.get(pkg.name)!.path, gitTag);
+      pkg.gitTag = gitTag;
     } catch (error) {
       return {
         ...result,
         state: "failed",
         packages: result.packages.map((pkgResult) => {
-          if (pkgResult.name === release.name) {
+          if (pkgResult.name === pkg.name) {
             return {
               ...pkgResult,
               state: "failed",

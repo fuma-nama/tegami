@@ -1,14 +1,20 @@
 import { x } from "tinyexec";
-import type { PublishPlan } from "../schemas";
 import type { PackageGraph } from "../workspace";
 import type { NpmClient } from "../types";
+import type { PlanStore } from "../schemas";
 
 export interface PublishPlanStatus {
-  state: "pending" | "success" | "failed";
+  state: "pending" | "success";
   error?: string;
 }
 
-export class RegistryClient {
+export interface RegistryClient {
+  packageVersionExists(name: string, version: string): Promise<boolean>;
+  publish(pkg: { path: string; distTag?: string }): Promise<void>;
+  publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus>;
+}
+
+export class NpmRegistryClient implements RegistryClient {
   // package@version -> if published
   #versionMap = new Map<string, Promise<boolean>>();
 
@@ -49,20 +55,25 @@ export class RegistryClient {
     return info;
   }
 
-  async publishPlanStatus(plan: PublishPlan): Promise<PublishPlanStatus> {
-    for (const pkg of plan.packages) {
-      if (!pkg.publish) continue;
+  async publish(pkg: { path: string; distTag?: string }) {
+    const args = ["publish"];
+    if (pkg.distTag) args.push("--tag", pkg.distTag);
 
-      try {
-        const exists = await this.packageVersionExists(pkg.name, pkg.version);
+    await x(this.npmClient, args, {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+      throwOnError: true,
+    });
+  }
 
-        if (!exists) return { state: "pending" };
-      } catch (error) {
-        return {
-          state: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
+  async publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus> {
+    for (const [name, pkgPlan] of Object.entries(plan.packages)) {
+      const pkg = this.graph.get(name);
+      if (!pkg || !pkgPlan.publish || !pkg.manifest.version) continue;
+
+      const exists = await this.packageVersionExists(name, pkg.manifest.version);
+      if (!exists) return { state: "pending" };
     }
 
     return { state: "success" };

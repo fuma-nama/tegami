@@ -1,15 +1,26 @@
 import { detect } from "package-manager-detector";
+import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createTegamiContext } from "../src/context";
 
 vi.mock("package-manager-detector", () => ({
   detect: vi.fn(),
 }));
+vi.mock("tinyexec", () => ({
+  x: vi.fn(),
+}));
 
 const detectPackageManager = vi.mocked(detect);
+const exec = vi.mocked(x);
 
 beforeEach(() => {
   detectPackageManager.mockReset();
+  exec.mockReset();
+  exec.mockResolvedValue({
+    exitCode: 0,
+    stdout: '"1.0.0"\n',
+    stderr: "",
+  } as Awaited<ReturnType<typeof x>>);
 });
 
 describe("tegami context", () => {
@@ -19,7 +30,13 @@ describe("tegami context", () => {
       npmClient: "npm",
     });
 
-    expect(context.npmClient).toBe("npm");
+    await context.registryClient.packageVersionExists("@acme/core", "1.0.0");
+
+    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
+      nodeOptions: {
+        cwd: "/repo",
+      },
+    });
     expect(detectPackageManager).not.toHaveBeenCalled();
   });
 
@@ -33,8 +50,13 @@ describe("tegami context", () => {
       cwd: "/repo",
     });
 
-    expect(context.npmClient).toBe("pnpm");
+    await context.registryClient.packageVersionExists("@acme/core", "1.0.0");
 
+    expect(exec).toHaveBeenCalledWith("pnpm", ["view", "@acme/core@1.0.0", "version", "--json"], {
+      nodeOptions: {
+        cwd: "/repo",
+      },
+    });
     expect(detectPackageManager).toHaveBeenCalledTimes(1);
     expect(detectPackageManager).toHaveBeenCalledWith({
       cwd: "/repo",
@@ -51,6 +73,12 @@ describe("tegami context", () => {
       cwd: "/repo",
     });
 
-    expect(context.npmClient).toBe("npm");
+    await context.registryClient.packageVersionExists("@acme/core", "1.0.0");
+
+    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
+      nodeOptions: {
+        cwd: "/repo",
+      },
+    });
   });
 });

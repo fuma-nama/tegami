@@ -1,15 +1,11 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { filterChangelogsByIds, type TegamiContext } from "./context";
+import path, { dirname, join } from "node:path";
+import type { TegamiContext } from "./context";
 import { simpleGenerator } from "./generators/simple";
 import { BumpType, bumpVersion, maxBump, updateRange } from "./utils/semver";
-import { type WorkspacePackage, writeManifest } from "./workspace";
-import {
-  publishPlanSchema,
-  type ChangelogEntry,
-  type PackagePlan,
-  type PublishPlan,
-} from "./schemas";
+import type { WorkspacePackage } from "./workspace";
+import type { ChangelogEntry } from "./markdown";
+import { PlanStore, planStoreSchema } from "./schemas";
 
 /** Per-package options applied when creating publish plans. */
 export interface PackageOptions {
@@ -17,8 +13,13 @@ export interface PackageOptions {
   distTag?: string;
   /** Set to false to keep this package out of npm publishing. */
   publish?: boolean;
-  /** Custom git tag, or false to skip git tag creation for this package. */
-  gitTag?: string | false;
+}
+
+export interface PackagePlan {
+  type: BumpType;
+  changelogIds: Set<string>;
+  distTag?: string;
+  publish: boolean;
 }
 
 const dependencyFields = [
@@ -29,20 +30,55 @@ const dependencyFields = [
 ] as const;
 
 export class DraftPlan {
-  readonly changelogs: ChangelogEntry[];
-  readonly packages: PackagePlan[];
-
   #created = false;
-  #context: TegamiContext;
 
-  constructor(changelogs: ChangelogEntry[], packages: PackagePlan[], context: TegamiContext) {
-    this.changelogs = changelogs;
-    this.packages = packages;
-    this.#context = context;
+  constructor(
+    // id -> changelog
+    private readonly changelogs: Map<string, ChangelogEntry>,
+    // package name -> plan
+    private readonly packages: Map<string, PackagePlan>,
+    private readonly context: TegamiContext,
+  ) {}
+
+  getPackages() {
+    return Array.from(this.packages.keys());
+  }
+
+  getPackage(name: string) {
+    return this.packages.get(name);
+  }
+
+  setPackage(name: string, plan: Partial<PackagePlan> = {}) {
+    this.packages.set(name, {
+      ...plan,
+      changelogIds: plan.changelogIds ?? new Set(),
+      publish: plan.publish ?? true,
+      type: plan.type ?? "patch",
+    });
+  }
+
+  deletePackage(name: string) {
+    return this.packages.delete(name);
+  }
+
+  getChangelogIds() {
+    return Array.from(this.changelogs.keys());
+  }
+
+  getChangelog(id: string) {
+    return this.changelogs.get(id);
+  }
+
+  setChangelog(id: string, entry: ChangelogEntry) {
+    this.changelogs.set(id, entry);
+  }
+
+  deleteChangelog(id: string): boolean {
+    return this.changelogs.delete(id);
   }
 
   /** Write the publish plan, update package versions, and consume changelog files. */
-  async createPublishPlan(): Promise<PublishPlan> {
+  async createPublishPlan(): Promise<void> {
     this.assertEditable();
     await this.assertPublishPlanFinished();
 
@@ -50,68 +86,90 @@ export class DraftPlan {
 
     await this.applyVersionChanges();
 
-    const plan: PublishPlan = {
+    const plan: PlanStore = {
       id: `tegami-${Date.now().toString(36)}`,
       createdAt: new Date().toISOString(),
-      changelogs: this.changelogs,
-      packages: this.packages,
+      changelogs: Object.fromEntries(
+        Array.from(this.changelogs, ([id, entry]) => [
+          id,
+          {
+            filename: entry.filename,
+            subject: entry.subject,
+            packages: Array.from(entry.packages),
+            type: entry.type,
+            title: entry.title,
+            content: entry.content,
+          },
+        ]),
+      ),
+      packages: Object.fromEntries(this.packages),
     };
 
-    await mkdir(dirname(this.#context.planPath), { recursive: true });
-    await writeFile(this.#context.planPath, publishPlanSchema.encode(plan));
+    await mkdir(dirname(this.context.planPath), { recursive: true });
+    await writeFile(this.context.planPath, planStoreSchema.encode(plan));
     await this.removeConsumedChangelogs();
-    return plan;
   }
 
   private async assertPublishPlanFinished(): Promise<void> {
-    const content = await readFile(this.#context.planPath, "utf8").catch(() => undefined);
+    const content = await readFile(this.context.planPath, "utf8").catch(() => undefined);
     if (!content) return;
 
-    const parsed = publishPlanSchema.safeDecode(content);
+    const parsed = planStoreSchema.safeDecode(content);
     if (!parsed.success) return;
 
-    const status = await this.#context.registryClient.publishPlanStatus(parsed.data);
+    const status = await this.context.registryClient.publishPlanStatus(parsed.data);
     if (status.state === "success") return;
 
-    const message = `Publish plan already exists at ${this.#context.planPath} and is ${status.state}. Publish it before creating a new plan.`;
+    const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before creating a new plan.`;
     throw new Error(status.error ? `${message}\n${status.error}` : message);
   }
 
   private async applyVersionChanges(): Promise<void> {
-    const releasesByName = new Map(this.packages.map((release) => [release.name, release]));
-
+    const { graph } = this.context;
+    const writes: Promise<void>[] = [];
     // TODO: Add dependent package bumps when an internal dependency changes outside a
     // dependent's accepted semver range.
-    for (const release of this.packages) {
-      const pkg = this.#context.graph.get(release.name);
+    for (const [name, plan] of this.packages) {
+      const pkg = graph.get(name);
       if (!pkg) continue;
 
-      const manifest = structuredClone(pkg.manifest);
-      manifest.version = release.version;
+      const manifest = pkg.manifest;
+      manifest.version = bumpVersion(manifest.version ?? "0.0.0", plan.type);
+    }
+
+    for (const [name, plan] of this.packages) {
+      const pkg = graph.get(name);
+      if (!pkg) continue;
 
       for (const field of dependencyFields) {
-        const dependencies = manifest[field];
+        const dependencies = pkg.manifest[field];
         if (!dependencies) continue;
 
         for (const [name, range] of Object.entries(dependencies)) {
-          const dependencyRelease = releasesByName.get(name);
-          if (!dependencyRelease) continue;
+          const dep = graph.get(name);
+          if (!dep?.manifest.version) continue;
 
-          dependencies[name] = updateRange(range, dependencyRelease.version);
+          dependencies[name] = updateRange(range, dep.manifest.version);
         }
       }
 
-      await writeManifest(pkg, manifest);
-      await this.appendChangelog(pkg, release);
+      const packageJsonPath = join(pkg.path, "package.json");
+      writes.push(
+        writeFile(packageJsonPath, `${JSON.stringify(pkg.manifest, null, 2)}\n`),
+        this.appendChangelog(pkg, plan),
+      );
     }
+
+    await Promise.all(writes);
   }
 
   private async removeConsumedChangelogs() {
-    const files = new Set(this.changelogs.map((entry) => entry.file));
-
-    for (const file of files) {
-      await rm(file, { force: true });
+    const writes: Promise<void>[] = [];
+    for (const entry of this.changelogs.values()) {
+      const file = path.resolve(this.context.cwd, this.context.changelogDir, entry.filename);
+      writes.push(rm(file, { force: true }));
     }
+    await Promise.all(writes);
   }
 
   private assertEditable(): void {
@@ -120,44 +178,60 @@ export class DraftPlan {
     }
   }
 
-  private async appendChangelog(pkg: WorkspacePackage, release: PackagePlan): Promise<void> {
-    if (release.changelogIds.size === 0) return;
-    const { generator = simpleGenerator() } = this.#context.options;
+  private async appendChangelog(pkg: WorkspacePackage, plan: PackagePlan): Promise<void> {
+    if (plan.changelogIds.size === 0) return;
+    const { generator = simpleGenerator() } = this.context.options;
+    const changelogs: ChangelogEntry[] = [];
+    for (const id of plan.changelogIds) {
+      const entry = this.changelogs.get(id);
+      if (entry) changelogs.push(entry);
+    }
 
-    const generated = await generator.generate.call(this.#context, {
-      packageName: release.name,
-      version: release.version,
-      changelogs: filterChangelogsByIds(this.changelogs, release.changelogIds),
+    const generated = await generator.generate.call(this.context, {
+      packageName: pkg.name,
+      version: pkg.manifest.version!,
+      changelogs,
     });
 
     const path = join(pkg.path, "CHANGELOG.md");
     const existing = await readFile(path, "utf8").catch(() => "");
     await writeFile(path, `${generated.trim()}\n\n${existing}`.trimEnd() + "\n");
   }
+
+  /** {@link createPublishPlan} but for `await using` syntax */
+  async [Symbol.asyncDispose]() {
+    return this.createPublishPlan();
+  }
 }
 
 export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiContext): DraftPlan {
+  const changelogMap = new Map<string, ChangelogEntry>();
   const byPackage = new Map<WorkspacePackage, ChangelogEntry[]>();
 
   for (const entry of changelogs) {
+    changelogMap.set(entry.id, entry);
+
     for (const requestedPackage of entry.packages) {
       const pkg = context.graph.get(requestedPackage);
       if (!pkg) continue;
 
-      const entries = byPackage.get(pkg) ?? [];
+      let entries = byPackage.get(pkg);
+      if (!entries) {
+        entries = [];
+        byPackage.set(pkg, entries);
+      }
+
       entries.push(entry);
-      byPackage.set(pkg, entries);
     }
   }
 
-  const packages: PackagePlan[] = [];
+  const packages = new Map<string, PackagePlan>();
   for (const [pkg, entries] of byPackage.entries()) {
     const plan = createPackagePlan(pkg, entries, context);
-    if (!plan) continue;
-    packages.push(plan);
+    if (plan) packages.set(pkg.name, plan);
   }
 
-  return new DraftPlan(changelogs, packages, context);
+  return new DraftPlan(changelogMap, packages, context);
 }
 
 function createPackagePlan(
@@ -176,17 +250,10 @@ function createPackagePlan(
     type = maxBump(type, entry.type);
   }
 
-  const version = bumpVersion(pkg.version, type);
-  const distTag = packageOptions.distTag ?? "latest";
-  const gitTag =
-    packageOptions.gitTag === false ? false : (packageOptions.gitTag ?? `${pkg.name}@${version}`);
-
   return {
-    name: pkg.name,
-    version,
+    type,
     changelogIds,
-    distTag,
-    gitTag,
-    publish: packageOptions.publish ?? !pkg.private,
+    distTag: packageOptions.distTag ?? pkg.manifest.publishConfig?.tag,
+    publish: packageOptions.publish ?? !pkg.manifest.private,
   };
 }

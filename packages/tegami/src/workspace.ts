@@ -9,8 +9,6 @@ import { isNodeError } from "./utils/error";
 export interface WorkspacePackage {
   name: string;
   path: string;
-  version: string;
-  private: boolean;
   manifest: PackageManifest;
 }
 
@@ -70,19 +68,8 @@ function toWorkspacePackage(path: string, manifest: PackageManifest): WorkspaceP
   return {
     name: manifest.name!,
     path,
-    version: manifest.version!,
-    private: manifest.private === true,
     manifest,
   };
-}
-
-/** Write a package manifest back to disk. */
-export async function writeManifest(
-  pkg: WorkspacePackage,
-  manifest: PackageManifest,
-): Promise<void> {
-  const path = join(pkg.path, "package.json");
-  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function readWorkspacePatterns(cwd: string): Promise<string[]> {

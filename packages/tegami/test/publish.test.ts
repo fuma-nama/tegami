@@ -5,9 +5,9 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { createTegamiContext, TegamiContext } from "../src/context";
-import type { PublishOptions } from "../src/publish";
+import type { PublishOptions, PublishResult } from "../src/publish";
 import { publishFromPlan } from "../src/publish";
-import { publishPlanSchema } from "../src/schemas";
+import { planStoreSchema } from "../src/schemas";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -101,29 +101,33 @@ describe("publish plans", () => {
   test("derives package changelogs from top-level plan changelogs", async () => {
     const { cwd, planPath } = await createPublishFixture();
     const plan = await readJson<{
-      changelogs: Array<{
-        id: string;
-        file: string;
-        packages: string[];
-        type: "major" | "minor" | "patch";
-        title: string;
-        content: string;
-      }>;
-      packages: Array<{
-        changelogIds: string[];
-      }>;
+      changelogs: Record<
+        string,
+        {
+          filename: string;
+          packages: string[];
+          type: "major" | "minor" | "patch";
+          title: string;
+          content: string;
+        }
+      >;
+      packages: Record<
+        string,
+        {
+          changelogIds: string[];
+        }
+      >;
     }>(planPath);
-    plan.changelogs = [
-      {
-        id: "change-1",
-        file: "/repo/.tegami/change.md",
-        packages: ["core"],
+    plan.changelogs = {
+      "change-1": {
+        filename: "change.md",
+        packages: ["@acme/core"],
         type: "minor",
         title: "Add proxy server",
         content: "Some description.",
       },
-    ];
-    plan.packages[0]!.changelogIds = ["change-1"];
+    };
+    plan.packages["@acme/core"]!.changelogIds = ["change-1"];
     await writeJson(planPath, plan);
 
     const result = await publishFixture(
@@ -135,7 +139,20 @@ describe("publish plans", () => {
       { dryRun: true },
     );
 
-    expect(result.packages[0]?.changelogs).toEqual(plan.changelogs);
+    expect(result.packages[0]?.changelogs.map(normalizeChangelog)).toMatchInlineSnapshot(`
+      [
+        {
+          "content": "Some description.",
+          "filename": "change.md",
+          "id": "change-1",
+          "packages": [
+            "@acme/core",
+          ],
+          "title": "Add proxy server",
+          "type": "minor",
+        },
+      ]
+    `);
   });
 
   test("creates git tags after all packages publish successfully", async () => {
@@ -173,52 +190,100 @@ describe("publish plans", () => {
 
     expect(result.state).toBe("success");
     expect(result.packages.every((pkg) => pkg.state === "success")).toBe(true);
-    expect(exec).toHaveBeenNthCalledWith(
-      1,
-      "npm",
-      ["view", "@acme/core@1.0.1", "version", "--json"],
-      expect.any(Object),
-    );
-    expect(exec).toHaveBeenNthCalledWith(
-      2,
-      "npm",
-      ["publish", "--tag", "latest"],
-      expect.objectContaining({
-        nodeOptions: {
-          cwd: corePath,
+    expect(
+      exec.mock.calls.map((call) =>
+        normalizeExecCall(call, {
+          cwd,
+          corePath,
+          uiPath,
+        }),
+      ),
+    ).toMatchInlineSnapshot(`
+      [
+        {
+          "args": [
+            "view",
+            "@acme/core@1.0.1",
+            "version",
+            "--json",
+          ],
+          "command": "npm",
+          "cwd": "<workspace>",
+          "throwOnError": undefined,
         },
-      }),
-    );
-    expect(exec).toHaveBeenNthCalledWith(
-      3,
-      "npm",
-      ["view", "@acme/ui@1.0.1", "version", "--json"],
-      expect.any(Object),
-    );
-    expect(exec).toHaveBeenNthCalledWith(
-      4,
-      "npm",
-      ["publish", "--tag", "latest"],
-      expect.objectContaining({
-        nodeOptions: {
-          cwd: uiPath,
+        {
+          "args": [
+            "publish",
+            "--tag",
+            "latest",
+          ],
+          "command": "npm",
+          "cwd": "<core>",
+          "throwOnError": true,
         },
-      }),
-    );
-    expect(exec).toHaveBeenNthCalledWith(
-      5,
-      "git",
-      ["rev-parse", "-q", "--verify", "refs/tags/@acme/core@1.0.1"],
-      expect.any(Object),
-    );
-    expect(exec).toHaveBeenNthCalledWith(6, "git", ["tag", "@acme/core@1.0.1"], expect.any(Object));
-    expect(exec).toHaveBeenNthCalledWith(
-      7,
-      "git",
-      ["rev-parse", "-q", "--verify", "refs/tags/@acme/ui@1.0.1"],
-      expect.any(Object),
-    );
-    expect(exec).toHaveBeenNthCalledWith(8, "git", ["tag", "@acme/ui@1.0.1"], expect.any(Object));
+        {
+          "args": [
+            "view",
+            "@acme/ui@1.0.1",
+            "version",
+            "--json",
+          ],
+          "command": "npm",
+          "cwd": "<workspace>",
+          "throwOnError": undefined,
+        },
+        {
+          "args": [
+            "publish",
+            "--tag",
+            "latest",
+          ],
+          "command": "npm",
+          "cwd": "<ui>",
+          "throwOnError": true,
+        },
+        {
+          "args": [
+            "rev-parse",
+            "-q",
+            "--verify",
+            "refs/tags/@acme/core@1.0.1",
+          ],
+          "command": "git",
+          "cwd": "<core>",
+          "throwOnError": undefined,
+        },
+        {
+          "args": [
+            "tag",
+            "@acme/core@1.0.1",
+          ],
+          "command": "git",
+          "cwd": "<core>",
+          "throwOnError": true,
+        },
+        {
+          "args": [
+            "rev-parse",
+            "-q",
+            "--verify",
+            "refs/tags/@acme/ui@1.0.1",
+          ],
+          "command": "git",
+          "cwd": "<ui>",
+          "throwOnError": undefined,
+        },
+        {
+          "args": [
+            "tag",
+            "@acme/ui@1.0.1",
+          ],
+          "command": "git",
+          "cwd": "<ui>",
+          "throwOnError": true,
+        },
+      ]
+    `);
   });
 
   test("does not create git tags when any package publish fails", async () => {
@@ -322,55 +387,6 @@ describe("publish plans", () => {
     await expect(readFile(planPath, "utf8")).resolves.toContain("@acme/core");
   });
 
-  test("publishes legacy plans without using status as source of truth", async () => {
-    const { cwd, planPath } = await createPublishFixture({
-      legacyStatus: "completed",
-    });
-
-    exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "view") {
-        return commandResult({
-          exitCode: 1,
-          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-        });
-      }
-
-      if (args.at(0) === "publish") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${args.join(" ")}`);
-    });
-
-    const result = await publishFixture(
-      planPath,
-      await createTegamiContext({
-        cwd,
-        planPath,
-        npmClient: "npm",
-      }),
-      {
-        dryRun: false,
-        gitTags: false,
-      },
-    );
-
-    expect(result.state).toBe("success");
-    expect(result.packages).toEqual([
-      expect.objectContaining({
-        name: "@acme/core",
-        state: "success",
-        version: "1.0.1",
-      }),
-    ]);
-    expect(exec).toHaveBeenNthCalledWith(
-      2,
-      "npm",
-      ["publish", "--tag", "latest"],
-      expect.any(Object),
-    );
-  });
-
   test("throws from root publish when no publish plan exists", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-publish-"));
     tempDirs.push(cwd);
@@ -379,9 +395,7 @@ describe("publish plans", () => {
   });
 });
 
-async function createPublishFixture(
-  options: { registry?: string; legacyStatus?: "pending" | "completed" } = {},
-): Promise<{
+async function createPublishFixture(options: { registry?: string } = {}): Promise<{
   cwd: string;
   packagePath: string;
   planPath: string;
@@ -408,18 +422,15 @@ async function createPublishFixture(
   const storedPlan = {
     id: "tegami-test",
     createdAt: "2026-01-01T00:00:00.000Z",
-    ...(options.legacyStatus ? { status: options.legacyStatus } : {}),
-    changelogs: [],
-    packages: [
-      {
-        name: "@acme/core",
-        version: "1.0.1",
+    changelogs: {},
+    packages: {
+      "@acme/core": {
+        type: "patch",
         changelogIds: [],
         distTag: "latest",
-        gitTag: false,
         publish: true,
       },
-    ],
+    },
   };
 
   await writeJson(planPath, storedPlan);
@@ -458,8 +469,11 @@ async function createMultiPackagePublishFixture(): Promise<{
   await writeJson(planPath, {
     id: "tegami-test",
     createdAt: "2026-01-01T00:00:00.000Z",
-    changelogs: [],
-    packages: [packageRelease("@acme/core"), packageRelease("@acme/ui")],
+    changelogs: {},
+    packages: {
+      "@acme/core": packageRelease(),
+      "@acme/ui": packageRelease(),
+    },
   });
 
   return {
@@ -470,13 +484,11 @@ async function createMultiPackagePublishFixture(): Promise<{
   };
 }
 
-function packageRelease(name: string) {
+function packageRelease() {
   return {
-    name,
-    version: "1.0.1",
+    type: "patch",
     changelogIds: [] as string[],
     distTag: "latest",
-    gitTag: `${name}@1.0.1`,
     publish: true,
   };
 }
@@ -488,7 +500,7 @@ async function publishFixture(
 ) {
   return publishFromPlan(
     context,
-    publishPlanSchema.decode(await readFile(planPath, "utf8")),
+    planStoreSchema.decode(await readFile(planPath, "utf8")),
     PublishOptions,
   );
 }
@@ -514,4 +526,46 @@ function execResult(overrides: Partial<ExecResult> = {}): ExecResult {
 
 function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x> {
   return execResult(overrides) as unknown as ReturnType<typeof x>;
+}
+
+function normalizeChangelog(
+  changelog: NonNullable<PublishResult["packages"][number]["changelogs"]>[number],
+) {
+  return {
+    ...changelog,
+    packages: Array.from(changelog.packages),
+  };
+}
+
+function normalizeExecCall(
+  [command, args, options]: Parameters<typeof x>,
+  paths: {
+    cwd: string;
+    corePath: string;
+    uiPath: string;
+  },
+) {
+  return {
+    command,
+    args,
+    cwd: normalizeCwd(
+      typeof options?.nodeOptions?.cwd === "string" ? options.nodeOptions.cwd : undefined,
+      paths,
+    ),
+    throwOnError: options?.throwOnError,
+  };
+}
+
+function normalizeCwd(
+  cwd: string | undefined,
+  paths: {
+    cwd: string;
+    corePath: string;
+    uiPath: string;
+  },
+) {
+  if (cwd === paths.cwd) return "<workspace>";
+  if (cwd === paths.corePath) return "<core>";
+  if (cwd === paths.uiPath) return "<ui>";
+  return cwd;
 }

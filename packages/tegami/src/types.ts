@@ -1,7 +1,7 @@
 import type { TegamiContext } from "./context";
 import type { DraftPlan, PackageOptions } from "./draft";
-import type { PublishOptions, PublishResult } from "./publish";
-import type { ChangelogEntry } from "./schemas";
+import type { ChangelogEntry } from "./markdown";
+import type { PublishResult } from "./publish";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {

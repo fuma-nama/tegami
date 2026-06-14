@@ -7,14 +7,12 @@ import type { PublishOptions, PublishResult } from "./publish";
 import type { TegamiOptions } from "./types";
 import { isNodeError } from "./utils/error";
 import { PackageGraph } from "./workspace";
-import { publishPlanSchema } from "./schemas";
+import { planStoreSchema } from "./schemas";
 
-export type { PackageOptions } from "./draft";
 export type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
 export type { LogGenerator, TegamiOptions, TegamiPlugin } from "./types";
-export type { WorkspacePackage } from "./workspace";
-export type { DraftPlan } from "./draft";
-export type { PackageGraph } from "./workspace";
+export type { DraftPlan, PackageOptions, PackagePlan } from "./draft";
+export type { PackageGraph, WorkspacePackage } from "./workspace";
 
 export interface Tegami {
   /** Build an editable draft from pending changelog files. */
@@ -47,7 +45,7 @@ export function tegami(options: TegamiOptions = {}): Tegami {
     async publish(publishOptions) {
       const context = await createTegamiContext(options);
       const parsed = await readFile(context.planPath, "utf8")
-        .then((content) => publishPlanSchema.decode(content))
+        .then((content) => planStoreSchema.decode(content))
         .catch((error: unknown) => {
           if (isNodeError(error) && error.code === "ENOENT") return undefined;
           throw error;

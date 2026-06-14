@@ -31,31 +31,35 @@ describe("github release plugin", () => {
           }),
           packageResult({
             name: "@acme/no-tag",
-            gitTag: false,
+            gitTag: undefined,
           }),
         ],
       }),
     );
 
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith(
-      "gh",
+    expect(exec.mock.calls).toMatchInlineSnapshot(`
       [
-        "release",
-        "create",
-        "@acme/core@1.0.1",
-        "--title",
-        "Release 1.0.1",
-        "--notes",
-        "Notes for @acme/core",
-        "--repo",
-        "acme/repo",
-        "--prerelease",
-      ],
-      {
-        throwOnError: true,
-      },
-    );
+        [
+          "gh",
+          [
+            "release",
+            "create",
+            "@acme/core@1.0.1",
+            "--title",
+            "Release 1.0.1",
+            "--notes",
+            "Notes for @acme/core",
+            "--repo",
+            "acme/repo",
+            "--prerelease",
+          ],
+          {
+            "throwOnError": true,
+          },
+        ],
+      ]
+    `);
   });
 
   test("does not create releases when any package failed", async () => {
@@ -87,8 +91,8 @@ describe("github release plugin", () => {
             changelogs: [
               {
                 id: "change-1",
-                file: "/repo/.tegami/change.md",
-                packages: ["core"],
+                filename: "change.md",
+                packages: new Set(["@acme/core"]),
                 type: "minor",
                 title: "Add proxy server",
                 content: "Some description.",
@@ -99,22 +103,38 @@ describe("github release plugin", () => {
       }),
     );
 
-    expect(exec).toHaveBeenCalledWith(
-      "gh",
-      expect.arrayContaining(["--notes", "### Add proxy server\n\nSome description."]),
-      expect.any(Object),
-    );
+    expect(exec.mock.calls).toMatchInlineSnapshot(`
+      [
+        [
+          "gh",
+          [
+            "release",
+            "create",
+            "@acme/core@1.0.1",
+            "--title",
+            "@acme/core@1.0.1",
+            "--notes",
+            "### Add proxy server
+
+      Some description.",
+          ],
+          {
+            "throwOnError": true,
+          },
+        ],
+      ]
+    `);
   });
 });
 
 function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
   return {
     planPath: "/repo/.tegami/publish-plan.json",
-    plan: {
+    _rawPlan: {
       id: "tegami-test",
       createdAt: "2026-01-01T00:00:00.000Z",
-      changelogs: [],
-      packages: [],
+      changelogs: {},
+      packages: {},
     },
     state: "success",
     packages: [],

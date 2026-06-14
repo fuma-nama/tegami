@@ -1,7 +1,7 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { PublishPlan } from "../src/schemas";
-import { RegistryClient } from "../src/utils/registry";
+import type { PlanStore } from "../src/schemas";
+import { NpmRegistryClient } from "../src/utils/registry";
 import { PackageGraph, type WorkspacePackage } from "../src/workspace";
 
 vi.mock("tinyexec", () => ({
@@ -16,7 +16,7 @@ beforeEach(() => {
 
 describe("registry client", () => {
   test("caches package version lookups and reads the registry from the graph", async () => {
-    const client = new RegistryClient("/repo", "pnpm", graph("https://registry.example.test"));
+    const client = new NpmRegistryClient("/repo", "pnpm", graph("https://registry.example.test"));
 
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
@@ -43,7 +43,7 @@ describe("registry client", () => {
   });
 
   test("returns false for missing package versions", async () => {
-    const client = new RegistryClient("/repo", "npm", graph());
+    const client = new NpmRegistryClient("/repo", "npm", graph());
 
     exec.mockResolvedValue(
       execResult({
@@ -56,7 +56,7 @@ describe("registry client", () => {
   });
 
   test("returns successful publish plan status", async () => {
-    const client = new RegistryClient("/repo", "npm", graph("https://registry.example.test"));
+    const client = new NpmRegistryClient("/repo", "npm", graph("https://registry.example.test"));
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
     const status = await client.publishPlanStatus(storedPlan());
@@ -83,7 +83,7 @@ describe("registry client", () => {
   });
 
   test("returns pending publish plan status", async () => {
-    const client = new RegistryClient("/repo", "npm", graph());
+    const client = new NpmRegistryClient("/repo", "npm", graph());
     exec.mockResolvedValue(
       execResult({
         exitCode: 1,
@@ -101,8 +101,6 @@ function graph(registry?: string): PackageGraph {
   const pkg: WorkspacePackage = {
     name: "@acme/core",
     path: "/repo/packages/core",
-    version: "1.0.1",
-    private: false,
     manifest: {
       name: "@acme/core",
       version: "1.0.1",
@@ -113,21 +111,19 @@ function graph(registry?: string): PackageGraph {
   return new PackageGraph([pkg]);
 }
 
-function storedPlan(): PublishPlan {
+function storedPlan(): PlanStore {
   return {
     id: "tegami-test",
     createdAt: "2026-01-01T00:00:00.000Z",
-    changelogs: [],
-    packages: [
-      {
-        name: "@acme/core",
-        version: "1.0.1",
+    changelogs: {},
+    packages: {
+      "@acme/core": {
+        type: "patch",
         changelogIds: new Set(),
         distTag: "latest",
-        gitTag: "@acme/core@1.0.1",
         publish: true,
       },
-    ],
+    },
   };
 }
 

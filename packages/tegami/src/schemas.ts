@@ -44,6 +44,7 @@ export const packageManifestSchema = z.looseObject({
     .looseObject({
       access: z.enum(["public", "restricted"]).optional(),
       registry: z.string().optional(),
+      tag: z.string().optional(),
     })
     .optional(),
   workspaces: workspacePatternsSchema.optional(),
@@ -55,55 +56,37 @@ export const packageManifestSchema = z.looseObject({
 
 export type PackageManifest = z.infer<typeof packageManifestSchema>;
 
-/** Parsed release note entry from a changelog markdown file. */
-export const changelogEntrySchema = z.object({
-  id: z.string(),
-  file: z.string(),
-  subject: z.string().optional(),
-  packages: z.array(z.string()),
-  type: z.enum(["major", "minor", "patch"]),
-  title: z.string(),
-  content: z.string(),
-});
-
-export const packagePlanSchema = z.object({
-  name: z.string(),
-  version: z.string(),
-  changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
-    encode: (v) => Array.from(v),
-    decode: (v) => new Set(v),
+/** the persisted plan data for actual publishing */
+export const planStoreSchema = jsonCodec(
+  z.object({
+    id: z.string(),
+    createdAt: z.iso.datetime(),
+    /** release note entries */
+    changelogs: z.record(
+      z.string(),
+      z.object({
+        filename: z.string(),
+        subject: z.string().optional(),
+        packages: z.array(z.string()),
+        type: z.enum(["major", "minor", "patch"]),
+        title: z.string(),
+        content: z.string(),
+      }),
+    ),
+    /** package name -> package info */
+    packages: z.record(
+      z.string(),
+      z.object({
+        type: z.enum(["major", "minor", "patch"]),
+        changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
+          encode: (v) => Array.from(v),
+          decode: (v) => new Set(v),
+        }),
+        distTag: z.string().optional(),
+        publish: z.boolean(),
+      }),
+    ),
   }),
-  distTag: z.string(),
-  gitTag: z.union([z.string(), z.literal(false)]),
-  publish: z.boolean(),
-});
-
-export const publishPlanSchema = jsonCodec(
-  z
-    .object({
-      id: z.string(),
-      createdAt: z.iso.datetime(),
-      changelogs: z.array(changelogEntrySchema),
-      packages: z.array(packagePlanSchema),
-    })
-    .superRefine((plan, context) => {
-      const seen = new Set<string>();
-
-      for (const [index, pkg] of plan.packages.entries()) {
-        if (!seen.has(pkg.name)) {
-          seen.add(pkg.name);
-          continue;
-        }
-
-        context.addIssue({
-          code: "custom",
-          message: `Duplicate package in publish plan: ${pkg.name}`,
-          path: ["packages", index, "name"],
-        });
-      }
-    }),
 );
 
-export type PublishPlan = z.output<typeof publishPlanSchema>;
-export type PackagePlan = z.output<typeof packagePlanSchema>;
-export type ChangelogEntry = z.output<typeof changelogEntrySchema>;
+export type PlanStore = z.output<typeof planStoreSchema>;

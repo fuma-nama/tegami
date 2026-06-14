@@ -1,20 +1,29 @@
-import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { Heading, Root, RootContent } from "mdast";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { remark } from "remark";
-import { type ChangelogEntry, changelogFrontmatterSchema } from "./schemas";
+import { changelogFrontmatterSchema } from "./schemas";
 import { isNodeError } from "./utils/error";
 import type { BumpType } from "./utils/semver";
 import { frontmatter } from "./utils/frontmatter";
+
+export interface ChangelogEntry {
+  id: string;
+  /** file name like `my-change.md` */
+  filename: string;
+  subject?: string;
+  packages: Set<string>;
+  type: BumpType;
+  title: string;
+  content: string;
+}
 
 export async function readChangelogEntries(
   cwd: string,
   changelogDir: string,
 ): Promise<ChangelogEntry[]> {
   const directory = resolve(cwd, changelogDir);
-
   const files = await readdir(directory).catch((error: unknown) => {
     if (isNodeError(error) && error.code === "ENOENT") {
       return [];
@@ -46,11 +55,12 @@ export function parseChangelogFile(file: string, content: string): ChangelogEntr
     const type = headingToBump(section.heading.depth);
     if (!type) continue;
 
+    const filename = basename(file);
     entries.push({
-      id: changelogId(file, entries.length),
-      file,
+      id: `${filename}:${entries.length}`,
+      filename,
       subject: data.subject,
-      packages: data.packages,
+      packages: new Set(data.packages),
       type,
       title: headingText(section.heading),
       content: sectionToMarkdown(section.children),
@@ -58,10 +68,6 @@ export function parseChangelogFile(file: string, content: string): ChangelogEntr
   }
 
   return entries;
-}
-
-function changelogId(file: string, index: number): string {
-  return createHash("sha256").update(`${file}\u0000${index}`).digest("hex").slice(0, 12);
 }
 
 interface HeadingSection {

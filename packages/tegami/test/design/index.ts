@@ -14,19 +14,32 @@ const paper = tegami({
 
 export async function version() {
   const draft = await paper.draft();
-  console.log(draft.changelogs);
+  console.log(draft.getChangelogIds());
 
-  for (const pkg of draft.packages) {
-    console.log("will be published", pkg.name, pkg.version);
+  for (const packageName of draft.getPackages()) {
+    const pkg = draft.getPackage(packageName);
+    console.log("will be planned", packageName, pkg?.type);
     // Changelog entries are stored once on the plan; packages reference them by id.
-    console.log(pkg.changelogIds);
+    console.log(pkg?.changelogIds);
   }
 
-  // generate .tegami/publish-plan.json and delete all changelogs
+  // update versions, generate .tegami/publish-plan.json, and delete all changelogs
   // it refuses to create a new plan until the current one has finished publishing
   await draft.createPublishPlan();
 
   // plan will be freezed once created, no further `create()` calls allowed
+}
+
+export async function versionWithAutoDispose() {
+  await using draft = await paper.draft();
+  console.log(draft.getChangelogIds());
+
+  for (const packageName of draft.getPackages()) {
+    const pkg = draft.getPackage(packageName);
+    console.log("will be planned", packageName, pkg?.type);
+    // Changelog entries are stored once on the plan; packages reference them by id.
+    console.log(pkg?.changelogIds);
+  }
 }
 
 export async function publish() {
