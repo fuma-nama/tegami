@@ -11,6 +11,7 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
+    "./cli": "./dist/cli/index.mjs",
     "./generators/simple": "./dist/generators/simple.mjs",
     "./plugins/git": "./dist/plugins/git.mjs",
     "./plugins/github": "./dist/plugins/github.mjs",
@@ -27,6 +28,8 @@
     "dev": "tsdown --watch"
   },
   "dependencies": {
+    "@clack/prompts": "^1.5.1",
+    "commander": "^15.0.0",
     "js-yaml": "^4.2.0",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-to-markdown": "^2.1.2",

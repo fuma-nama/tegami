@@ -1,9 +1,10 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { PublishResult } from "../src";
+import type { PackagePublishResult, PublishResult } from "../src";
+import { DraftPlan, type PackagePlan } from "../src/draft";
 import { github } from "../src/plugins/github";
 import type { TegamiPlugin } from "../src/types";
-import { PackageGraph } from "../src/workspace";
+import { PackageGraph, WorkspacePackage } from "../src/workspace";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -136,6 +137,292 @@ describe("github release plugin", () => {
   });
 });
 
+describe("github version pull request", () => {
+  test("updates an existing version pull request in CI", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const plugin = githubPlugin({ repo: "acme/repo" });
+
+      exec.mockImplementation((command, args = []) => {
+        if (command === "git" && args[0] === "status") {
+          return commandResult({ stdout: " M package.json\n" });
+        }
+
+        if (command === "git") {
+          return commandResult();
+        }
+
+        if (command === "gh" && args[0] === "pr" && args[1] === "list") {
+          return commandResult({ stdout: '[{"number":42}]\n' });
+        }
+
+        if (command === "gh") {
+          return commandResult();
+        }
+
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      });
+
+      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+
+      expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
+        [
+          {
+            "args": [
+              "status",
+              "--porcelain",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": undefined,
+          },
+          {
+            "args": [
+              "checkout",
+              "-B",
+              "tegami/version-packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "add",
+              "-A",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "commit",
+              "-m",
+              "Version Packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "push",
+              "--force",
+              "-u",
+              "origin",
+              "tegami/version-packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "pr",
+              "list",
+              "--head",
+              "tegami/version-packages",
+              "--state",
+              "open",
+              "--json",
+              "number",
+              "--repo",
+              "acme/repo",
+            ],
+            "command": "gh",
+            "cwd": undefined,
+            "throwOnError": true,
+          },
+        ]
+      `);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("creates a version pull request in CI when there are changes", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const plugin = githubPlugin({ repo: "acme/repo" });
+
+      exec.mockImplementation((command, args = []) => {
+        if (command === "git" && args[0] === "status") {
+          return commandResult({ stdout: " M package.json\n" });
+        }
+
+        if (command === "git") {
+          return commandResult();
+        }
+
+        if (command === "gh" && args[0] === "pr" && args[1] === "list") {
+          return commandResult({ stdout: "[]\n" });
+        }
+
+        if (command === "gh") {
+          return commandResult();
+        }
+
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      });
+
+      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+
+      expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
+        [
+          {
+            "args": [
+              "status",
+              "--porcelain",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": undefined,
+          },
+          {
+            "args": [
+              "checkout",
+              "-B",
+              "tegami/version-packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "add",
+              "-A",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "commit",
+              "-m",
+              "Version Packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "push",
+              "--force",
+              "-u",
+              "origin",
+              "tegami/version-packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "pr",
+              "list",
+              "--head",
+              "tegami/version-packages",
+              "--state",
+              "open",
+              "--json",
+              "number",
+              "--repo",
+              "acme/repo",
+            ],
+            "command": "gh",
+            "cwd": undefined,
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "pr",
+              "create",
+              "--title",
+              "Version Packages",
+              "--body",
+              "## Summary
+        - @acme/core: minor → \`1.1.0\`
+
+        ## Changelogs
+        - Add feature
+
+        Merge this PR to publish the versioned packages.",
+              "--head",
+              "tegami/version-packages",
+              "--base",
+              "main",
+              "--repo",
+              "acme/repo",
+            ],
+            "command": "gh",
+            "cwd": undefined,
+            "throwOnError": true,
+          },
+        ]
+      `);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("skips version pull requests outside CI by default", async () => {
+    const previousCi = process.env.CI;
+    delete process.env.CI;
+
+    try {
+      const plugin = githubPlugin();
+      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+      expect(exec).not.toHaveBeenCalled();
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("creates a version pull request outside CI when enabled explicitly", async () => {
+    const previousCi = process.env.CI;
+    delete process.env.CI;
+
+    try {
+      const plugin = githubPlugin({
+        repo: "acme/repo",
+        cli: {
+          createVersionPR: true,
+        },
+      });
+
+      exec.mockImplementation((command, args = []) => {
+        if (command === "git" && args[0] === "status") {
+          return commandResult({ stdout: " M package.json\n" });
+        }
+
+        if (command === "git" || command === "gh") {
+          return commandResult(command === "gh" && args[1] === "list" ? { stdout: "[]\n" } : {});
+        }
+
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      });
+
+      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+
+      expect(exec).toHaveBeenCalled();
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+});
+
 function githubPlugin(options?: Parameters<typeof github>[0]): TegamiPlugin {
   const plugin = github(options).find((plugin) => plugin.name === "github");
   if (!plugin) throw new Error("GitHub plugin not found.");
@@ -150,9 +437,48 @@ function publishContext() {
     options: {},
     plugins: [],
     publishOptions: {},
-    graph: new PackageGraph([]),
+    graph: new PackageGraph([testPackage()]),
     getRegistryClient: registryClient,
   };
+}
+
+function testPackage(): WorkspacePackage {
+  return {
+    name: "@acme/core",
+    path: "/repo/packages/core",
+    manager: "test",
+    version: "1.1.0",
+    publish: true,
+    id: "test:@acme/core",
+  } as WorkspacePackage;
+}
+
+function versionDraft(context = publishContext()): DraftPlan {
+  const changelogs = new Map([
+    [
+      "change-1",
+      {
+        id: "change-1",
+        filename: "change.md",
+        packages: new Set(["@acme/core"]),
+        type: "minor" as const,
+        title: "Add feature",
+        content: "Description.",
+      },
+    ],
+  ]);
+  const packages = new Map<string, PackagePlan>([
+    [
+      "test:@acme/core",
+      {
+        type: "minor",
+        changelogIds: new Set(["change-1"]),
+        publish: true,
+      },
+    ],
+  ]);
+
+  return new DraftPlan(changelogs, packages, context);
 }
 
 function registryClient() {
@@ -177,15 +503,13 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
       changelogs: {},
       packages: {},
     },
-    state: "success",
+    state: "created",
     packages: [],
     ...overrides,
   };
 }
 
-function packageResult(
-  overrides: Partial<PublishResult["packages"][number]> = {},
-): PublishResult["packages"][number] {
+function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePublishResult {
   const name = overrides.name ?? "@acme/core";
   return {
     id: `test:${name}`,
@@ -196,5 +520,25 @@ function packageResult(
     gitTag: "@acme/core@1.0.1",
     state: "success",
     ...overrides,
+  };
+}
+
+type ExecResult = Awaited<ReturnType<typeof x>>;
+
+function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x> {
+  return {
+    exitCode: 0,
+    stdout: "",
+    stderr: "",
+    ...overrides,
+  } as unknown as ReturnType<typeof x>;
+}
+
+function normalizeExecCall([command, args, options]: Parameters<typeof x>) {
+  return {
+    command,
+    args,
+    cwd: typeof options?.nodeOptions?.cwd === "string" ? options.nodeOptions.cwd : undefined,
+    throwOnError: options?.throwOnError,
   };
 }

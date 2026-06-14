@@ -40,7 +40,7 @@ describe("createChangelog", () => {
       ) as unknown as ReturnType<typeof x>;
     });
 
-    const created = await tegami({ cwd }).createChangelog();
+    const created = await tegami({ cwd }).generateChangelog();
 
     expect(exec.mock.calls.map((call) => call[1])).toEqual([
       ["describe", "--tags", "--abbrev=0"],

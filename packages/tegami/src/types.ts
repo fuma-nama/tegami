@@ -57,6 +57,12 @@ export interface TegamiPlugin {
     result: PublishResult,
   ): Awaitable<PublishResult | void | undefined>;
 
+  /** CLI lifecycle hooks. */
+  cli?: {
+    /** Called after `tegami version` creates a publish plan. */
+    afterVersion?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
+  };
+
   /**
    * @param pkg - the package that referenced the dependency
    * @param spec - the referenced dependency & its range

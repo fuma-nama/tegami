@@ -245,7 +245,7 @@ describe("draft publish plans", () => {
       version: "1.0.0",
     });
 
-    const graph = await tegami({ cwd }).graph();
+    const graph = await tegami({ cwd })._internal.graph();
 
     expect(normalizeDirPath(graph.get("npm:@acme/nested")?.path ?? "")).toBe(
       normalizeDirPath(join(cwd, "examples/nested/pkg")),

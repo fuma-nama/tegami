@@ -7,15 +7,31 @@ export interface PublishOptions {
   dryRun?: boolean;
 }
 
-export interface PublishResult {
-  /** Path to the publish plan that was executed. */
-  planPath: string;
-  state: "success" | "failed";
-  packages: PackagePublishResult[];
+export type PublishResult =
+  | {
+      state: "created";
+      packages: PackagePublishResult[];
 
-  /** the persisted plan object. This is not a public API, can be changed without notice */
-  _rawPlan: PlanStore;
-}
+      /** Path to the publish plan that was executed. */
+      planPath: string;
+      /** the persisted plan object. This is not a public API, can be changed without notice */
+      _rawPlan: PlanStore;
+    }
+  | {
+      state: "failed";
+      error?: string;
+      packages: PackagePublishResult[];
+
+      /** Path to the publish plan that was executed. */
+      planPath: string;
+      /** the persisted plan object. This is not a public API, can be changed without notice */
+      _rawPlan: PlanStore;
+    }
+  | {
+      state: "skipped";
+      /** Path to the publish plan that was executed or missing. */
+      planPath: string;
+    };
 
 export type PackagePublishResult = (
   | {
@@ -37,24 +53,11 @@ export type PackagePublishResult = (
 
 export async function publishFromPlan(
   context: TegamiContext,
-  plan: PlanStore,
+  store: PlanStore,
   options: PublishOptions,
 ): Promise<PublishResult> {
-  const packages = await publishStoredPlan(plan, context, options);
-  return {
-    planPath: context.planPath,
-    state: packages.some((pkg) => pkg.state === "failed") ? "failed" : "success",
-    packages,
-    _rawPlan: plan,
-  };
-}
-
-async function publishStoredPlan(
-  store: PlanStore,
-  context: TegamiContext,
-  { dryRun = false }: PublishOptions,
-): Promise<PackagePublishResult[]> {
-  const results: PackagePublishResult[] = [];
+  const { dryRun = false } = options;
+  const packages: PackagePublishResult[] = [];
 
   for (const [id, plan] of Object.entries(store.packages)) {
     if (!plan.publish) continue;
@@ -78,7 +81,7 @@ async function publishStoredPlan(
       const published = await registryClient.packageVersionExists(pkg, pkg.version);
 
       if (published) {
-        results.push({
+        packages.push({
           id: pkg.id,
           name: pkg.name,
           version: pkg.version,
@@ -95,7 +98,7 @@ async function publishStoredPlan(
         await context.getRegistryClient(pkg).publish(pkg, { distTag: plan.distTag });
       }
 
-      results.push({
+      packages.push({
         id: pkg.id,
         name: pkg.name,
         version: pkg.version,
@@ -104,7 +107,7 @@ async function publishStoredPlan(
         changelogs,
       });
     } catch (error) {
-      results.push({
+      packages.push({
         id: pkg.id,
         name: pkg.name,
         version: pkg.version,
@@ -116,5 +119,12 @@ async function publishStoredPlan(
     }
   }
 
-  return results;
+  if (packages.length === 0) return { state: "skipped", planPath: context.planPath };
+
+  return {
+    planPath: context.planPath,
+    state: packages.some((pkg) => pkg.state === "failed") ? "failed" : "created",
+    packages,
+    _rawPlan: store,
+  };
 }

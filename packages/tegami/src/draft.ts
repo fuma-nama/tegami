@@ -104,6 +104,10 @@ export class DraftPlan {
     await this.removeConsumedChangelogs();
   }
 
+  editable() {
+    return !this.#created;
+  }
+
   private async assertPublishPlanFinished(): Promise<void> {
     const content = await readFile(this.context.planPath, "utf8").catch(() => undefined);
     if (!content) return;

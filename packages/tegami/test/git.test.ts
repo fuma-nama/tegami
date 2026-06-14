@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { git, createGitTag, gitTagExists } from "../src/plugins/git";
+import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/workspace";
-import type { PublishResult } from "../src";
+import type { PackagePublishResult, PublishResult } from "../src";
 
 vi.mock("tinyexec", async (importOriginal) => {
   const actual = await importOriginal<typeof import("tinyexec")>();
@@ -44,10 +44,6 @@ describe("git utils", () => {
       },
     );
     await x("git", ["tag", "pkg@1.0.0"], { nodeOptions: { cwd }, throwOnError: true });
-
-    await expect(createGitTag(cwd, "pkg@1.0.0")).resolves.toBeUndefined();
-    await expect(createGitTag(cwd, "pkg@1.0.1")).resolves.toBeUndefined();
-    await expect(gitTagExists(cwd, "pkg@1.0.1")).resolves.toBe(true);
   });
 
   test("creates git tags for successful publish results", async () => {
@@ -65,6 +61,8 @@ describe("git utils", () => {
       ],
     });
 
+    if (result.state !== "created") throw new Error("must be created");
+
     exec.mockImplementation((_command, args = []) => {
       if (args.at(0) === "rev-parse") {
         return commandResult({
@@ -80,7 +78,6 @@ describe("git utils", () => {
     });
 
     const next = await plugin.afterPublish?.call(pluginContext(), result);
-
     expect(next).toBe(result);
     expect(result.packages.map((pkg) => pkg.gitTag)).toEqual([
       "@acme/core@1.0.1",
@@ -143,6 +140,68 @@ describe("git utils", () => {
     );
 
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  test("pushes newly created tags in CI", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const plugin = git();
+      exec.mockImplementation((_command, args = []) => {
+        if (args.at(0) === "rev-parse") {
+          return commandResult({
+            exitCode: 1,
+          });
+        }
+
+        if (args.at(0) === "tag" || args.at(0) === "push") {
+          return commandResult();
+        }
+
+        throw new Error(`Unexpected command: ${args.join(" ")}`);
+      });
+
+      await plugin.afterPublish?.call(pluginContext(), publishResult());
+
+      expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
+        [
+          {
+            "args": [
+              "rev-parse",
+              "-q",
+              "--verify",
+              "refs/tags/@acme/core@1.0.1",
+            ],
+            "command": "git",
+            "cwd": "/repo/packages/core",
+            "throwOnError": undefined,
+          },
+          {
+            "args": [
+              "tag",
+              "@acme/core@1.0.1",
+            ],
+            "command": "git",
+            "cwd": "/repo/packages/core",
+            "throwOnError": true,
+          },
+          {
+            "args": [
+              "push",
+              "origin",
+              "@acme/core@1.0.1",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": true,
+          },
+        ]
+      `);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
   });
 
   test("marks the package failed when git tag creation fails", async () => {
@@ -231,15 +290,13 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
       changelogs: {},
       packages: {},
     },
-    state: "success",
+    state: "created",
     packages: [packageResult()],
     ...overrides,
   };
 }
 
-function packageResult(
-  overrides: Partial<PublishResult["packages"][number]> = {},
-): PublishResult["packages"][number] {
+function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePublishResult {
   const name = overrides.name ?? "@acme/core";
   return {
     id: `test:${name}`,

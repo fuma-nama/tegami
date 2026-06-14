@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createChangelog } from "./changelog/create";
 import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
-import { createTegamiContext } from "./context";
+import { createTegamiContext, TegamiContext } from "./context";
 import { DraftPlan, createDraftPlan } from "./draft";
 import { readChangelogEntries } from "./changelog/parse";
 import { publishFromPlan } from "./publish";
@@ -25,22 +25,36 @@ export type { PackageGraph, WorkspacePackage } from "./workspace";
 
 export interface Tegami {
   /** Create pending changelog files from git commit history. */
-  createChangelog(options?: CreateChangelogOptions): Promise<CreatedChangelog[]>;
+  generateChangelog(options?: CreateChangelogOptions): Promise<CreatedChangelog[]>;
   /** Build an editable draft from pending changelog files. */
   draft(): Promise<DraftPlan>;
-  /** Discover workspace packages and their dependency relationships. */
-  graph(): Promise<PackageGraph>;
   /** Publish the current publish plan. */
   publish(options?: PublishOptions): Promise<PublishResult>;
+
+  /** Internal APIs, do not use it unless you know what you are doing */
+  _internal: {
+    context(): Promise<TegamiContext>;
+    /** Discover workspace packages and their dependency relationships. */
+    graph(): Promise<PackageGraph>;
+    options: TegamiOptions;
+  };
 }
 
 /** Create a Tegami project handle. */
 export function tegami(options: TegamiOptions = {}): Tegami {
   return {
-    async createChangelog(createOptions = {}) {
+    async generateChangelog(createOptions = {}) {
       return createChangelog(await createTegamiContext(options), createOptions);
     },
-
+    _internal: {
+      options,
+      context() {
+        return createTegamiContext(options);
+      },
+      async graph() {
+        return (await createTegamiContext(options)).graph;
+      },
+    },
     async draft() {
       const context = await createTegamiContext(options);
       const changelogs = await readChangelogEntries(context.cwd, context.changelogDir);
@@ -53,12 +67,15 @@ export function tegami(options: TegamiOptions = {}): Tegami {
       return plan;
     },
 
-    async graph() {
-      return (await createTegamiContext(options)).graph;
-    },
-
     async publish(publishOptions = {}) {
       const context = await createTegamiContext(options);
+      const changelogs = await readChangelogEntries(context.cwd, context.changelogDir);
+
+      // it implies a new versioning cycle has started
+      if (changelogs.length > 0) {
+        return { state: "skipped", planPath: context.planPath };
+      }
+
       const parsed = await readFile(context.planPath, "utf8")
         .then((content) => planStoreSchema.decode(content))
         .catch((error: unknown) => {
@@ -66,9 +83,7 @@ export function tegami(options: TegamiOptions = {}): Tegami {
           throw error;
         });
 
-      if (parsed === undefined) {
-        throw new Error(`No publish plan found at ${context.planPath}.`);
-      }
+      if (parsed === undefined) return { state: "skipped", planPath: context.planPath };
 
       let result = await publishFromPlan(context, parsed, publishOptions);
 

@@ -29,7 +29,7 @@ describe("cargo packages", () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const graph = await tegami({ cwd }).graph();
+    const graph = await tegami({ cwd })._internal.graph();
     const context = await createTegamiContext({ cwd });
 
     const packages = graph.getPackages().map((pkg) => ({
@@ -129,7 +129,7 @@ describe("cargo packages", () => {
     const result = await tegami({ cwd, npmClient: "npm" }).publish();
 
     expect(result).toMatchObject({
-      state: "success",
+      state: "created",
       packages: [
         {
           name: "@acme/js",

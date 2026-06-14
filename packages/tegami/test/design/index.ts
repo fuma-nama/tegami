@@ -51,7 +51,7 @@ export async function publish() {
   console.log(result);
 
   // for example, to auto-configure trusted publishing
-  if (result.state !== "success") return;
+  if (result.state !== "created") return;
 
   for (const pkg of result.packages) {
     // success | failed
@@ -65,7 +65,7 @@ export async function publish() {
 export async function withGraph() {
   // internal dependency graph of Tegami, used for handling dependencies
   // useful for advanced customization or for plugin authors
-  const graph = await paper.graph();
+  const graph = await paper._internal.graph();
 
   graph.get("npm:package-name");
 }

@@ -5,7 +5,7 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { createTegamiContext, TegamiContext } from "../src/context";
-import type { PublishOptions, PublishResult } from "../src/publish";
+import type { PackagePublishResult, PublishOptions, PublishResult } from "../src/publish";
 import { publishFromPlan } from "../src/publish";
 import { planStoreSchema } from "../src/schemas";
 
@@ -30,18 +30,19 @@ describe("publish plans", () => {
       registry: "https://registry.example.test",
     });
 
-    const result = await publishFixture(
-      planPath,
-      await createTegamiContext({
-        cwd,
+    const result = createdResult(
+      await publishFixture(
         planPath,
-      }),
-      {
-        dryRun: true,
-      },
+        await createTegamiContext({
+          cwd,
+          planPath,
+        }),
+        {
+          dryRun: true,
+        },
+      ),
     );
 
-    expect(result.state).toBe("success");
     expect(result.packages).toEqual([
       expect.objectContaining({
         name: "@acme/core",
@@ -58,19 +59,20 @@ describe("publish plans", () => {
 
     exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
 
-    const result = await publishFixture(
-      planPath,
-      await createTegamiContext({
-        cwd,
+    const result = createdResult(
+      await publishFixture(
         planPath,
-        npmClient: "npm",
-      }),
-      {
-        dryRun: false,
-      },
+        await createTegamiContext({
+          cwd,
+          planPath,
+          npmClient: "npm",
+        }),
+        {
+          dryRun: false,
+        },
+      ),
     );
 
-    expect(result.state).toBe("success");
     expect(result.packages).toEqual([
       expect.objectContaining({
         name: "@acme/core",
@@ -129,13 +131,15 @@ describe("publish plans", () => {
     plan.packages["npm:@acme/core"]!.changelogIds = ["change-1"];
     await writeJson(planPath, plan);
 
-    const result = await publishFixture(
-      planPath,
-      await createTegamiContext({
-        cwd,
+    const result = createdResult(
+      await publishFixture(
         planPath,
-      }),
-      { dryRun: true },
+        await createTegamiContext({
+          cwd,
+          planPath,
+        }),
+        { dryRun: true },
+      ),
     );
 
     expect(result.packages[0]?.changelogs.map(normalizeChangelog)).toMatchInlineSnapshot(`
@@ -187,13 +191,14 @@ describe("publish plans", () => {
     );
 
     expect(result.state).toBe("failed");
-    expect(result.packages).toContainEqual(
-      expect.objectContaining({
-        name: "@acme/ui",
-        state: "failed",
-        error: "publish failed",
-      }),
-    );
+    if (result.state === "failed")
+      expect(result.packages).toContainEqual(
+        expect.objectContaining({
+          name: "@acme/ui",
+          state: "failed",
+          error: "publish failed",
+        }),
+      );
     expect(exec.mock.calls.every(([, args]) => args?.at(0) !== "tag")).toBe(true);
   });
 
@@ -215,19 +220,20 @@ describe("publish plans", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const result = await publishFixture(
-      planPath,
-      await createTegamiContext({
-        cwd,
+    const result = createdResult(
+      await publishFixture(
         planPath,
-        npmClient: "pnpm",
-      }),
-      {
-        dryRun: false,
-      },
+        await createTegamiContext({
+          cwd,
+          planPath,
+          npmClient: "pnpm",
+        }),
+        {
+          dryRun: false,
+        },
+      ),
     );
 
-    expect(result.state).toBe("success");
     expect(result.packages).toEqual([
       expect.objectContaining({
         name: "@acme/core",
@@ -254,11 +260,67 @@ describe("publish plans", () => {
     await expect(readFile(planPath, "utf8")).resolves.toContain("@acme/core");
   });
 
-  test("throws from root publish when no publish plan exists", async () => {
+  test("skips publish when pending changelog entries exist", async () => {
+    const { cwd, planPath } = await createPublishFixture();
+
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["@acme/core"]
+---
+
+## Pending change
+
+Not versioned yet.
+`,
+    );
+
+    await expect(tegami({ cwd, planPath }).publish()).resolves.toEqual({
+      state: "skipped",
+      planPath,
+    });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  test("skips publish when no publish plan exists", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-publish-"));
     tempDirs.push(cwd);
 
-    await expect(tegami({ cwd }).publish()).rejects.toThrow(/No publish plan found/);
+    await expect(tegami({ cwd }).publish()).resolves.toEqual({
+      state: "skipped",
+      planPath: join(cwd, ".tegami/publish-plan.json"),
+    });
+  });
+
+  test("skips publish when the plan has no publishable packages", async () => {
+    const { cwd, planPath } = await createPublishFixture();
+
+    await writeJson(planPath, {
+      id: "tegami-test",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      changelogs: {},
+      packages: {
+        "npm:@acme/core": {
+          type: "patch",
+          changelogIds: [],
+          distTag: "latest",
+          publish: false,
+        },
+      },
+    });
+
+    const result = await publishFixture(
+      planPath,
+      await createTegamiContext({
+        cwd,
+        planPath,
+      }),
+    );
+
+    expect(result).toEqual({
+      state: "skipped",
+      planPath,
+    });
   });
 });
 
@@ -395,9 +457,13 @@ function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x
   return execResult(overrides) as unknown as ReturnType<typeof x>;
 }
 
-function normalizeChangelog(
-  changelog: NonNullable<PublishResult["packages"][number]["changelogs"]>[number],
-) {
+function createdResult(result: PublishResult) {
+  expect(result.state).toBe("created");
+  if (result.state !== "created") throw new Error(`expected created, got ${result.state}`);
+  return result;
+}
+
+function normalizeChangelog(changelog: PackagePublishResult["changelogs"][number]) {
   return {
     ...changelog,
     packages: Array.from(changelog.packages),
