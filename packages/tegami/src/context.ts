@@ -11,13 +11,14 @@ export interface TegamiContext {
   options: TegamiOptions;
   plugins: TegamiPlugin[];
   graph: PackageGraph;
+  /** error if doesn't exist */
   getRegistryClient(pkgOrId: WorkspacePackage | string): RegistryClient;
 }
 
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const graph = new PackageGraph();
-  const registryClients: RegistryClient[] = [];
+  const registryClients = new Map<string, RegistryClient>();
   const ctx: TegamiContext = {
     cwd,
     changelogDir: options.changelogDir ?? ".tegami",
@@ -26,10 +27,19 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
     plugins: resolvePlugins([npm(options.npmClient), cargo(), ...(options.plugins ?? [])]),
     graph,
     getRegistryClient(pkgOrId) {
-      const client =
-        typeof pkgOrId === "string"
-          ? registryClients.find((client) => client.id === pkgOrId)
-          : registryClients.find((client) => client.supports?.(pkgOrId) ?? false);
+      let client: RegistryClient | undefined;
+
+      if (typeof pkgOrId === "string") {
+        client = registryClients.get(pkgOrId);
+      } else {
+        for (const item of registryClients.values()) {
+          if (item.supports && item.supports(pkgOrId)) {
+            client = item;
+            break;
+          }
+        }
+      }
+
       if (!client) {
         const id = typeof pkgOrId === "string" ? pkgOrId : pkgOrId.manager;
         throw new Error(`No registry client is available for ${id}.`);
@@ -48,9 +58,12 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
   }
 
   for (const plugin of ctx.plugins) {
-    const client = await plugin.createRegistryClient?.call(ctx);
-    if (Array.isArray(client)) registryClients.push(...client);
-    else if (client) registryClients.push(client);
+    const clients = await plugin.createRegistryClient?.call(ctx);
+    if (!clients) continue;
+
+    for (const client of Array.isArray(clients) ? clients : [clients]) {
+      registryClients.set(client.id, client);
+    }
   }
 
   return ctx;
