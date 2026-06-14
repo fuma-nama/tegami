@@ -34,16 +34,16 @@ jobs:
             echo "has_changelogs=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Setup pnpm
+        if: steps.changelogs.outputs.has_changelogs == 'true'
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node
         if: steps.changelogs.outputs.has_changelogs == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
-
-      - name: Enable pnpm
-        if: steps.changelogs.outputs.has_changelogs == 'true'
-        run: corepack enable
 
       - name: Install dependencies
         if: steps.changelogs.outputs.has_changelogs == 'true'
