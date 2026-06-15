@@ -16,7 +16,7 @@ export interface PackagePlan {
 }
 
 export class DraftPlan {
-  #created = false;
+  #applied = false;
 
   constructor(
     // id -> changelog
@@ -63,12 +63,12 @@ export class DraftPlan {
     return this.changelogs.delete(id);
   }
 
-  /** Write the publish plan, update package versions, and consume changelog files. */
-  async createPublishPlan(): Promise<void> {
+  /** Apply the publish plan: update package versions, write the plan file, and consume changelog files. */
+  async applyPlan(): Promise<void> {
     this.assertEditable();
     await this.assertPublishPlanFinished();
 
-    this.#created = true;
+    this.#applied = true;
 
     await this.applyVersionChanges();
 
@@ -97,7 +97,7 @@ export class DraftPlan {
   }
 
   editable() {
-    return !this.#created;
+    return !this.#applied;
   }
 
   private async assertPublishPlanFinished(): Promise<void> {
@@ -110,7 +110,7 @@ export class DraftPlan {
     const status = await publishPlanStatus(this.context, parsed.data);
     if (status.state === "success") return;
 
-    const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before creating a new plan.`;
+    const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before applying a new plan.`;
     throw new Error(status.error ? `${message}\n${status.error}` : message);
   }
 
@@ -158,8 +158,8 @@ export class DraftPlan {
   }
 
   private assertEditable(): void {
-    if (this.#created) {
-      throw new Error("This draft has already created a publish plan.");
+    if (this.#applied) {
+      throw new Error("This draft has already applied a publish plan.");
     }
   }
 
@@ -187,9 +187,9 @@ export class DraftPlan {
     await writeFile(path, `${generated.trim()}\n\n${existing}`.trimEnd() + "\n");
   }
 
-  /** {@link createPublishPlan} but for `await using` syntax */
+  /** {@link applyPlan} but for `await using` syntax */
   async [Symbol.asyncDispose]() {
-    return this.createPublishPlan();
+    return this.applyPlan();
   }
 }
 
@@ -268,7 +268,7 @@ export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiCon
 function createPackagePlan(
   pkg: WorkspacePackage,
   entries: ChangelogEntry[],
-  context: TegamiContext,
+  _context: TegamiContext,
 ): PackagePlan {
   const packageOptions = pkg.getPackageOptions();
   let type: BumpType = "patch";

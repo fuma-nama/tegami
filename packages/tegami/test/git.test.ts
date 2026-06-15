@@ -228,7 +228,7 @@ describe("git utils", () => {
             ],
             "command": "git",
             "cwd": "/repo",
-            "throwOnError": true,
+            "throwOnError": undefined,
           },
         ]
       `);

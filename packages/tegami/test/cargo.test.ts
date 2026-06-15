@@ -67,7 +67,7 @@ describe("cargo packages", () => {
     tempDirs.push(cwd);
 
     const draft = await tegami({ cwd }).draft();
-    await draft.createPublishPlan();
+    await draft.applyPlan();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/js/package.json"), "utf8"));
     const core = await readCargo(join(cwd, "crates/core"));
@@ -85,7 +85,7 @@ describe("cargo packages", () => {
     tempDirs.push(cwd);
 
     const draft = await tegami({ cwd }).draft();
-    await draft.createPublishPlan();
+    await draft.applyPlan();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/pkg-a/package.json"), "utf8"));
     const crate = await readCargo(join(cwd, "crates/pkg-a"));
@@ -102,7 +102,7 @@ describe("cargo packages", () => {
     tempDirs.push(cwd);
     await tegami({ cwd })
       .draft()
-      .then((draft) => draft.createPublishPlan());
+      .then((draft) => draft.applyPlan());
 
     vi.stubGlobal(
       "fetch",

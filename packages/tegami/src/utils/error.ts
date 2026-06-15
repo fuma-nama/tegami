@@ -10,11 +10,11 @@ type ExecResult = Awaited<ReturnType<typeof x>>;
 export function execFailure(
   context: string,
   result: Pick<ExecResult, "exitCode" | "stdout" | "stderr">,
-): string {
+): Error {
   const lines = [context, `(exit ${result.exitCode})`];
   const output = commandOutput(result);
   if (output) lines.push(output);
-  return lines.join("\n");
+  return new Error(lines.join("\n"));
 }
 
 export function isNodeError(error: unknown): error is NodeJS.ErrnoException {

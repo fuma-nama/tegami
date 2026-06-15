@@ -284,6 +284,8 @@ describe("github version pull request", () => {
 
     try {
       const plugin = githubPlugin({ repo: "acme/repo" });
+      const context = publishContext();
+      const draft = versionDraft(context);
 
       exec.mockImplementation((command, args = []) => {
         if (command === "git" && args[0] === "status") {
@@ -305,7 +307,7 @@ describe("github version pull request", () => {
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
-      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+      await runVersionPullRequest(plugin, context, draft);
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
@@ -390,6 +392,8 @@ describe("github version pull request", () => {
 
     try {
       const plugin = githubPlugin({ repo: "acme/repo" });
+      const context = publishContext();
+      const draft = versionDraft(context);
 
       exec.mockImplementation((command, args = []) => {
         if (command === "git" && args[0] === "status") {
@@ -411,7 +415,7 @@ describe("github version pull request", () => {
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
-      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+      await runVersionPullRequest(plugin, context, draft);
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
@@ -521,7 +525,8 @@ describe("github version pull request", () => {
 
     try {
       const plugin = githubPlugin();
-      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+      const context = publishContext();
+      await runVersionPullRequest(plugin, context, versionDraft(context));
       expect(exec).not.toHaveBeenCalled();
     } finally {
       if (previousCi === undefined) delete process.env.CI;
@@ -537,9 +542,10 @@ describe("github version pull request", () => {
       const plugin = githubPlugin({
         repo: "acme/repo",
         cli: {
-          createVersionPR: true,
+          versionPr: true,
         },
       });
+      const context = publishContext();
 
       exec.mockImplementation((command, args = []) => {
         if (command === "git" && args[0] === "status") {
@@ -553,7 +559,7 @@ describe("github version pull request", () => {
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
-      await plugin.cli?.afterVersion?.call(publishContext(), versionDraft());
+      await runVersionPullRequest(plugin, context, versionDraft(context));
 
       expect(exec).toHaveBeenCalled();
     } finally {
@@ -590,10 +596,17 @@ class TestPackage extends WorkspacePackage {
   readonly name = "@acme/core";
   readonly path = "/repo/packages/core";
   readonly manager = "test";
-  readonly version = "1.0.0";
   readonly publish = true;
 
-  setVersion(): void {}
+  #version = "1.0.0";
+
+  get version() {
+    return this.#version;
+  }
+
+  setVersion(version: string): void {
+    this.#version = version;
+  }
 
   async updateDependency(): Promise<void> {}
 
@@ -626,6 +639,19 @@ function versionDraft(context = publishContext()): DraftPlan {
   ]);
 
   return new DraftPlan(changelogs, packages, context);
+}
+
+async function runVersionPullRequest(
+  plugin: TegamiPlugin,
+  context: ReturnType<typeof publishContext>,
+  draft: DraftPlan,
+) {
+  const pkg = context.graph.get("test:@acme/core");
+  if (!pkg) throw new Error("missing package");
+
+  await plugin.cli?.publishPlanCreated?.call(context, draft);
+  pkg.setVersion("1.1.0");
+  await plugin.cli?.publishPlanApplied?.call(context, draft);
 }
 
 function registryClient() {

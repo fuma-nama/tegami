@@ -31,7 +31,7 @@ export interface TegamiOptions<Groups extends string = string> {
   changelogDir?: string;
   /** Path to the publish plan file. */
   planPath?: string;
-  /** Changelog generator used when creating a publish plan. */
+  /** Changelog generator used when applying a publish plan. */
   generator?: LogGenerator;
   /** Per-package release and publish options keyed by package name. */
   packages?: Record<string, PackageOptions<NoInfer<Groups>>>;
@@ -90,10 +90,10 @@ export interface TegamiPlugin {
     init?(this: TegamiContext): Awaitable<void>;
 
     /** Called after `tegami version` returns a draft plan. */
-    afterVersion?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
-
-    /** Called after `tegami version` creates a publish plan. */
     publishPlanCreated?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
+
+    /** Called after `tegami version` applies a publish plan. */
+    publishPlanApplied?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
   };
 
   /**

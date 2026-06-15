@@ -47,9 +47,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
         ] as const) {
           const result = await x("git", [...args], gitOptions);
           if (result.exitCode !== 0) {
-            throw new Error(
-              execFailure("Failed to configure git user for GitHub Actions.", result),
-            );
+            throw execFailure("Failed to configure git user for GitHub Actions.", result);
           }
         }
       },
@@ -75,19 +73,28 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
           Array.from(pendingTags).map(async (tag) => {
             if (await gitTagExists(cwd, tag)) return;
 
-            const out = await x("git", ["tag", tag], {
+            const gitOut = await x("git", ["tag", tag], {
               nodeOptions: { cwd },
             });
 
-            if (out.exitCode !== 0)
-              throw execFailure(`Failed to create Git tag "${tag}" for release`, out);
+            if (gitOut.exitCode !== 0)
+              throw execFailure(`Failed to create Git tag "${tag}" for release`, gitOut);
 
             createdTags.push(tag);
           }),
         );
 
         if (pushTags && createdTags.length > 0) {
-          await pushGitTags(cwd, createdTags);
+          const gitOut = await x("git", ["push", "origin", ...createdTags], {
+            nodeOptions: { cwd },
+          });
+
+          if (gitOut.exitCode !== 0) {
+            throw execFailure(
+              `Failed to push Git tags to origin: ${createdTags.join(", ")}`,
+              gitOut,
+            );
+          }
         }
       } catch (error) {
         return {
@@ -110,15 +117,4 @@ async function gitTagExists(cwd: string, tag: string): Promise<boolean> {
   });
 
   return result.exitCode === 0;
-}
-
-async function pushGitTags(cwd: string, tags: string[]): Promise<void> {
-  if (tags.length === 0) return;
-
-  await x("git", ["push", "origin", ...tags], {
-    nodeOptions: {
-      cwd,
-    },
-    throwOnError: true,
-  });
 }

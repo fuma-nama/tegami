@@ -19,15 +19,26 @@ interface GithubRelease {
   prerelease?: boolean;
 }
 
-interface VersionPullRequestOptions {
-  /** Pull request branch. */
-  branch?: string;
-  /** Pull request base branch. */
-  base?: string;
+interface VersionPullRequest {
   /** Pull request title. */
   title?: string;
   /** Pull request body. */
   body?: string;
+}
+
+interface VersionPullRequestOptions {
+  /**
+   * Pull request branch.
+   *
+   * @default "tegami/version-packages"
+   */
+  branch?: string;
+  /**
+   * Pull request base branch.
+   *
+   * @default "main"
+   */
+  base?: string;
 }
 
 /** Options for creating GitHub releases after a successful publish. */
@@ -39,6 +50,8 @@ export interface GitHubPluginOptions extends GitPluginOptions {
   onCreateRelease?: (result: PackagePublishResult) => Awaitable<GithubRelease | false>;
   /** Override release details when multiple packages share a git tag, return `false` to skip. */
   onCreateGroupedRelease?: (packages: PackagePublishResult[]) => Awaitable<GithubRelease | false>;
+  /** Override details for "Version Packages" PR. */
+  onCreateVersionPullRequest?: (publishPlan: DraftPlan) => Awaitable<VersionPullRequest | false>;
 
   cli?: {
     /**
@@ -46,37 +59,19 @@ export interface GitHubPluginOptions extends GitPluginOptions {
      * Defaults to enabled in CI and disabled locally.
      * Set to `true` to always create the pull request.
      */
-    createVersionPR?: boolean | VersionPullRequestOptions;
+    versionPr?: boolean | VersionPullRequestOptions;
   };
 }
 
 /** Create GitHub releases for successfully published packages after the whole plan succeeds. */
 export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
-  async function createGithubRelease(packages: PackagePublishResult[]): Promise<void> {
-    const primary = packages[0];
-    if (!primary?.gitTag) return;
-
-    const grouped = packages.length > 1;
-    const release = grouped
-      ? ((await options.onCreateGroupedRelease?.(packages)) ?? {})
-      : ((await options.onCreateRelease?.(primary)) ?? {});
-    if (release === false) return;
-
-    const prerelease =
-      release.prerelease ??
-      (grouped
-        ? packages.some((pkg) => getPrerelease(pkg.version) !== null)
-        : getPrerelease(primary.version) !== null);
-
-    const args: string[] = [
-      "release",
-      "create",
-      primary.gitTag,
-      "--title",
-      release.title ?? (grouped ? defaultGroupedTitle(packages) : defaultTitle(primary)),
-      "--notes",
-      release.notes ?? (grouped ? defaultGroupedNotes(packages) : defaultNotes(primary)),
-    ];
+  async function runGithubRelease(
+    gitTag: string,
+    title: string,
+    notes: string,
+    prerelease: boolean,
+  ): Promise<void> {
+    const args: string[] = ["release", "create", gitTag, "--title", title, "--notes", notes];
 
     if (options.repo) {
       args.push("--repo", options.repo);
@@ -88,14 +83,41 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
     const result = await x("gh", args);
     if (result.exitCode !== 0) {
-      throw new Error(
-        execFailure(`Failed to create GitHub release for ${primary.gitTag}.`, result),
-      );
+      throw execFailure(`Failed to create GitHub release for ${gitTag}.`, result);
     }
   }
 
+  async function createRelease(pkg: PackagePublishResult): Promise<void> {
+    if (!pkg.gitTag) return;
+
+    const release = (await options.onCreateRelease?.(pkg)) ?? {};
+    if (release === false) return;
+
+    await runGithubRelease(
+      pkg.gitTag,
+      release.title ?? defaultTitle(pkg),
+      release.notes ?? defaultNotes(pkg),
+      release.prerelease ?? getPrerelease(pkg.version) !== null,
+    );
+  }
+
+  async function createGroupedRelease(packages: PackagePublishResult[]): Promise<void> {
+    const primary = packages[0];
+    if (!primary?.gitTag) return;
+
+    const release = (await options.onCreateGroupedRelease?.(packages)) ?? {};
+    if (release === false) return;
+
+    await runGithubRelease(
+      primary.gitTag,
+      release.title ?? defaultGroupedTitle(packages),
+      release.notes ?? defaultGroupedNotes(packages),
+      release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
+    );
+  }
+
   function resolvePROptions(): [false] | [true, VersionPullRequestOptions] {
-    const setting = options.cli?.createVersionPR ?? isCI();
+    const setting = options.cli?.versionPr ?? isCI();
 
     if (setting === false) {
       return [false];
@@ -104,6 +126,44 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     return [true, typeof setting === "object" ? setting : {}];
   }
 
+  function defaultVersionPRBody(draft: DraftPlan, context: TegamiContext): string {
+    const packageLines: string[] = [];
+
+    for (const id of draft.getPackageIds()) {
+      const packagePlan = draft.getPackage(id);
+      if (!packagePlan) continue;
+
+      const pkg = context.graph.get(id);
+      if (!pkg) continue;
+
+      const publishTxt = packagePlan.publish ? "" : " (no publish)";
+      packageLines.push(
+        `- ${formatVersionBump(
+          pkg.name,
+          cliOriginalPackageVersions.get(pkg.id) ?? pkg.version,
+          pkg.version,
+          packagePlan.distTag,
+        )}${publishTxt}`,
+      );
+    }
+
+    const changelogLines = draft
+      .getChangelogIds()
+      .map((id) => draft.getChangelog(id))
+      .filter((entry) => entry !== undefined)
+      .map((entry) => `- ${entry.title}`);
+    const sections = ["## Summary", ...packageLines];
+
+    if (changelogLines.length > 0) {
+      sections.push("", "## Changelogs", ...changelogLines);
+    }
+
+    sections.push("", "Merge this PR to publish the versioned packages.");
+
+    return sections.join("\n");
+  }
+
+  const cliOriginalPackageVersions = new Map<string, string>();
   return [
     git(options),
     {
@@ -127,50 +187,51 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             { nodeOptions: { cwd: this.cwd } },
           );
           if (result.exitCode !== 0) {
-            throw new Error(
-              execFailure("Failed to configure git remote for GitHub Actions.", result),
-            );
+            throw execFailure("Failed to configure git remote for GitHub Actions.", result);
           }
         },
-        async afterVersion(draft) {
+        publishPlanCreated() {
+          for (const pkg of this.graph.getPackages()) {
+            cliOriginalPackageVersions.set(pkg.id, pkg.version);
+          }
+        },
+        async publishPlanApplied(draft) {
           const { cwd } = this;
           const [enabled, config] = resolvePROptions();
           if (!enabled || !(await hasGitChanges(cwd))) return;
 
-          const {
-            branch = "tegami/version-packages",
-            base = "main",
-            title = "Version Packages",
-            body = defaultVersionPRBody(draft, this),
-          } = config;
+          const { branch = "tegami/version-packages", base = "main" } = config;
+
+          const basePR = await options.onCreateVersionPullRequest?.(draft);
+          if (basePR === false) return;
+          const pr: Required<VersionPullRequest> = {
+            title: basePR?.title ?? "Version Packages",
+            body: basePR?.body ?? defaultVersionPRBody(draft, this),
+          };
 
           const gitOptions = { nodeOptions: { cwd } };
 
           let result = await x("git", ["checkout", "-B", branch], gitOptions);
           if (result.exitCode !== 0) {
-            throw new Error(
-              execFailure("Failed to create the version pull request branch.", result),
-            );
+            throw execFailure("Failed to create the version pull request branch.", result);
           }
 
           result = await x("git", ["add", "-A"], gitOptions);
           if (result.exitCode !== 0) {
-            throw new Error(execFailure("Failed to stage version changes.", result));
+            throw execFailure("Failed to stage version changes.", result);
           }
 
-          result = await x("git", ["commit", "-m", title], gitOptions);
+          result = await x("git", ["commit", "-m", pr.title], gitOptions);
           if (result.exitCode !== 0) {
-            throw new Error(execFailure("Failed to commit version changes.", result));
+            throw execFailure("Failed to commit version changes.", result);
           }
 
           const pushArgs = ["push", "--force", "-u", "origin", branch];
           result = await x("git", pushArgs, gitOptions);
           if (result.exitCode !== 0) {
-            throw new Error(
-              execFailure(
-                "Failed to push the version branch to origin. Ensure `origin` is configured and you have push access.",
-                result,
-              ),
+            throw execFailure(
+              "Failed to push the version branch to origin. Ensure `origin` is configured and you have push access.",
+              result,
             );
           }
 
@@ -180,9 +241,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             "pr",
             "create",
             "--title",
-            title,
+            pr.title,
             "--body",
-            body,
+            pr.body,
             "--head",
             branch,
             "--base",
@@ -192,7 +253,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
           const prResult = await x("gh", args);
           if (prResult.exitCode !== 0) {
-            throw new Error(execFailure("Failed to create the version pull request.", prResult));
+            throw execFailure("Failed to create the version pull request.", prResult);
           }
         },
       },
@@ -200,7 +261,11 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         if (result.state !== "created") return;
 
         for (const packages of groupPackagesByGitTag(result.packages).values()) {
-          await createGithubRelease(packages);
+          if (packages.length > 1) {
+            await createGroupedRelease(packages);
+          } else {
+            await createRelease(packages[0]!);
+          }
         }
       },
     },
@@ -223,47 +288,10 @@ async function hasOpenPullRequest(branch: string, repo: string | undefined): Pro
 
   const result = await x("gh", args);
   if (result.exitCode !== 0) {
-    throw new Error(execFailure("Failed to check for an existing version pull request.", result));
+    throw execFailure("Failed to check for an existing version pull request.", result);
   }
 
   return result.stdout.trim() !== "[]";
-}
-
-function defaultVersionPRBody(draft: DraftPlan, context: TegamiContext): string {
-  const packageLines: string[] = [];
-
-  for (const id of draft.getPackageIds()) {
-    const packagePlan = draft.getPackage(id);
-    if (!packagePlan) continue;
-
-    const pkg = context.graph.get(id);
-    if (!pkg) continue;
-
-    const publishTxt = packagePlan.publish ? "" : " (no publish)";
-    packageLines.push(
-      `- ${formatVersionBump(
-        pkg.name,
-        pkg.version,
-        bumpVersion(pkg.version, packagePlan.type, resolvePrerelease(pkg, context)),
-        packagePlan.distTag,
-      )}${publishTxt}`,
-    );
-  }
-
-  const changelogLines = draft
-    .getChangelogIds()
-    .map((id) => draft.getChangelog(id))
-    .filter((entry) => entry !== undefined)
-    .map((entry) => `- ${entry.title}`);
-  const sections = ["## Summary", ...packageLines];
-
-  if (changelogLines.length > 0) {
-    sections.push("", "## Changelogs", ...changelogLines);
-  }
-
-  sections.push("", "Merge this PR to publish the versioned packages.");
-
-  return sections.join("\n");
 }
 
 function groupPackagesByGitTag(
@@ -310,17 +338,22 @@ function defaultNotes(pkg: PackagePublishResult): string {
 }
 
 function defaultGroupedNotes(packages: PackagePublishResult[]): string {
-  const entries = uniqueChangelogs(packages);
+  const changelogs = new Map<string, ChangelogEntry>();
+
+  for (const pkg of packages) {
+    for (const entry of pkg.changelogs) changelogs.set(entry.id, entry);
+  }
+
   const sections = [
     packages
       .map((pkg) => `- ${formatPackageVersion(pkg.name, pkg.version, pkg.distTag)}`)
       .join("\n"),
   ];
 
-  if (entries.length > 0) {
+  if (changelogs.size > 0) {
     sections.push(
       "",
-      entries
+      Array.from(changelogs.values())
         .map((entry) => [`### ${entry.title}`, entry.content].filter(Boolean).join("\n\n"))
         .join("\n\n"),
     );
@@ -329,14 +362,4 @@ function defaultGroupedNotes(packages: PackagePublishResult[]): string {
   }
 
   return sections.join("\n");
-}
-
-function uniqueChangelogs(packages: PackagePublishResult[]) {
-  const entries = new Map<string, ChangelogEntry>();
-
-  for (const pkg of packages) {
-    for (const entry of pkg.changelogs) entries.set(entry.id, entry);
-  }
-
-  return Array.from(entries.values());
 }

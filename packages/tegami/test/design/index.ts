@@ -33,10 +33,10 @@ export async function version() {
   }
 
   // update versions, generate .tegami/publish-plan, and delete all changelogs
-  // it refuses to create a new plan until the current one has finished publishing
-  await draft.createPublishPlan();
+  // it refuses to apply a new plan until the current one has finished publishing
+  await draft.applyPlan();
 
-  // plan will be freezed once created, no further `create()` calls allowed
+  // plan will be frozen once applied, no further apply calls allowed
 }
 
 export async function versionWithAutoDispose() {

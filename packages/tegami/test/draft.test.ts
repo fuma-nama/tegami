@@ -69,7 +69,7 @@ describe("draft publish plans", () => {
       }
     `);
 
-    await draft.createPublishPlan();
+    await draft.applyPlan();
     expect(await readFile(join(cwd, "packages/core/package.json"), "utf-8")).toMatchInlineSnapshot(`
       "{
         "name": "@acme/core",
@@ -184,7 +184,7 @@ describe("draft publish plans", () => {
       },
     }).draft();
 
-    await draft.createPublishPlan();
+    await draft.applyPlan();
 
     await expect(
       await readFile(join(cwd, "packages/core/CHANGELOG.md"), "utf8"),
@@ -216,7 +216,7 @@ describe("draft publish plans", () => {
       stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
     } as Awaited<ReturnType<typeof x>>);
 
-    await expect(draft.createPublishPlan()).rejects.toThrow(/Publish plan already exists/);
+    await expect(draft.applyPlan()).rejects.toThrow(/Publish plan already exists/);
     expect(await readJson<PackageManifest>(join(cwd, "packages/core/package.json"))).toMatchObject({
       version: "1.0.0",
     });

@@ -152,11 +152,9 @@ export class NpmRegistryClient implements RegistryClient {
       },
     });
     if (result.exitCode !== 0) {
-      throw new Error(
-        execFailure(
-          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-          result,
-        ),
+      throw execFailure(
+        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+        result,
       );
     }
   }

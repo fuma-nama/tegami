@@ -77,7 +77,7 @@ Useful release note.
       uiDistTag: "next",
     });
 
-    await draft.createPublishPlan();
+    await draft.applyPlan();
 
     expect(await readJson(join(cwd, "packages/core/package.json"))).toMatchObject({
       version: "1.1.0-alpha.0",
@@ -127,7 +127,7 @@ Breaking note.
       ui: "major",
     });
 
-    await draft.createPublishPlan();
+    await draft.applyPlan();
 
     expect(await readJson(join(cwd, "packages/core/package.json"))).toMatchObject({
       version: "2.0.0",

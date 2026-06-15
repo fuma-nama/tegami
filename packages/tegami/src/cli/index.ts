@@ -43,21 +43,21 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
 
   program
     .name("tegami")
-    .description("Create changelogs, version packages, and publish releases.")
+    .description("create changelogs")
     .action((commandOptions: ChangelogCommandOptions) =>
       runAction(tegami, () => createChangelogs(tegami, { ...commandOptions, cli: options })),
     );
 
   program
     .command("version")
-    .description("create a publish plan and update package versions")
+    .description("draft and apply a publish plan")
     .action((commandOptions: VersionCommandOptions) =>
       runAction(tegami, () => versionPackages(tegami, { ...commandOptions, cli: options })),
     );
 
   program
     .command("publish")
-    .description("publish packages from the current publish plan")
+    .description("publish packages from the applied publish plan")
     .option("--dry-run", "validate the publish plan without publishing packages")
     .action((commandOptions: PublishCommandOptions) =>
       runAction(tegami, () => publishPackages(tegami, { ...commandOptions, cli: options })),
@@ -177,8 +177,8 @@ async function versionPackages(
   }
 
   for (const plugin of context.plugins) {
-    await handlePluginError(plugin, "cli.afterVersion", () =>
-      plugin.cli?.afterVersion?.call(context, draft),
+    await handlePluginError(plugin, "cli.publishPlanCreated", () =>
+      plugin.cli?.publishPlanCreated?.call(context, draft),
     );
   }
 
@@ -203,21 +203,21 @@ async function versionPackages(
   s.start("Updating package versions");
 
   try {
-    await draft.createPublishPlan();
+    await draft.applyPlan();
   } catch (error) {
-    s.stop("Failed to create publish plan");
+    s.stop("Failed to apply publish plan");
     throw error;
   }
 
   s.stop("Package versions updated");
 
   for (const plugin of context.plugins) {
-    await handlePluginError(plugin, "cli.publishPlanCreated", () =>
-      plugin.cli?.publishPlanCreated?.call(context, draft),
+    await handlePluginError(plugin, "cli.publishPlanApplied", () =>
+      plugin.cli?.publishPlanApplied?.call(context, draft),
     );
   }
 
-  outro("Publish plan created.");
+  outro("Publish plan applied.");
 }
 
 async function publishPackages(
