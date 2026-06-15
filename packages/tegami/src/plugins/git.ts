@@ -1,6 +1,6 @@
 import { x } from "tinyexec";
 import type { TegamiPlugin } from "../types";
-import { execFailure } from "../utils/exec";
+import { execFailure } from "../utils/error";
 import { isCI } from "../utils/constants";
 
 export interface GitPluginOptions {

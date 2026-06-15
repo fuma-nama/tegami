@@ -18,8 +18,7 @@ import type {
   Awaitable,
   TegamiPlugin,
 } from "../types";
-import { isNodeError } from "../utils/error";
-import { execFailure } from "../utils/exec";
+import { execFailure, isNodeError } from "../utils/error";
 import { WorkspacePackage } from "../workspace";
 import { detect } from "package-manager-detector";
 

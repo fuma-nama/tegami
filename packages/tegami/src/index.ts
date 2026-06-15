@@ -3,7 +3,7 @@ import { createChangelog } from "./changelog/create";
 import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
 import { createTegamiContext, TegamiContext } from "./context";
 import { DraftPlan, createDraftPlan } from "./draft";
-import { readChangelogEntries } from "./changelog/parse";
+import { getChangelogFiles, readChangelogEntries } from "./changelog/parse";
 import { publishFromPlan } from "./publish";
 import type { PublishOptions, PublishResult } from "./publish";
 import { planStoreSchema } from "./schemas";
@@ -61,7 +61,7 @@ export function tegami(options: TegamiOptions = {}): Tegami {
     },
     async draft() {
       const context = await $context;
-      const changelogs = await readChangelogEntries(context.cwd, context.changelogDir);
+      const changelogs = await readChangelogEntries(context);
       let plan = createDraftPlan(changelogs, context);
 
       for (const plugin of context.plugins) {
@@ -73,7 +73,7 @@ export function tegami(options: TegamiOptions = {}): Tegami {
 
     async publish(publishOptions = {}) {
       const context = await $context;
-      const changelogs = await readChangelogEntries(context.cwd, context.changelogDir);
+      const changelogs = await getChangelogFiles(context);
 
       // it implies a new versioning cycle has started
       if (changelogs.length > 0) {

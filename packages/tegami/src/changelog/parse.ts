@@ -4,9 +4,9 @@ import type { Heading, Root, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { changelogFrontmatterSchema } from "../schemas";
-import { isNodeError } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
+import type { TegamiContext } from "../context";
 
 export interface ChangelogEntry {
   id: string;
@@ -19,29 +19,28 @@ export interface ChangelogEntry {
   content: string;
 }
 
-export async function readChangelogEntries(
-  cwd: string,
-  changelogDir: string,
-): Promise<ChangelogEntry[]> {
-  const directory = resolve(cwd, changelogDir);
-  const files = await readdir(directory).catch((error: unknown) => {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return [];
-    }
+export async function getChangelogFiles(context: TegamiContext): Promise<string[]> {
+  const { cwd, changelogDir } = context;
+  const dir = resolve(cwd, changelogDir);
+  const files = await readdir(dir).catch(() => []);
 
-    throw error;
-  });
-  const entries: ChangelogEntry[] = [];
+  return files.filter((file) => file.endsWith(".md"));
+}
 
-  for (const file of files.sort()) {
-    if (!file.endsWith(".md")) continue;
+export async function readChangelogEntries(context: TegamiContext): Promise<ChangelogEntry[]> {
+  const { cwd, changelogDir } = context;
+  const dir = resolve(cwd, changelogDir);
 
-    const filePath = join(directory, file);
-    const content = await readFile(filePath, "utf8");
-    entries.push(...parseChangelogFile(filePath, content));
-  }
+  const files = await getChangelogFiles(context);
+  const entries = await Promise.all(
+    files.map(async (file) => {
+      const filePath = join(dir, file);
+      const content = await readFile(filePath, "utf8");
+      return parseChangelogFile(filePath, content);
+    }),
+  );
 
-  return entries;
+  return entries.flat();
 }
 
 /** Parse one changelog markdown file into release entries. */

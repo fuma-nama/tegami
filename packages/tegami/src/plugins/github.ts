@@ -3,7 +3,7 @@ import type { TegamiContext } from "../context";
 import type { DraftPlan } from "../draft";
 import type { PackagePublishResult } from "../publish";
 import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure } from "../utils/exec";
+import { execFailure } from "../utils/error";
 import { formatPackageVersion, formatVersionBump, previousVersion } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
 import { isCI } from "../utils/constants";
