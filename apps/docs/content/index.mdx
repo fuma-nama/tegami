@@ -1,8 +1,68 @@
 ---
-title: My Page
-description: Hello World
+title: Tegami
+description: Initial prototypes & decisions
 ---
 
-# Overview
+# Entities
 
-This is my first document.
+## Package
+
+A workspace package in the repo/monorepo, such as a npm or cargo package.
+
+## Group
+
+A group contains multiple packages, a package can only belong to one group at a time.
+
+## Graph
+
+The package graph is a mutable storage for all packages & groups.
+
+Plugins resolve packages from file-system to write to the package graph.
+
+## Changelogs
+
+A markdown file describing the changes to different packages, Tegami generates the initial draft plan from changelogs.
+
+## Plugins
+
+Plugins can hook into all phases, such as package graph resolution and post-publish (e.g. create Git tags).
+
+Tegami relies on plugins to provide adapters (registry client) for different registries, such as npm.
+
+# 1. Draft Plan
+
+A detailed plan on what & how to update, it is mutable.
+
+It manages plans for all kind of entities:
+
+## Package Plan
+
+A package plan describes the operation to run on a package, such as bump, or add prerelease tag.
+
+## Group Plan
+
+A group plan describes group-specific operations, such as creating git tags.
+
+Note that package-specific configs will only be written once to package plan, not group plan.
+
+## Constraint
+
+Some operations are unique per package in a single version cycle. For example, bump operations won't repeat for same package.
+
+When there's major + minor on the same package, it will only result in a major bump (`1.0.0` -> `2.0.0`), instead of `2.1.0`.
+
+Note that version cycle can not intersect, only one version cycle can happen at a time.
+
+# 2. Publish Plan
+
+When a draft plan is applied, it updates changelogs, package versions, and creates a persisted `publish-plan` file (in the file-system).
+
+Once applied, it becomes an immutable publish plan that can no longer be applied.
+
+# 3. Publish
+
+Usually on CI, Tegami will read `publish-plan` and check if the publish plan needs to be executed.
+
+It publishes packages in the publish plan, using the current package versions in the file-system.
+
+By using `publish-plan`, it ensures even with CI failure, developers can fix their pipeline & code until publish plan is executed successfully.
