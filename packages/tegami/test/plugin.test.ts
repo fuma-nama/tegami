@@ -2,7 +2,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { tegami, type TegamiPlugin } from "../src";
+import { tegami } from "../src";
+import type { TegamiPlugin } from "../src/types";
 
 const tempDirs: string[] = [];
 
@@ -102,7 +103,7 @@ async function writePublishPlan(cwd: string): Promise<void> {
       "@acme/core": {
         type: "patch",
         changelogIds: changelog ? ["change.md:0"] : [],
-        distTag: "latest",
+        npm: { distTag: "latest" },
         publish: true,
       },
     },

@@ -65,13 +65,13 @@ Useful release note.
       },
       packages: {
         "@acme/core": { group: "acme" },
-        "@acme/ui": { group: "acme", distTag: "next" },
+        "@acme/ui": { group: "acme", npm: { distTag: "next" } },
       },
     }).draft();
 
     expect({
-      coreDistTag: draft.getPackage("npm:@acme/core")?.distTag,
-      uiDistTag: draft.getPackage("npm:@acme/ui")?.distTag,
+      coreDistTag: draft.getPackage("npm:@acme/core")?.npm?.distTag,
+      uiDistTag: draft.getPackage("npm:@acme/ui")?.npm?.distTag,
     }).toEqual({
       coreDistTag: undefined,
       uiDistTag: "next",
@@ -312,7 +312,7 @@ function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePu
     id: overrides.id ?? `test:${name}`,
     name,
     version: "1.0.1",
-    distTag: "latest",
+    npm: { distTag: "latest" },
     changelogs: [],
     state: "success",
     ...overrides,

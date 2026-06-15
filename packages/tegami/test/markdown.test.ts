@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, test } from "vitest";
+import { rm } from "node:fs/promises";
 import { parseChangelogFile } from "../src/changelog/parse";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  const { rm } = await import("node:fs/promises");
-
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 

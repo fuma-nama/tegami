@@ -1,14 +1,15 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as tinyexec from "tinyexec";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
-import type { PackagePublishResult, PublishResult } from "../src";
 
 vi.mock("tinyexec", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("tinyexec")>();
+  const actual = await importOriginal<typeof tinyexec>();
 
   return {
     ...actual,
@@ -336,7 +337,7 @@ function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePu
     id: `test:${name}`,
     name,
     version: "1.0.1",
-    distTag: "latest",
+    npm: { distTag: "latest" },
     changelogs: [],
     state: "success",
     ...overrides,

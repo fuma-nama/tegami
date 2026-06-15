@@ -5,8 +5,10 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
+import type { PackagePlan } from "../draft";
 import {
   packageManifestSchema,
+  PackagePlanStore,
   pnpmWorkspaceSchema,
   type PackageManifest,
   type PlanStore,
@@ -47,14 +49,6 @@ export class NpmPackage extends WorkspacePackage {
     return this.manifest.version ?? "0.0.0";
   }
 
-  get publish(): boolean {
-    return this.manifest.private !== true;
-  }
-
-  get distTag(): string | undefined {
-    return this.manifest.publishConfig?.tag;
-  }
-
   setVersion(version: string): void {
     this.manifest.version = version;
   }
@@ -80,6 +74,18 @@ export class NpmPackage extends WorkspacePackage {
 
   async write(): Promise<void> {
     await writeFile(join(this.path, "package.json"), `${JSON.stringify(this.manifest, null, 2)}\n`);
+  }
+
+  onPlan(context: TegamiContext): Partial<PackagePlan> {
+    const defaults = super.onPlan(context);
+    defaults.publish ??= this.manifest.private !== true;
+
+    if (this.manifest.publishConfig?.tag) {
+      defaults.npm ??= {};
+      defaults.npm.distTag ??= this.manifest.publishConfig.tag;
+    }
+
+    return defaults;
   }
 }
 
@@ -139,10 +145,13 @@ export class NpmRegistryClient implements RegistryClient {
     return info;
   }
 
-  async publish(pkg: WorkspacePackage, options: { distTag?: string } = {}) {
+  async publish(
+    pkg: NpmPackage,
+    { packageStore }: { store: PlanStore; packageStore: PackagePlanStore },
+  ) {
     const client = await this.resolveClient();
     const args = ["publish"];
-    const distTag = options.distTag ?? pkg.distTag;
+    const distTag = packageStore.npm?.distTag;
     if (distTag) args.push("--tag", distTag);
     if (client === "pnpm") args.push("--no-git-checks");
 

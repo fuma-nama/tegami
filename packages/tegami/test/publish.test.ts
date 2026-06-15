@@ -301,7 +301,7 @@ Not versioned yet.
         "npm:@acme/core": {
           type: "patch",
           changelogIds: [],
-          distTag: "latest",
+          npm: { distTag: "latest" },
           publish: false,
         },
       },
@@ -354,7 +354,7 @@ async function createPublishFixture(options: { registry?: string } = {}): Promis
       "npm:@acme/core": {
         type: "patch",
         changelogIds: [],
-        distTag: "latest",
+        npm: { distTag: "latest" },
         publish: true,
       },
     },
@@ -415,7 +415,7 @@ function packageRelease() {
   return {
     type: "patch",
     changelogIds: [] as string[],
-    distTag: "latest",
+    npm: { distTag: "latest" },
     publish: true,
   };
 }

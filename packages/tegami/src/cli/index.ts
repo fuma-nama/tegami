@@ -244,7 +244,7 @@ async function publishPackages(
   note(
     result.packages
       .map((pkg) => {
-        const tag = pkg.distTag ? ` (${pkg.distTag})` : "";
+        const tag = pkg.npm?.distTag ? ` (${pkg.npm.distTag})` : "";
         const suffix = pkg.state === "failed" && pkg.error ? `: ${pkg.error}` : "";
         return `${pkg.state === "success" ? "success" : "failed"} ${pkg.name}@${pkg.version}${tag}${suffix}`;
       })

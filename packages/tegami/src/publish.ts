@@ -45,7 +45,9 @@ export type PackagePublishResult = (
   id: string;
   name: string;
   version: string;
-  distTag: string | undefined;
+  npm?: {
+    distTag?: string;
+  };
   /** added by the `git` plugin */
   gitTag?: string;
   changelogs: ChangelogEntry[];
@@ -85,7 +87,7 @@ export async function publishFromPlan(
           id: pkg.id,
           name: pkg.name,
           version: pkg.version,
-          distTag: plan.distTag,
+          npm: plan.npm,
           state: "success",
           changelogs,
         });
@@ -95,14 +97,14 @@ export async function publishFromPlan(
 
     try {
       if (!dryRun) {
-        await context.getRegistryClient(pkg).publish(pkg, { distTag: plan.distTag });
+        await context.getRegistryClient(pkg).publish(pkg, { packageStore: plan, store });
       }
 
       packages.push({
         id: pkg.id,
         name: pkg.name,
         version: pkg.version,
-        distTag: plan.distTag,
+        npm: plan.npm,
         state: "success",
         changelogs,
       });
@@ -111,7 +113,7 @@ export async function publishFromPlan(
         id: pkg.id,
         name: pkg.name,
         version: pkg.version,
-        distTag: plan.distTag,
+        npm: plan.npm,
         changelogs,
         state: "failed",
         error: error instanceof Error ? error.message : String(error),

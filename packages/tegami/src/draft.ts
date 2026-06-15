@@ -11,8 +11,11 @@ import type { Awaitable, PublishPlanStatus } from "./types";
 export interface PackagePlan {
   type: BumpType;
   changelogIds: Set<string>;
-  distTag?: string;
   publish: boolean;
+  npm?: {
+    /** npm dist-tag used when publishing. */
+    distTag?: string;
+  };
 }
 
 export class DraftPlan {
@@ -176,7 +179,7 @@ export class DraftPlan {
       packageId: pkg.id,
       packageName: pkg.name,
       version: pkg.version,
-      distTag: plan.distTag,
+      npm: plan.npm,
       plan,
       changelogs,
       _draft: this,
@@ -268,9 +271,8 @@ export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiCon
 function createPackagePlan(
   pkg: WorkspacePackage,
   entries: ChangelogEntry[],
-  _context: TegamiContext,
+  context: TegamiContext,
 ): PackagePlan {
-  const packageOptions = pkg.getPackageOptions();
   let type: BumpType = "patch";
   const changelogIds = new Set<string>();
 
@@ -279,16 +281,12 @@ function createPackagePlan(
     type = maxBump(type, entry.type);
   }
 
-  const resolveDistTag = () => {
-    if (packageOptions.distTag !== undefined) return packageOptions.distTag;
-    return pkg.distTag;
-  };
-
+  const defaults = pkg.onPlan(context);
   return {
+    ...defaults,
     type,
     changelogIds,
-    distTag: resolveDistTag(),
-    publish: packageOptions.publish ?? pkg.publish,
+    publish: defaults.publish ?? false,
   };
 }
 

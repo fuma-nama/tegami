@@ -121,7 +121,7 @@ function storedPlan(): PlanStore {
       "npm:@acme/core": {
         type: "patch",
         changelogIds: new Set(),
-        distTag: "latest",
+        npm: { distTag: "latest" },
         publish: true,
       },
     },

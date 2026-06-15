@@ -5,7 +5,7 @@ import type { ChangelogEntry } from "./changelog/parse";
 import type { PublishOptions, PublishResult } from "./publish";
 import type { NpmClient } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
-import type { PlanStore } from "./schemas";
+import type { PackagePlanStore, PlanStore } from "./schemas";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -15,7 +15,6 @@ export interface LogGenerator {
       packageId: string;
       packageName: string;
       version: string;
-      distTag?: string;
       changelogs: ChangelogEntry[];
 
       plan: PackagePlan;
@@ -55,12 +54,16 @@ export interface GroupOptions {
 export interface PackageOptions<Group extends string = string> {
   /** Prerelease identifier appended to bumped versions (e.g. `alpha` → `1.1.0-alpha.0`). */
   prerelease?: string;
-  /** npm dist-tag used when publishing. */
-  distTag?: string;
   /** Set to false to keep this package out of npm publishing. */
   publish?: boolean;
   /** the group of this package, ignored if the group doesn't exist */
   group?: Group;
+
+  /** npm-specific options. */
+  npm?: {
+    /** npm dist-tag used when publishing. */
+    distTag?: string;
+  };
 }
 
 export type TegamiPluginOption = TegamiPlugin | TegamiPluginOption[];
@@ -121,7 +124,10 @@ export interface RegistryClient {
   id: string;
   supports?(pkg: WorkspacePackage): boolean;
   packageVersionExists(pkg: WorkspacePackage, version: string): Promise<boolean>;
-  publish(pkg: WorkspacePackage, options?: { distTag?: string }): Promise<void>;
+  publish(
+    pkg: WorkspacePackage,
+    env: { store: PlanStore; packageStore: PackagePlanStore },
+  ): Promise<void>;
   publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus>;
 }
 

@@ -50,6 +50,20 @@ export const packageManifestSchema = z.looseObject({
 
 export type PackageManifest = z.infer<typeof packageManifestSchema>;
 
+const packagePlanStoreSchema = z.object({
+  type: z.enum(["major", "minor", "patch"]),
+  changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
+    encode: (v) => Array.from(v),
+    decode: (v) => new Set(v),
+  }),
+  npm: z
+    .object({
+      distTag: z.string().optional(),
+    })
+    .optional(),
+  publish: z.boolean(),
+});
+
 /** the persisted plan data for actual publishing */
 export const planStoreSchema = jsonCodec(
   z.object({
@@ -68,19 +82,9 @@ export const planStoreSchema = jsonCodec(
       }),
     ),
     /** package id -> package info */
-    packages: z.record(
-      z.string(),
-      z.object({
-        type: z.enum(["major", "minor", "patch"]),
-        changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
-          encode: (v) => Array.from(v),
-          decode: (v) => new Set(v),
-        }),
-        distTag: z.string().optional(),
-        publish: z.boolean(),
-      }),
-    ),
+    packages: z.record(z.string(), packagePlanStoreSchema),
   }),
 );
 
 export type PlanStore = z.output<typeof planStoreSchema>;
+export type PackagePlanStore = z.output<typeof packagePlanStoreSchema>;

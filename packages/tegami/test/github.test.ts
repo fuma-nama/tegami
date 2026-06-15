@@ -1,6 +1,6 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { PackagePublishResult, PublishResult } from "../src";
+import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { DraftPlan, type PackagePlan } from "../src/draft";
 import { github } from "../src/plugins/github";
 import type { TegamiPlugin } from "../src/types";
@@ -23,7 +23,7 @@ describe("github release plugin", () => {
       repo: "acme/repo",
       onCreateRelease(pkg) {
         return {
-          prerelease: pkg.distTag !== "latest",
+          prerelease: pkg.npm?.distTag !== "latest",
           title: `Release ${pkg.version}`,
           notes: `Notes for ${pkg.name}`,
         };
@@ -35,7 +35,7 @@ describe("github release plugin", () => {
       publishResult({
         packages: [
           packageResult({
-            distTag: "alpha",
+            npm: { distTag: "alpha" },
             gitTag: "@acme/core@1.0.1",
           }),
           packageResult({
@@ -688,7 +688,7 @@ function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePu
     id: `test:${name}`,
     name,
     version: "1.0.1",
-    distTag: "latest",
+    npm: { distTag: "latest" },
     changelogs: [],
     gitTag: "@acme/core@1.0.1",
     state: "success",

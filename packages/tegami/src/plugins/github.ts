@@ -2,11 +2,11 @@ import { x } from "tinyexec";
 import { prerelease as getPrerelease } from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
-import { resolvePrerelease, type DraftPlan } from "../draft";
+import type { DraftPlan } from "../draft";
 import type { PackagePublishResult } from "../publish";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
-import { bumpVersion, formatPackageVersion, formatVersionBump } from "../utils/semver";
+import { formatPackageVersion, formatVersionBump } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
 import { isCI } from "../utils/constants";
 
@@ -142,7 +142,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           pkg.name,
           cliOriginalPackageVersions.get(pkg.id) ?? pkg.version,
           pkg.version,
-          packagePlan.distTag,
+          packagePlan.npm?.distTag,
         )}${publishTxt}`,
       );
     }
@@ -311,13 +311,13 @@ function groupPackagesByGitTag(
 }
 
 function defaultTitle(pkg: PackagePublishResult): string {
-  return formatPackageVersion(pkg.name, pkg.version, pkg.distTag);
+  return formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag);
 }
 
 function defaultGroupedTitle(packages: PackagePublishResult[]): string {
   const primary = packages[0]!;
-  const distTag = packages.every((pkg) => pkg.distTag === primary.distTag)
-    ? primary.distTag
+  const distTag = packages.every((pkg) => pkg.npm?.distTag === primary.npm?.distTag)
+    ? primary.npm?.distTag
     : undefined;
 
   return formatPackageVersion(
@@ -334,7 +334,7 @@ function defaultNotes(pkg: PackagePublishResult): string {
       .join("\n\n");
   }
 
-  return `Published ${formatPackageVersion(pkg.name, pkg.version, pkg.distTag)}.`;
+  return `Published ${formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag)}.`;
 }
 
 function defaultGroupedNotes(packages: PackagePublishResult[]): string {
@@ -346,7 +346,7 @@ function defaultGroupedNotes(packages: PackagePublishResult[]): string {
 
   const sections = [
     packages
-      .map((pkg) => `- ${formatPackageVersion(pkg.name, pkg.version, pkg.distTag)}`)
+      .map((pkg) => `- ${formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag)}`)
       .join("\n"),
   ];
 

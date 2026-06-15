@@ -1,4 +1,5 @@
 import type { TegamiContext } from "./context";
+import type { PackagePlan } from "./draft";
 import type { Awaitable, DependencySpec, GroupOptions, PackageOptions } from "./types";
 import { handlePluginError } from "./utils/error";
 import * as semver from "semver";
@@ -9,11 +10,6 @@ export abstract class WorkspacePackage {
   abstract readonly path: string;
   abstract readonly manager: string;
   abstract readonly version: string;
-  abstract readonly publish: boolean;
-
-  get distTag(): string | undefined {
-    return undefined;
-  }
 
   get id(): string {
     return `${this.manager}:${this.name}`;
@@ -57,6 +53,15 @@ export abstract class WorkspacePackage {
 
   setPackageOptions(options: PackageOptions) {
     this.opts = options;
+  }
+
+  /** Override defaults when building a draft plan. */
+  onPlan(_context: TegamiContext): Partial<PackagePlan> {
+    const { publish, npm } = this.opts;
+    return {
+      publish,
+      npm: npm ? { distTag: npm.distTag } : undefined,
+    };
   }
 }
 

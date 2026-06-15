@@ -9,6 +9,7 @@ import type { TegamiContext } from "../context";
 import type { TegamiPlugin, PublishPlanStatus, RegistryClient } from "../types";
 import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
+import { PackagePlan } from "../draft";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
@@ -29,10 +30,6 @@ export class CargoPackage extends WorkspacePackage {
 
   get version(): string {
     return stringValue(this.packageInfo.version) ?? this.workspaceVersion ?? "0.0.0";
-  }
-
-  get publish(): boolean {
-    return this.packageInfo.publish !== false;
   }
 
   setVersion(version: string): void {
@@ -70,6 +67,12 @@ export class CargoPackage extends WorkspacePackage {
         }
       }
     }
+  }
+
+  onPlan(context: TegamiContext): Partial<PackagePlan> {
+    const defaults = super.onPlan(context);
+    defaults.publish ??= this.packageInfo.publish !== false;
+    return defaults;
   }
 
   async write(): Promise<void> {

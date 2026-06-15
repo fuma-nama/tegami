@@ -4,6 +4,7 @@ import { join, normalize } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
+import type { PackagePlan } from "../src/draft";
 import { planStoreSchema, type PackageManifest } from "../src/schemas";
 
 vi.mock("tinyexec", () => ({
@@ -30,7 +31,7 @@ describe("draft publish plans", () => {
       cwd,
       packages: {
         "@acme/core": {
-          distTag: "alpha",
+          npm: { distTag: "alpha" },
         },
       },
     });
@@ -50,7 +51,9 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md:0",
           ],
-          "distTag": "alpha",
+          "npm": {
+            "distTag": "alpha",
+          },
           "publish": true,
           "type": "minor",
         },
@@ -62,7 +65,6 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md:0",
           ],
-          "distTag": undefined,
           "publish": true,
           "type": "minor",
         },
@@ -105,9 +107,9 @@ describe("draft publish plans", () => {
       code: "ENOENT",
     });
 
-    const rawPlan = await readJson<{
-      packages: Record<string, { version?: string; distTag?: string; changelogIds: string[] }>;
-    }>(join(cwd, ".tegami/publish-plan"));
+    const rawPlan = await readJson<{ packages: Record<string, { version?: string }> }>(
+      join(cwd, ".tegami/publish-plan"),
+    );
     const plan = planStoreSchema.decode(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
 
     expect({
@@ -140,7 +142,9 @@ describe("draft publish plans", () => {
             "changelogIds": [
               "change.md:0",
             ],
-            "distTag": "alpha",
+            "npm": {
+              "distTag": "alpha",
+            },
             "publish": true,
             "type": "minor",
           },
@@ -203,7 +207,7 @@ describe("draft publish plans", () => {
         "npm:@acme/core": {
           type: "patch",
           changelogIds: [],
-          distTag: "latest",
+          npm: { distTag: "latest" },
           publish: true,
         },
       },
@@ -311,14 +315,14 @@ async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
-function normalizePackagePlan(
-  plan: { changelogIds: Set<string>; distTag?: string; publish: boolean; type: string } | undefined,
-) {
+function normalizePackagePlan(plan: PackagePlan | undefined) {
   if (!plan) return undefined;
 
   return {
-    ...plan,
+    type: plan.type,
+    publish: plan.publish,
     changelogIds: Array.from(plan.changelogIds),
+    ...(plan.npm ? { npm: plan.npm } : {}),
   };
 }
 

@@ -17,7 +17,7 @@ await createCli(
     ],
     packages: {
       "npm:tegami": {
-        distTag: "beta",
+        prerelease: "beta",
       },
     },
   }),
