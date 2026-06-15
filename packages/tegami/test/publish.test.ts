@@ -7,7 +7,7 @@ import { tegami } from "../src";
 import { createTegamiContext, TegamiContext } from "../src/context";
 import type { PackagePublishResult, PublishOptions, PublishResult } from "../src/publish";
 import { publishFromPlan } from "../src/publish";
-import { planStoreSchema } from "../src/schemas";
+import { parsePlanStore } from "../src/plans/store";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -423,11 +423,7 @@ async function publishFixture(
   context: TegamiContext,
   PublishOptions: PublishOptions = {},
 ) {
-  return publishFromPlan(
-    context,
-    planStoreSchema.decode(await readFile(planPath, "utf8")),
-    PublishOptions,
-  );
+  return publishFromPlan(context, parsePlanStore(await readFile(planPath, "utf8")), PublishOptions);
 }
 
 async function readJson<T>(path: string): Promise<T> {

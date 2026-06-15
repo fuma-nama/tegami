@@ -1,12 +1,12 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path, { dirname, join } from "node:path";
-import type { TegamiContext } from "./context";
-import { simpleGenerator } from "./generators/simple";
-import { BumpType, bumpVersion, maxBump } from "./utils/semver";
-import type { WorkspacePackage } from "./graph";
-import type { ChangelogEntry } from "./changelog/parse";
-import { PlanStore, planStoreSchema } from "./schemas";
-import type { Awaitable, PublishPlanStatus } from "./types";
+import type { TegamiContext } from "../context";
+import { simpleGenerator } from "../generators/simple";
+import { BumpType, bumpVersion, maxBump } from "../utils/semver";
+import type { WorkspacePackage } from "../graph";
+import type { ChangelogEntry } from "../changelog/parse";
+import { createPlanStore, parsePlanStore, PlanStore } from "./store";
+import type { Awaitable, PublishPlanStatus } from "../types";
 
 export interface PackagePlan {
   type: BumpType;
@@ -77,27 +77,8 @@ export class DraftPlan {
 
     await this.applyVersionChanges();
 
-    const plan: PlanStore = {
-      id: `tegami-${Date.now().toString(36)}`,
-      createdAt: new Date().toISOString(),
-      changelogs: Object.fromEntries(
-        Array.from(this.changelogs, ([id, entry]) => [
-          id,
-          {
-            filename: entry.filename,
-            subject: entry.subject,
-            packages: Array.from(entry.packages),
-            type: entry.type,
-            title: entry.title,
-            content: entry.content,
-          },
-        ]),
-      ),
-      packages: Object.fromEntries(this.packages),
-    };
-
     await mkdir(dirname(this.context.planPath), { recursive: true });
-    await writeFile(this.context.planPath, planStoreSchema.encode(plan));
+    await writeFile(this.context.planPath, createPlanStore(this));
     await this.removeConsumedChangelogs();
   }
 
@@ -109,10 +90,15 @@ export class DraftPlan {
     const content = await readFile(this.context.planPath, "utf8").catch(() => undefined);
     if (!content) return;
 
-    const parsed = planStoreSchema.safeDecode(content);
-    if (!parsed.success) return;
+    let store: PlanStore;
+    try {
+      store = parsePlanStore(content);
+    } catch {
+      return;
+    }
 
-    const status = await publishPlanStatus(this.context, parsed.data);
+    // TODO: allow plugins to decide
+    const status = await publishPlanStatus(this.context, store);
     if (status.state === "success") return;
 
     const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before applying a new plan.`;

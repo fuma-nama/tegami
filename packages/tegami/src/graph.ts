@@ -1,5 +1,5 @@
 import type { TegamiContext } from "./context";
-import type { PackagePlan } from "./draft";
+import type { PackagePlan } from "./plans/draft";
 import type { Awaitable, DependencySpec, GroupOptions, PackageOptions } from "./types";
 import { handlePluginError } from "./utils/error";
 import * as semver from "semver";

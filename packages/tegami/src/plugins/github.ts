@@ -2,7 +2,7 @@ import { x } from "tinyexec";
 import { prerelease as getPrerelease } from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
-import type { DraftPlan } from "../draft";
+import type { DraftPlan } from "../plans/draft";
 import type { PackagePublishResult } from "../publish";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";

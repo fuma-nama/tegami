@@ -5,18 +5,13 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import type { PackagePlan } from "../draft";
-import {
-  packageManifestSchema,
-  PackagePlanStore,
-  pnpmWorkspaceSchema,
-  type PackageManifest,
-  type PlanStore,
-} from "../schemas";
+import type { PackagePlan } from "../plans/draft";
+import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
 import type { PublishPlanStatus, RegistryClient, DependencySpec, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
+import type { PackagePlanStore, PlanStore } from "../plans/store";
 
 const DEP_FIELDS = [
   "dependencies",

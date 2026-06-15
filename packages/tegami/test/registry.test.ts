@@ -1,9 +1,9 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { PlanStore } from "../src/schemas";
 import { NpmRegistryClient } from "../src/providers/npm";
 import { NpmPackage } from "../src/providers/npm";
 import { PackageGraph } from "../src/graph";
+import type { PlanStore } from "../src/plans/store";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -114,6 +114,7 @@ function graph(registry?: string): PackageGraph {
 
 function storedPlan(): PlanStore {
   return {
+    version: "0.0.0",
     id: "tegami-test",
     createdAt: "2026-01-01T00:00:00.000Z",
     changelogs: {},

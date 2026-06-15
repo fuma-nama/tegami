@@ -4,8 +4,9 @@ import { join, normalize } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import type { PackagePlan } from "../src/draft";
-import { planStoreSchema, type PackageManifest } from "../src/schemas";
+import type { PackagePlan } from "../src/plans/draft";
+import type { PackageManifest } from "../src/schemas";
+import { parsePlanStore } from "../src/plans/store";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -110,7 +111,7 @@ describe("draft publish plans", () => {
     const rawPlan = await readJson<{ packages: Record<string, { version?: string }> }>(
       join(cwd, ".tegami/publish-plan"),
     );
-    const plan = planStoreSchema.decode(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
+    const plan = parsePlanStore(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
 
     expect({
       changelogs: plan.changelogs,

@@ -1,11 +1,11 @@
 import { SemVer } from "semver";
 import type { TegamiContext } from "./context";
-import type { DraftPlan, PackagePlan } from "./draft";
+import type { DraftPlan, PackagePlan } from "./plans/draft";
 import type { ChangelogEntry } from "./changelog/parse";
 import type { PublishOptions, PublishResult } from "./publish";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
-import type { PackagePlanStore, PlanStore } from "./schemas";
+import type { PlanStore, PackagePlanStore } from "./plans/store";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {

@@ -4,12 +4,12 @@ import * as semver from "semver";
 import { parse, stringify, type TomlTable, type TomlValue } from "smol-toml";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { PlanStore } from "../schemas";
+import type { PlanStore } from "../plans/store";
 import type { TegamiContext } from "../context";
 import type { TegamiPlugin, PublishPlanStatus, RegistryClient } from "../types";
 import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
-import { PackagePlan } from "../draft";
+import { PackagePlan } from "../plans/draft";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 

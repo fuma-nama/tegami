@@ -320,6 +320,7 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
   return {
     planPath: "/repo/.tegami/publish-plan",
     _rawPlan: {
+      version: "0.0.0",
       id: "tegami-test",
       createdAt: "2026-01-01T00:00:00.000Z",
       changelogs: {},

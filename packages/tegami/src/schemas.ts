@@ -7,7 +7,7 @@ export const changelogFrontmatterSchema = z.object({
 
 const stringRecordSchema = z.record(z.string(), z.string());
 
-const jsonCodec = <T extends z.core.$ZodType>(schema: T) =>
+export const jsonCodec = <T extends z.core.$ZodType>(schema: T) =>
   z.codec(z.string(), schema, {
     decode: (jsonString, ctx) => {
       try {
@@ -49,42 +49,3 @@ export const packageManifestSchema = z.looseObject({
 });
 
 export type PackageManifest = z.infer<typeof packageManifestSchema>;
-
-const packagePlanStoreSchema = z.object({
-  type: z.enum(["major", "minor", "patch"]),
-  changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
-    encode: (v) => Array.from(v),
-    decode: (v) => new Set(v),
-  }),
-  npm: z
-    .object({
-      distTag: z.string().optional(),
-    })
-    .optional(),
-  publish: z.boolean(),
-});
-
-/** the persisted plan data for actual publishing */
-export const planStoreSchema = jsonCodec(
-  z.object({
-    id: z.string(),
-    createdAt: z.iso.datetime(),
-    /** release note entries */
-    changelogs: z.record(
-      z.string(),
-      z.object({
-        filename: z.string(),
-        subject: z.string().optional(),
-        packages: z.array(z.string()),
-        type: z.enum(["major", "minor", "patch"]),
-        title: z.string(),
-        content: z.string(),
-      }),
-    ),
-    /** package id -> package info */
-    packages: z.record(z.string(), packagePlanStoreSchema),
-  }),
-);
-
-export type PlanStore = z.output<typeof planStoreSchema>;
-export type PackagePlanStore = z.output<typeof packagePlanStoreSchema>;

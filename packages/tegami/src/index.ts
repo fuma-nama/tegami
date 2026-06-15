@@ -2,14 +2,14 @@ import { readFile } from "node:fs/promises";
 import { createChangelog } from "./changelog/create";
 import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
 import { createTegamiContext, TegamiContext } from "./context";
-import { DraftPlan, createDraftPlan } from "./draft";
+import { DraftPlan, createDraftPlan } from "./plans/draft";
 import { getChangelogFiles, readChangelogEntries } from "./changelog/parse";
 import { publishFromPlan } from "./publish";
 import type { PublishOptions, PublishResult } from "./publish";
-import { planStoreSchema } from "./schemas";
 import type { TegamiOptions } from "./types";
 import { isNodeError, handlePluginError } from "./utils/error";
 import { PackageGraph } from "./graph";
+import { parsePlanStore } from "./plans/store";
 
 export type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
 export type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
@@ -22,7 +22,7 @@ export type {
   PackageOptions,
   TegamiPluginOption,
 } from "./types";
-export type { DraftPlan, PackagePlan } from "./draft";
+export type { DraftPlan, PackagePlan } from "./plans/draft";
 export type { PackageGraph, PackageGroup, WorkspacePackage } from "./graph";
 
 export interface Tegami {
@@ -88,7 +88,7 @@ export function tegami<const Groups extends string = string>(
       }
 
       const parsed = await readFile(context.planPath, "utf8")
-        .then((content) => planStoreSchema.decode(content))
+        .then((content) => parsePlanStore(content))
         .catch((error: unknown) => {
           if (isNodeError(error) && error.code === "ENOENT") return undefined;
           throw error;
