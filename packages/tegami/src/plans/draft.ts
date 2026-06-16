@@ -116,6 +116,9 @@ export class DraftPlan {
       );
     }
 
+    this.applyGroupPolicy();
+    this.#applied = true;
+
     const { graph } = this.context;
     const writes: Awaitable<void>[] = [];
     for (const [id, packagePlan] of this.packages) {
@@ -128,7 +131,30 @@ export class DraftPlan {
     await mkdir(dirname(this.context.planPath), { recursive: true });
     await writeFile(this.context.planPath, createPlanStore(this, this.context));
     await this.removeConsumedChangelogs();
-    this.#applied = true;
+  }
+
+  private applyGroupPolicy() {
+    const { graph } = this.context;
+
+    for (const group of graph.getGroups()) {
+      if (!group.options.syncBump || group.packages.length <= 1) continue;
+
+      let bumpType: BumpType | undefined;
+      for (const member of group.packages) {
+        const pkgPlan = this.packages.get(member.id);
+        if (!pkgPlan?.type) continue;
+
+        bumpType = bumpType ? maxBump(bumpType, pkgPlan.type) : pkgPlan.type;
+      }
+
+      if (!bumpType) continue;
+      for (const member of group.packages) {
+        this.bumpPackage(member, {
+          type: bumpType,
+          reason: "sync group package versions",
+        });
+      }
+    }
   }
 
   editable() {
@@ -136,22 +162,13 @@ export class DraftPlan {
   }
 
   private async assertPublishPlanFinished(): Promise<void> {
-    const content = await readFile(this.context.planPath, "utf8").catch(() => undefined);
-    if (!content) return;
+    const status = await publishPlanStatus(this.context);
 
-    let store: PlanStore;
-    try {
-      store = parsePlanStore(content);
-    } catch {
-      return;
+    if (status.state === "pending") {
+      throw new Error(
+        "Publish plan already exists at ${this.context.planPath} and is pending. Publish it before applying a new plan.",
+      );
     }
-
-    // TODO: allow plugins to decide
-    const status = await publishPlanStatus(this.context, store);
-    if (status.state === "success") return;
-
-    const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before applying a new plan.`;
-    throw new Error(status.error ? `${message}\n${status.error}` : message);
   }
 
   private async removeConsumedChangelogs() {
@@ -194,19 +211,37 @@ export class DraftPlan {
   }
 }
 
-async function publishPlanStatus(
-  context: TegamiContext,
-  plan: PlanStore,
-): Promise<PublishPlanStatus> {
-  for (const [id, pkgPlan] of Object.entries(plan.packages)) {
-    const pkg = context.graph.get(id);
-    if (!pkg || !pkgPlan.publish) continue;
+export async function publishPlanStatus(context: TegamiContext): Promise<PublishPlanStatus> {
+  const content = await readFile(context.planPath, "utf8").catch(() => undefined);
+  if (!content) return { state: "missing" };
 
-    const exists = await context.getRegistryClient(pkg).packageVersionExists(pkg, pkg.version);
-    if (!exists) return { state: "pending" };
+  let store: PlanStore;
+  try {
+    store = parsePlanStore(content);
+  } catch {
+    return { state: "missing" };
   }
 
-  return { state: "success" };
+  async function defaultStatus(): Promise<PublishPlanStatus> {
+    for (const [id, pkgPlan] of Object.entries(store.packages)) {
+      const pkg = context.graph.get(id);
+      if (!pkg || !pkgPlan.publish) continue;
+
+      const published = await context.getRegistryClient(pkg).isPackagePublished(pkg);
+      if (!published) return { state: "pending" };
+    }
+
+    return { state: "success" };
+  }
+
+  let status = await defaultStatus();
+  for (const plugin of context.plugins) {
+    const resolved = await handlePluginError(plugin, "resolvePlanStatus", () =>
+      plugin.resolvePlanStatus?.call(context, status, { plan: store }),
+    );
+    if (resolved) status = resolved;
+  }
+  return status;
 }
 
 export async function createDraftPlan(
@@ -217,27 +252,6 @@ export async function createDraftPlan(
 
   for (const entry of changelogs) {
     draft.addChangelog(entry);
-  }
-
-  // TODO: create a special type of package plan to represent sync-version updates
-  for (const group of context.graph.getGroups()) {
-    if (!group.options.syncVersion || group.packages.length <= 1) continue;
-
-    let bumpType: BumpType | undefined;
-    for (const member of group.packages) {
-      const pkgPlan = draft.getPackagePlan(member.id);
-      if (!pkgPlan?.type) continue;
-
-      bumpType = bumpType ? maxBump(bumpType, pkgPlan.type) : pkgPlan.type;
-    }
-
-    if (!bumpType) continue;
-    for (const member of group.packages) {
-      draft.bumpPackage(member, {
-        type: bumpType,
-        reason: "sync group package versions",
-      });
-    }
   }
 
   for (const plugin of context.plugins) {

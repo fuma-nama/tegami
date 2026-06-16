@@ -6,7 +6,7 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
-import type { Awaitable, PublishPlanStatus, RegistryClient, TegamiPlugin } from "../types";
+import type { Awaitable, RegistryClient, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
@@ -72,15 +72,13 @@ export class NpmRegistryClient implements RegistryClient {
     return pkg instanceof NpmPackage;
   }
 
-  async packageVersionExists(pkg: WorkspacePackage, version: string): Promise<boolean> {
-    const cacheKey = `${pkg.id}@${version}`;
+  async isPackagePublished(pkg: NpmPackage): Promise<boolean> {
+    const cacheKey = `${pkg.id}@${pkg.version}`;
     let info = this.#versionMap.get(cacheKey);
     if (!info) {
       const run = async () => {
-        if (!(pkg instanceof NpmPackage)) return false;
-
         const registry = pkg.manifest.publishConfig?.registry;
-        const args = ["view", `${pkg.name}@${version}`, "version", "--json"];
+        const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
         if (registry) args.push("--registry", registry);
 
         const result = await x(this.client, args, {
@@ -94,7 +92,7 @@ export class NpmRegistryClient implements RegistryClient {
         if (isMissingRegistryEntry(output)) return false;
 
         throw new Error(
-          `Unable to validate ${pkg.name}@${version} against the npm registry${registry ? ` "${registry}"` : ""}: ${output.trim() || `command exited with code ${result.exitCode}`}`,
+          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}: ${output.trim() || `command exited with code ${result.exitCode}`}`,
         );
       };
 
@@ -125,18 +123,6 @@ export class NpmRegistryClient implements RegistryClient {
         result,
       );
     }
-  }
-
-  async publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus> {
-    for (const [name, pkgPlan] of Object.entries(plan.packages)) {
-      const pkg = this.graph.get(name);
-      if (!(pkg instanceof NpmPackage) || !pkgPlan.publish) continue;
-
-      const exists = await this.packageVersionExists(pkg, pkg.version);
-      if (!exists) return { state: "pending" };
-    }
-
-    return { state: "success" };
   }
 }
 

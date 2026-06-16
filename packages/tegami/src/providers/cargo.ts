@@ -4,10 +4,9 @@ import * as semver from "semver";
 import { parse, stringify, type TomlTable, type TomlValue } from "smol-toml";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { PlanStore } from "../plans/store";
 import type { TegamiContext } from "../context";
 import type { DraftPlan } from "../plans/draft";
-import type { Awaitable, TegamiPlugin, PublishPlanStatus, RegistryClient } from "../types";
+import type { Awaitable, TegamiPlugin, RegistryClient } from "../types";
 import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
 
@@ -57,24 +56,24 @@ export class CargoRegistryClient implements RegistryClient {
 
   #versionMap = new Map<string, Promise<boolean>>();
 
-  constructor(private readonly graph: PackageGraph) {}
+  constructor(private readonly _graph: PackageGraph) {}
 
   supports(pkg: WorkspacePackage): boolean {
     return pkg instanceof CargoPackage;
   }
 
-  async packageVersionExists(pkg: WorkspacePackage, version: string): Promise<boolean> {
-    const cacheKey = `${pkg.id}@${version}`;
+  async isPackagePublished(pkg: CargoPackage): Promise<boolean> {
+    const cacheKey = `${pkg.id}@${pkg.version}`;
     let info = this.#versionMap.get(cacheKey);
     if (!info) {
       info = fetch(
-        `https://crates.io/api/v1/crates/${encodeURIComponent(pkg.name)}/${version}`,
+        `https://crates.io/api/v1/crates/${encodeURIComponent(pkg.name)}/${pkg.version}`,
       ).then(async (response) => {
         if (response.status === 200) return true;
         if (response.status === 404) return false;
 
         throw new Error(
-          `Unable to validate ${pkg.name}@${version} against crates.io: ${await response.text()}`,
+          `Unable to validate ${pkg.name}@${pkg.version} against crates.io: ${await response.text()}`,
         );
       });
       this.#versionMap.set(cacheKey, info);
@@ -83,25 +82,13 @@ export class CargoRegistryClient implements RegistryClient {
     return info;
   }
 
-  async publish(pkg: WorkspacePackage): Promise<void> {
+  async publish(pkg: CargoPackage): Promise<void> {
     await x("cargo", ["publish"], {
       nodeOptions: {
         cwd: pkg.path,
       },
       throwOnError: true,
     });
-  }
-
-  async publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus> {
-    for (const [id, pkgPlan] of Object.entries(plan.packages)) {
-      const pkg = this.graph.get(id);
-      if (!(pkg instanceof CargoPackage) || !pkgPlan.publish) continue;
-
-      const exists = await this.packageVersionExists(pkg, pkg.version);
-      if (!exists) return { state: "pending" };
-    }
-
-    return { state: "success" };
   }
 }
 

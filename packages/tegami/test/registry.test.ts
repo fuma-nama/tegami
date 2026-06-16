@@ -1,18 +1,27 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { x } from "tinyexec";
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { NpmRegistryClient } from "../src/providers/npm";
-import { NpmPackage } from "../src/providers/npm";
-import { PackageGraph } from "../src/graph";
+import { createTegamiContext } from "../src/context";
+import { publishPlanStatus } from "../src/plans/draft";
 import type { PlanStore } from "../src/plans/store";
+import { NpmPackage, NpmRegistryClient } from "../src/providers/npm";
+import { PackageGraph } from "../src/graph";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
 }));
 
+const tempDirs: string[] = [];
 const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+});
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
 describe("registry client", () => {
@@ -23,8 +32,8 @@ describe("registry client", () => {
 
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
-    await expect(client.packageVersionExists(pkg, "1.0.1")).resolves.toBe(true);
-    await expect(client.packageVersionExists(pkg, "1.0.1")).resolves.toBe(true);
+    await expect(client.isPackagePublished(pkg)).resolves.toBe(true);
+    await expect(client.isPackagePublished(pkg)).resolves.toBe(true);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith(
@@ -46,7 +55,7 @@ describe("registry client", () => {
   });
 
   test("returns false for missing package versions", async () => {
-    const packageGraph = graph();
+    const packageGraph = graph(undefined, "9.9.9");
     const client = new NpmRegistryClient("/repo", "npm", packageGraph);
     const pkg = packageGraph.get("npm:@acme/core")!;
 
@@ -57,18 +66,22 @@ describe("registry client", () => {
       }),
     );
 
-    await expect(client.packageVersionExists(pkg, "9.9.9")).resolves.toBe(false);
+    await expect(client.isPackagePublished(pkg)).resolves.toBe(false);
+  });
+});
+
+describe("publish plan status", () => {
+  test("returns missing when no publish plan exists", async () => {
+    const context = await createTestContext();
+
+    await expect(publishPlanStatus(context)).resolves.toEqual({ state: "missing" });
   });
 
-  test("returns successful publish plan status", async () => {
-    const client = new NpmRegistryClient("/repo", "npm", graph("https://registry.example.test"));
+  test("returns success when publishable packages are on the registry", async () => {
+    const context = await createTestContext({ plan: storedPlan() });
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
-    const status = await client.publishPlanStatus(storedPlan());
-
-    expect(status).toEqual({
-      state: "success",
-    });
+    await expect(publishPlanStatus(context)).resolves.toEqual({ state: "success" });
     expect(exec).toHaveBeenCalledWith(
       "npm",
       [
@@ -81,14 +94,14 @@ describe("registry client", () => {
       ],
       {
         nodeOptions: {
-          cwd: "/repo",
+          cwd: context.cwd,
         },
       },
     );
   });
 
-  test("returns pending publish plan status", async () => {
-    const client = new NpmRegistryClient("/repo", "npm", graph());
+  test("returns pending when a publishable package is missing from the registry", async () => {
+    const context = await createTestContext({ plan: storedPlan() });
     exec.mockResolvedValue(
       execResult({
         exitCode: 1,
@@ -96,16 +109,56 @@ describe("registry client", () => {
       }),
     );
 
-    await expect(client.publishPlanStatus(storedPlan())).resolves.toEqual({
-      state: "pending",
-    });
+    await expect(publishPlanStatus(context)).resolves.toEqual({ state: "pending" });
   });
 });
 
-function graph(registry?: string): PackageGraph {
+async function createTestContext(options: { plan?: PlanStore } = {}) {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-registry-"));
+  tempDirs.push(cwd);
+
+  if (options.plan) {
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, ".tegami/publish-plan"),
+      `${JSON.stringify(
+        {
+          ...options.plan,
+          packages: Object.fromEntries(
+            Object.entries(options.plan.packages).map(([id, plan]) => [
+              id,
+              {
+                ...plan,
+                changelogIds: Array.from(plan.changelogIds),
+              },
+            ]),
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
+
+  const context = await createTegamiContext({
+    cwd,
+    npm: { client: "npm" },
+  });
+  context.graph.add(
+    new NpmPackage(join(cwd, "packages/core"), {
+      name: "@acme/core",
+      version: "1.0.1",
+      publishConfig: { registry: "https://registry.example.test" },
+    }),
+  );
+
+  return context;
+}
+
+function graph(registry?: string, version = "1.0.1"): PackageGraph {
   const pkg = new NpmPackage("/repo/packages/core", {
     name: "@acme/core",
-    version: "1.0.1",
+    version,
     ...(registry ? { publishConfig: { registry } } : {}),
   });
 

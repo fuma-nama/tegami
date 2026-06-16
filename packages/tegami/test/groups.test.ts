@@ -115,7 +115,7 @@ Breaking note.
       cwd,
       groups: {
         acme: {
-          syncVersion: true,
+          syncBump: true,
         },
       },
       packages: {
@@ -339,12 +339,10 @@ function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x
 function registryClient() {
   return {
     id: "test",
-    async packageVersionExists() {
+    supports: () => true,
+    async isPackagePublished() {
       return false;
     },
     async publish() {},
-    async publishPlanStatus() {
-      return { state: "success" as const };
-    },
   };
 }

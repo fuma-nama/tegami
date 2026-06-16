@@ -644,13 +644,11 @@ async function runVersionPullRequest(
 function registryClient() {
   return {
     id: "test",
-    async packageVersionExists() {
+    supports: () => true,
+    async isPackagePublished() {
       return false;
     },
     async publish() {},
-    async publishPlanStatus() {
-      return { state: "success" as const };
-    },
   };
 }
 

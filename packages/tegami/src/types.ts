@@ -44,8 +44,9 @@ export interface GroupOptions {
   /** Prerelease identifier appended to bumped versions (e.g. `alpha` → `1.1.0-alpha.0`). */
   prerelease?: string;
 
-  /** all packages in the group will use the same version (obtained from the highest one) */
-  syncVersion?: boolean;
+  /** all member packages will share the same type of version bump (e.g. when one package is bumped by a minor, other member packages will also be bumped by a minor) */
+  syncBump?: boolean;
+
   /** when multiple packages in the group are published, only one git tag will be created (as well as GitHub release) */
   syncGitTag?: boolean;
 }
@@ -84,6 +85,15 @@ export interface TegamiPlugin {
   /** Called when Tegami applies the draft plan. */
   applyPlan?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
 
+  /** resolve the plan status, crucial to check if the plan is finished successfully, or needs retries */
+  resolvePlanStatus?(
+    this: TegamiContext,
+    status: PublishPlanStatus,
+    env: {
+      plan: PlanStore;
+    },
+  ): Awaitable<PublishPlanStatus>;
+
   /** Called after publishing finishes. */
   afterPublish?(
     this: TegamiContext & { publishOptions: PublishOptions },
@@ -106,17 +116,15 @@ export interface TegamiPlugin {
 export type Awaitable<T> = T | Promise<T>;
 
 export interface PublishPlanStatus {
-  state: "pending" | "success";
-  error?: string;
+  state: "pending" | "success" | "missing";
 }
 
 export interface RegistryClient {
   id: string;
-  supports?(pkg: WorkspacePackage): boolean;
-  packageVersionExists(pkg: WorkspacePackage, version: string): Promise<boolean>;
+  supports(pkg: WorkspacePackage): boolean;
+  isPackagePublished(pkg: WorkspacePackage): Promise<boolean>;
   publish(
     pkg: WorkspacePackage,
     env: { store: PlanStore; packageStore: PackagePlanStore },
   ): Promise<void>;
-  publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus>;
 }

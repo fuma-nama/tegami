@@ -80,7 +80,7 @@ export async function publishFromPlan(
 
     if (!dryRun) {
       const registryClient = context.getRegistryClient(pkg);
-      const published = await registryClient.packageVersionExists(pkg, pkg.version);
+      const published = await registryClient.isPackagePublished(pkg);
 
       if (published) {
         packages.push({

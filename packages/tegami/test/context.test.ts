@@ -35,7 +35,7 @@ describe("tegami context", () => {
     const pkg = npmPackage();
     context.graph.add(pkg);
 
-    await context.getRegistryClient("npm").packageVersionExists(pkg, "1.0.0");
+    await context.getRegistryClient("npm").isPackagePublished(pkg);
 
     expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
       nodeOptions: {
@@ -57,7 +57,7 @@ describe("tegami context", () => {
     const pkg = npmPackage();
     context.graph.add(pkg);
 
-    await context.getRegistryClient("npm").packageVersionExists(pkg, "1.0.0");
+    await context.getRegistryClient("npm").isPackagePublished(pkg);
 
     expect(exec).toHaveBeenCalledWith("pnpm", ["view", "@acme/core@1.0.0", "version", "--json"], {
       nodeOptions: {

@@ -16,7 +16,7 @@ const paper = tegami({
   groups: {
     fumadocs: {
       syncGitTag: true,
-      syncVersion: true,
+      syncBump: true,
     },
   },
 });
