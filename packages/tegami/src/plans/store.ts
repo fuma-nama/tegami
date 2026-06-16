@@ -1,13 +1,12 @@
 import z from "zod";
 import { jsonCodec } from "../schemas";
 import { DraftPlan } from "./draft";
+import { TegamiContext } from "../context";
 
 const packagePlanStoreSchema = z.object({
-  type: z.enum(["major", "minor", "patch"]),
-  changelogIds: z.codec(z.array(z.string()), z.set(z.string()), {
-    encode: (v) => Array.from(v),
-    decode: (v) => new Set(v),
-  }),
+  type: z.enum(["major", "minor", "patch"]).optional(),
+  changelogIds: z.array(z.string()).optional(),
+  bumpReasons: z.array(z.string()).optional(),
   npm: z
     .object({
       distTag: z.string().optional(),
@@ -43,7 +42,7 @@ const planStoreSchema = jsonCodec(
 export type PlanStore = z.output<typeof planStoreSchema>;
 export type PackagePlanStore = z.output<typeof packagePlanStoreSchema>;
 
-export function createPlanStore(draft: DraftPlan): string {
+export function createPlanStore(draft: DraftPlan, context: TegamiContext): string {
   const store: z.output<typeof planStoreSchema> = {
     version: "0.0.0",
     id: `tegami-${Date.now().toString(36)}`,
@@ -51,9 +50,8 @@ export function createPlanStore(draft: DraftPlan): string {
     changelogs: {},
     packages: {},
   };
-  for (const id of draft.getChangelogIds()) {
-    const entry = draft.getChangelog(id)!;
-    store.changelogs[id] = {
+  for (const entry of draft.getChangelogs()) {
+    store.changelogs[entry.id] = {
       filename: entry.filename,
       subject: entry.subject,
       packages: Array.from(entry.packages),
@@ -62,8 +60,17 @@ export function createPlanStore(draft: DraftPlan): string {
       content: entry.content,
     };
   }
-  for (const id of draft.getPackageIds()) {
-    store.packages[id] = draft.getPackage(id)!;
+  for (const pkg of context.graph.getPackages()) {
+    const plan = draft.getPackagePlan(pkg.id);
+    if (plan) {
+      store.packages[pkg.id] = {
+        publish: plan.publish ?? false,
+        type: plan.type,
+        npm: plan.npm,
+        changelogIds: plan.changelogs?.map((entry) => entry.id),
+        bumpReasons: plan.bumpReasons,
+      };
+    }
   }
 
   return planStoreSchema.encode(store);

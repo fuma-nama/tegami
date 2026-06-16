@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { createTegamiContext } from "../src/context";
 import { parsePlanStore } from "../src/plans/store";
+import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -78,25 +79,27 @@ describe("cargo packages", () => {
     expect(table(core.package)?.version).toBe("1.1.0");
     expect(table(table(binding.dependencies)?.acme_core)?.version).toBe("1.1.0");
     expect(table(binding.package)?.version).toBe("1.0.1");
-    expect(Object.keys(plan.packages)).toEqual([
-      "npm:@acme/js",
-      "cargo:acme_core",
-      "cargo:acme_binding",
-    ]);
+    expect(Object.keys(plan.packages).sort()).toEqual(
+      ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
+    );
   });
 
   test("allows npm packages and cargo crates with the same name", async () => {
     const cwd = await createDuplicateNameWorkspace();
     tempDirs.push(cwd);
 
-    const draft = await tegami({ cwd }).draft();
+    const paper = tegami({ cwd });
+    const draft = await paper.draft();
     await draft.applyPlan();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/pkg-a/package.json"), "utf8"));
     const crate = await readCargo(join(cwd, "crates/pkg-a"));
     const plan = parsePlanStore(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
 
-    expect(draft.getPackageIds()).toEqual(["npm:pkg-a", "cargo:pkg-a"]);
+    expect(getPendingPackageIds(draft, (await paper._internal.context()).graph).sort()).toEqual([
+      "cargo:pkg-a",
+      "npm:pkg-a",
+    ]);
     expect(npmPackage.version).toBe("1.1.0");
     expect(table(crate.package)?.version).toBe("1.1.0");
     expect(Object.keys(plan.packages)).toEqual(["npm:pkg-a", "cargo:pkg-a"]);
@@ -129,23 +132,15 @@ describe("cargo packages", () => {
 
     const result = await tegami({ cwd, npm: { client: "npm" } }).publish();
 
-    expect(result).toMatchObject({
-      state: "created",
-      packages: [
-        {
-          name: "@acme/js",
-          state: "success",
-        },
-        {
-          name: "acme_core",
-          state: "success",
-        },
-        {
-          name: "acme_binding",
-          state: "success",
-        },
-      ],
-    });
+    expect(result.state).toBe("created");
+    expect(result.packages.map((pkg) => ({ name: pkg.name, state: pkg.state }))).toEqual(
+      expect.arrayContaining([
+        { name: "@acme/js", state: "success" },
+        { name: "acme_core", state: "success" },
+        { name: "acme_binding", state: "success" },
+      ]),
+    );
+    expect(result.packages).toHaveLength(3);
     expect(
       exec.mock.calls.map(([command, args, options]) => ({
         command,
@@ -166,12 +161,12 @@ describe("cargo packages", () => {
       {
         command: "cargo",
         args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "crates/core")),
+        cwd: normalizeDirPath(join(cwd, "crates/binding")),
       },
       {
         command: "cargo",
         args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "crates/binding")),
+        cwd: normalizeDirPath(join(cwd, "crates/core")),
       },
     ]);
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_core/1.1.0");

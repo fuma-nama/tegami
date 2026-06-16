@@ -1,7 +1,7 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { PackagePublishResult, PublishResult } from "../src/publish";
-import { DraftPlan, type PackagePlan } from "../src/plans/draft";
+import { DraftPlan } from "../src/plans/draft";
 import { github } from "../src/plugins/github";
 import type { TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
@@ -608,35 +608,24 @@ class TestPackage extends WorkspacePackage {
     this.#version = version;
   }
 
+  onPlan() {
+    return { publish: true };
+  }
+
   async write(): Promise<void> {}
 }
 
 function versionDraft(context = publishContext()): DraftPlan {
-  const changelogs = new Map([
-    [
-      "change-1",
-      {
-        id: "change-1",
-        filename: "change.md",
-        packages: new Set(["@acme/core"]),
-        type: "minor" as const,
-        title: "Add feature",
-        content: "Description.",
-      },
-    ],
-  ]);
-  const packages = new Map<string, PackagePlan>([
-    [
-      "test:@acme/core",
-      {
-        type: "minor",
-        changelogIds: new Set(["change-1"]),
-        publish: true,
-      },
-    ],
-  ]);
-
-  return new DraftPlan(changelogs, packages, context);
+  const draft = new DraftPlan(context);
+  draft.addChangelog({
+    id: "change-1",
+    filename: "change.md",
+    packages: new Set(["@acme/core"]),
+    type: "minor",
+    title: "Add feature",
+    content: "Description.",
+  });
+  return draft;
 }
 
 async function runVersionPullRequest(

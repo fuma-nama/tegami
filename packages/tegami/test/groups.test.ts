@@ -8,6 +8,7 @@ import { git } from "../src/plugins/git";
 import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
+import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -38,7 +39,7 @@ Useful release note.
     });
     tempDirs.push(cwd);
 
-    const draft = await tegami({
+    const paper = tegami({
       cwd,
       groups: {
         acme: {},
@@ -47,9 +48,13 @@ Useful release note.
         "@acme/core": { group: "acme" },
         "@acme/ui": { group: "acme" },
       },
-    }).draft();
+    });
+    const draft = await paper.draft();
 
-    expect(draft.getPackageIds().sort()).toEqual(["npm:@acme/core", "npm:@acme/ui"]);
+    expect(getPendingPackageIds(draft, (await paper._internal.context()).graph).sort()).toEqual([
+      "npm:@acme/core",
+      "npm:@acme/ui",
+    ]);
   });
 
   test("applies group prerelease to version and keeps distTag separate", async () => {
@@ -70,8 +75,8 @@ Useful release note.
     }).draft();
 
     expect({
-      coreDistTag: draft.getPackage("npm:@acme/core")?.npm?.distTag,
-      uiDistTag: draft.getPackage("npm:@acme/ui")?.npm?.distTag,
+      coreDistTag: draft.getPackagePlan("npm:@acme/core")?.npm?.distTag,
+      uiDistTag: draft.getPackagePlan("npm:@acme/ui")?.npm?.distTag,
     }).toEqual({
       coreDistTag: undefined,
       uiDistTag: "next",
@@ -120,8 +125,8 @@ Breaking note.
     }).draft();
 
     expect({
-      core: draft.getPackage("npm:@acme/core")?.type,
-      ui: draft.getPackage("npm:@acme/ui")?.type,
+      core: draft.getPackagePlan("npm:@acme/core")?.type,
+      ui: draft.getPackagePlan("npm:@acme/ui")?.type,
     }).toEqual({
       core: "major",
       ui: "major",

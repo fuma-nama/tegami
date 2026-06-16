@@ -68,7 +68,7 @@ export async function publishFromPlan(
     if (!pkg) continue;
 
     const changelogs: ChangelogEntry[] = [];
-    for (const id of plan.changelogIds) {
+    for (const id of plan.changelogIds ?? []) {
       const entry = store.changelogs[id];
       if (entry)
         changelogs.push({

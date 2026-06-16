@@ -10,65 +10,99 @@ import type { Awaitable, PublishPlanStatus } from "../types";
 import { handlePluginError } from "../utils/error";
 
 export interface PackagePlan {
-  type: BumpType;
-  changelogIds: Set<string>;
+  type?: BumpType;
+  bumpReasons?: string[];
+
+  changelogs?: ChangelogEntry[];
   prerelease?: string;
-  publish: boolean;
+  publish?: boolean;
 
   npm?: {
     /** npm dist-tag used when publishing. */
     distTag?: string;
   };
+
+  bumpVersion: (pkg: WorkspacePackage) => string;
 }
 
 export class DraftPlan {
   #applied = false;
+  // package id -> plan
+  private readonly packages = new Map<string, PackagePlan>();
+  // id -> changelog
+  private readonly changelogs = new Map<string, ChangelogEntry>();
 
-  constructor(
-    // id -> changelog
-    private readonly changelogs: Map<string, ChangelogEntry>,
-    // package id -> plan
-    private readonly packages: Map<string, PackagePlan>,
-    private readonly context: TegamiContext,
-  ) {}
+  constructor(private readonly context: TegamiContext) {}
 
-  getPackageIds() {
-    return Array.from(this.packages.keys());
+  getPackagePlans() {
+    return this.packages;
   }
 
-  getPackage(id: string) {
+  getPackagePlan(id: string) {
     return this.packages.get(id);
   }
 
-  setPackage(id: string, plan: Partial<PackagePlan> = {}): PackagePlan {
-    const out: PackagePlan = {
-      ...plan,
-      changelogIds: plan.changelogIds ?? new Set(),
-      publish: plan.publish ?? true,
-      type: plan.type ?? "patch",
-    };
-    this.packages.set(id, out);
-    return out;
+  bumpPackage(pkg: WorkspacePackage, { type, reason }: { type: BumpType; reason?: string }) {
+    let plan = this.packages.get(pkg.id);
+    if (!plan) {
+      plan = this.initPackagePlan(pkg);
+      this.packages.set(pkg.id, plan);
+    }
+    plan.type = plan.type ? maxBump(plan.type, type) : type;
+    if (reason) {
+      plan.bumpReasons ??= [];
+      plan.bumpReasons.push(reason);
+    }
+
+    return plan;
   }
 
-  deletePackage(id: string) {
-    return this.packages.delete(id);
+  hasPending() {
+    const { graph } = this.context;
+    for (const [id, plan] of this.packages) {
+      const pkg = graph.get(id);
+      if (pkg && plan.bumpVersion(pkg) !== pkg.version) return true;
+    }
+    return false;
   }
 
-  getChangelogIds() {
-    return Array.from(this.changelogs.keys());
+  getChangelogs() {
+    return Array.from(this.changelogs.values());
   }
 
   getChangelog(id: string) {
     return this.changelogs.get(id);
   }
 
-  setChangelog(id: string, entry: ChangelogEntry) {
-    this.changelogs.set(id, entry);
+  addChangelog(entry: ChangelogEntry) {
+    this.changelogs.set(entry.id, entry);
+    const { graph } = this.context;
+    const groupPackages = new Set<WorkspacePackage>();
+
+    for (const name of entry.packages) {
+      for (const pkg of graph.getByName(name)) groupPackages.add(pkg);
+    }
+
+    for (const pkg of groupPackages) {
+      const plan = this.bumpPackage(pkg, { type: entry.type });
+      plan.changelogs ??= [];
+      plan.changelogs.push(entry);
+    }
   }
 
   deleteChangelog(id: string): boolean {
     return this.changelogs.delete(id);
+  }
+
+  private initPackagePlan(pkg: WorkspacePackage) {
+    const context = this.context;
+    const plan = pkg.onPlan(context);
+
+    const group = context.graph.getPackageGroup(pkg.id);
+    // apply group configs
+    if (group) plan.prerelease ??= group.options.prerelease;
+
+    return plan;
   }
 
   /** Apply the publish plan: update package versions, write the plan file, and consume changelog files. */
@@ -92,7 +126,7 @@ export class DraftPlan {
     await Promise.all(writes);
 
     await mkdir(dirname(this.context.planPath), { recursive: true });
-    await writeFile(this.context.planPath, createPlanStore(this));
+    await writeFile(this.context.planPath, createPlanStore(this, this.context));
     await this.removeConsumedChangelogs();
     this.#applied = true;
   }
@@ -136,13 +170,8 @@ export class DraftPlan {
   }
 
   private async appendChangelog(pkg: WorkspacePackage, plan: PackagePlan): Promise<void> {
-    if (plan.changelogIds.size === 0) return;
+    if (!plan.changelogs || plan.changelogs.length === 0) return;
     const { generator = simpleGenerator() } = this.context.options;
-    const changelogs: ChangelogEntry[] = [];
-    for (const id of plan.changelogIds) {
-      const entry = this.changelogs.get(id);
-      if (entry) changelogs.push(entry);
-    }
 
     const generated = await generator.generate.call(this.context, {
       packageId: pkg.id,
@@ -150,7 +179,7 @@ export class DraftPlan {
       version: pkg.version,
       npm: plan.npm,
       plan,
-      changelogs,
+      changelogs: plan.changelogs,
       _draft: this,
     });
 
@@ -184,29 +213,10 @@ export async function createDraftPlan(
   changelogs: ChangelogEntry[],
   context: TegamiContext,
 ): Promise<DraftPlan> {
-  const changelogMap = new Map<string, ChangelogEntry>();
-  const byPackage = new Map<WorkspacePackage, ChangelogEntry[]>();
+  let draft = new DraftPlan(context);
 
   for (const entry of changelogs) {
-    changelogMap.set(entry.id, entry);
-
-    for (const requestedPackage of entry.packages) {
-      for (const pkg of context.graph.getByName(requestedPackage)) {
-        let entries = byPackage.get(pkg);
-        if (!entries) {
-          entries = [];
-          byPackage.set(pkg, entries);
-        }
-
-        entries.push(entry);
-      }
-    }
-  }
-
-  const packages = new Map<string, PackagePlan>();
-  for (const [pkg, entries] of byPackage.entries()) {
-    if (entries.length === 0) continue;
-    packages.set(pkg.id, createPackagePlan(pkg, entries, context));
+    draft.addChangelog(entry);
   }
 
   // TODO: create a special type of package plan to represent sync-version updates
@@ -215,38 +225,21 @@ export async function createDraftPlan(
 
     let bumpType: BumpType | undefined;
     for (const member of group.packages) {
-      const plan = packages.get(member.id);
-      if (!plan) continue;
+      const pkgPlan = draft.getPackagePlan(member.id);
+      if (!pkgPlan?.type) continue;
 
-      if (!bumpType) {
-        bumpType = plan.type;
-      } else {
-        bumpType = maxBump(bumpType, plan.type);
-      }
+      bumpType = bumpType ? maxBump(bumpType, pkgPlan.type) : pkgPlan.type;
     }
 
     if (!bumpType) continue;
     for (const member of group.packages) {
-      let plan = packages.get(member.id);
-      if (!plan) {
-        plan = createPackagePlan(member, [], context);
-        packages.set(member.id, plan);
-      }
-
-      plan.type = bumpType;
+      draft.bumpPackage(member, {
+        type: bumpType,
+        reason: "sync group package versions",
+      });
     }
   }
 
-  // apply group configs
-  for (const group of context.graph.getGroups()) {
-    for (const member of group.packages) {
-      const plan = packages.get(member.id);
-      if (!plan) continue;
-      plan.prerelease ??= group.options.prerelease;
-    }
-  }
-
-  let draft = new DraftPlan(changelogMap, packages, context);
   for (const plugin of context.plugins) {
     const next = await handlePluginError(plugin, "initPlan", () =>
       plugin.initPlan?.call(context, draft),
@@ -255,26 +248,4 @@ export async function createDraftPlan(
   }
 
   return draft;
-}
-
-function createPackagePlan(
-  pkg: WorkspacePackage,
-  entries: ChangelogEntry[],
-  context: TegamiContext,
-): PackagePlan {
-  let type: BumpType = "patch";
-  const changelogIds = new Set<string>();
-
-  for (const entry of entries) {
-    changelogIds.add(entry.id);
-    type = maxBump(type, entry.type);
-  }
-
-  const defaults = pkg.onPlan(context);
-  return {
-    ...defaults,
-    type,
-    changelogIds,
-    publish: defaults.publish ?? false,
-  };
 }

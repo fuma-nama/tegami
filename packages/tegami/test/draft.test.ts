@@ -4,9 +4,9 @@ import { join, normalize } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import type { PackagePlan } from "../src/plans/draft";
 import type { PackageManifest } from "../src/schemas";
 import { parsePlanStore } from "../src/plans/store";
+import { getPendingPackageIds, normalizePackagePlan } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -37,24 +37,27 @@ describe("draft publish plans", () => {
       },
     });
 
+    const context = await paper._internal.context();
     const draft = await paper.draft();
-    const packages = draft.getPackageIds();
-    const changelogId = draft.getChangelogIds()[0];
+    const packages = getPendingPackageIds(draft, context.graph).sort();
+    const changelogId = draft.getChangelogs()[0]?.id;
 
     expect(changelogId).toEqual(expect.any(String));
     expect({
       packages,
-      core: normalizePackagePlan(draft.getPackage("npm:@acme/core")),
-      ui: normalizePackagePlan(draft.getPackage("npm:@acme/ui")),
+      core: normalizePackagePlan(draft.getPackagePlan("npm:@acme/core")),
+      ui: normalizePackagePlan(draft.getPackagePlan("npm:@acme/ui")),
     }).toMatchInlineSnapshot(`
       {
         "core": {
+          "bumpVersion": [Function],
           "changelogIds": [
             "change.md:0",
           ],
           "npm": {
             "distTag": "alpha",
           },
+          "prerelease": undefined,
           "publish": true,
           "type": "minor",
         },
@@ -63,9 +66,12 @@ describe("draft publish plans", () => {
           "npm:@acme/ui",
         ],
         "ui": {
+          "bumpVersion": [Function],
           "changelogIds": [
             "change.md:0",
           ],
+          "npm": undefined,
+          "prerelease": undefined,
           "publish": true,
           "type": "minor",
         },
@@ -111,20 +117,11 @@ describe("draft publish plans", () => {
     const rawPlan = await readJson<{ packages: Record<string, { version?: string }> }>(
       join(cwd, ".tegami/publish-plan"),
     );
-    const plan = parsePlanStore(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
 
-    expect({
-      changelogs: plan.changelogs,
-      packages: Object.fromEntries(
-        Object.entries(plan.packages).map(([name, packagePlan]) => [
-          name,
-          normalizePackagePlan(packagePlan),
-        ]),
-      ),
-      rawPackageVersions: Object.fromEntries(
-        Object.entries(rawPlan.packages).map(([name, packagePlan]) => [name, packagePlan.version]),
-      ),
-    }).toMatchInlineSnapshot(`
+    delete (rawPlan as Record<string, unknown>).createdAt;
+    delete (rawPlan as Record<string, unknown>).id;
+
+    expect(rawPlan).toMatchInlineSnapshot(`
       {
         "changelogs": {
           "change.md:0": {
@@ -150,6 +147,10 @@ describe("draft publish plans", () => {
             "type": "minor",
           },
           "npm:@acme/ui": {
+            "bumpReasons": [
+              "update dependency "@acme/core-alias"",
+              "update dependency "@acme/core"",
+            ],
             "changelogIds": [
               "change.md:0",
             ],
@@ -157,10 +158,7 @@ describe("draft publish plans", () => {
             "type": "minor",
           },
         },
-        "rawPackageVersions": {
-          "npm:@acme/core": undefined,
-          "npm:@acme/ui": undefined,
-        },
+        "version": "0.0.0",
       }
     `);
   });
@@ -171,9 +169,11 @@ describe("draft publish plans", () => {
     });
     tempDirs.push(cwd);
 
-    const draft = await tegami({ cwd }).draft();
+    const paper = tegami({ cwd });
+    const draft = await paper.draft();
 
-    expect(draft.getPackageIds()).toEqual([]);
+    expect(draft.hasPending()).toBe(false);
+    expect(getPendingPackageIds(draft, (await paper._internal.context()).graph)).toEqual([]);
   });
 
   test("uses a custom log generator", async () => {
@@ -314,17 +314,6 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 
 async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
-}
-
-function normalizePackagePlan(plan: PackagePlan | undefined) {
-  if (!plan) return undefined;
-
-  return {
-    type: plan.type,
-    publish: plan.publish,
-    changelogIds: Array.from(plan.changelogIds),
-    ...(plan.npm ? { npm: plan.npm } : {}),
-  };
 }
 
 function normalizeDirPath(path: string): string {

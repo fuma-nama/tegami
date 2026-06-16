@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
+import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -85,8 +86,9 @@ describe("createChangelog", () => {
       ]
     `);
 
-    const draft = await tegami({ cwd }).draft();
-    expect(normalizePlan(draft)).toMatchInlineSnapshot(`
+    const paper = tegami({ cwd });
+    const draft = await paper.draft();
+    expect(await normalizePlan(draft, cwd)).toMatchInlineSnapshot(`
       {
         "npm:@acme/core": {
           "changelogIds": [
@@ -148,16 +150,20 @@ function normalizeFile(file: { packages: string[]; changes: number; content: str
   };
 }
 
-function normalizePlan(draft: Awaited<ReturnType<ReturnType<typeof tegami>["draft"]>>) {
+async function normalizePlan(
+  draft: Awaited<ReturnType<ReturnType<typeof tegami>["draft"]>>,
+  cwd: string,
+) {
+  const graph = await tegami({ cwd })._internal.graph();
   return Object.fromEntries(
-    draft.getPackageIds().map((id) => {
-      const plan = draft.getPackage(id)!;
+    getPendingPackageIds(draft, graph).map((id) => {
+      const plan = draft.getPackagePlan(id)!;
       return [
         id,
         {
           type: plan.type,
-          changelogIds: Array.from(plan.changelogIds).map((item) =>
-            item.replaceAll(/changes-[a-z0-9]+/g, "changes-<stamp>"),
+          changelogIds: (plan.changelogs ?? []).map((item) =>
+            item.id.replaceAll(/changes-[a-z0-9]+/g, "changes-<stamp>"),
           ),
         },
       ];

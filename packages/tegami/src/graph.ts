@@ -1,6 +1,7 @@
 import type { TegamiContext } from "./context";
 import type { PackagePlan } from "./plans/draft";
 import type { GroupOptions, PackageOptions } from "./types";
+import { bumpVersion } from "./utils/semver";
 
 /** Package discovered in the workspace. */
 export abstract class WorkspacePackage {
@@ -24,13 +25,16 @@ export abstract class WorkspacePackage {
     this.opts = options;
   }
 
-  /** Override defaults when building a draft plan. */
-  onPlan(_context: TegamiContext): Partial<PackagePlan> {
+  /** create an empty draft plan. */
+  onPlan(_context: TegamiContext): PackagePlan {
     const { publish, prerelease, npm } = this.opts;
     return {
       publish,
       prerelease,
       npm: npm ? { distTag: npm.distTag } : undefined,
+      bumpVersion(pkg) {
+        return bumpVersion(pkg.version, this.type, this.prerelease);
+      },
     };
   }
 }

@@ -1,4 +1,3 @@
-import { SemVer } from "semver";
 import type { TegamiContext } from "./context";
 import type { DraftPlan, PackagePlan } from "./plans/draft";
 import type { ChangelogEntry } from "./changelog/parse";

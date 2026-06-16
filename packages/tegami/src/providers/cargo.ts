@@ -6,11 +6,10 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { PlanStore } from "../plans/store";
 import type { TegamiContext } from "../context";
-import type { DraftPlan, PackagePlan } from "../plans/draft";
+import type { DraftPlan } from "../plans/draft";
 import type { Awaitable, TegamiPlugin, PublishPlanStatus, RegistryClient } from "../types";
 import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
-import { bumpVersion } from "../utils/semver";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
@@ -33,7 +32,7 @@ export class CargoPackage extends WorkspacePackage {
     return stringValue(this.packageInfo.version) ?? this.workspaceVersion ?? "0.0.0";
   }
 
-  onPlan(context: TegamiContext): Partial<PackagePlan> {
+  onPlan(context: TegamiContext) {
     const defaults = super.onPlan(context);
     defaults.publish ??= this.packageInfo.publish !== false;
     return defaults;
@@ -130,10 +129,9 @@ export function cargo(): TegamiPlugin {
       const bumpedPackages = new Map<CargoPackage, { $updateVersion: string | null }>();
       const writes: Awaitable<void>[] = [];
 
-      function bumpDeps(pkg: CargoPackage) {
+      const bumpDeps = (pkg: CargoPackage) => {
         const existing = bumpedPackages.get(pkg);
         if (existing) return existing;
-        let pkgPlan = draft.getPackage(pkg.id);
 
         for (const table of dependencyTables(pkg.manifest)) {
           for (const [rawName, rawSpec] of Object.entries(table)) {
@@ -152,9 +150,7 @@ export function cargo(): TegamiPlugin {
               table[rawName] = result;
 
               // TODO: allow user config
-              pkgPlan ??= draft.setPackage(pkg.id, {
-                type: "patch",
-              });
+              draft.bumpPackage(pkg, { type: "patch", reason: `update dependency "${rawName}"` });
               continue;
             }
 
@@ -169,17 +165,14 @@ export function cargo(): TegamiPlugin {
               }
 
               // TODO: allow user config
-              pkgPlan ??= draft.setPackage(pkg.id, {
-                type: "patch",
-              });
+              draft.bumpPackage(pkg, { type: "patch", reason: `update dependency "${rawName}"` });
             }
           }
         }
 
+        const bumpedVersion = draft.getPackagePlan(pkg.id)?.bumpVersion(pkg);
         const result = {
-          $updateVersion: pkgPlan
-            ? bumpVersion(pkg.version, pkgPlan.type, pkgPlan.prerelease)
-            : null,
+          $updateVersion: bumpedVersion && pkg.version !== bumpedVersion ? bumpedVersion : null,
         };
 
         bumpedPackages.set(pkg, result);
@@ -189,7 +182,7 @@ export function cargo(): TegamiPlugin {
 
         writes.push(pkg.write());
         return result;
-      }
+      };
 
       for (const pkg of graph.getPackages()) {
         if (pkg instanceof CargoPackage) bumpDeps(pkg);

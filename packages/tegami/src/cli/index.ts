@@ -182,22 +182,24 @@ async function versionPackages(
     );
   }
 
-  const packageIds = draft.getPackageIds();
-  if (packageIds.length === 0) {
+  if (draft.hasPending()) {
     note("No pending changelog entries matched workspace packages.", "Nothing to version");
     outro("No versions changed.");
     return;
   }
 
-  note(
-    packageIds
-      .map((id) => {
-        const plan = draft.getPackage(id)!;
-        return `${id}: ${plan.type} (${plan.changelogIds.size} changelogs)`;
-      })
-      .join("\n"),
-    "Release plan",
-  );
+  const planEntries: string[] = [];
+  for (const pkg of context.graph.getPackages()) {
+    const plan = draft.getPackagePlan(pkg.id);
+    if (!plan?.type) continue;
+
+    planEntries.push(`${pkg.id}: ${plan.type} (${plan.changelogs?.length ?? 0} changelogs)`);
+    for (const reason of plan.bumpReasons ?? []) {
+      planEntries.push(`  - ${reason}`);
+    }
+  }
+
+  note(planEntries.join("\n"), "Release plan");
 
   const s = spinner();
   s.start("Updating package versions");

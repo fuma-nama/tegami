@@ -14,25 +14,30 @@ const WEIGHTS = {
   major: 3,
   minor: 2,
   patch: 1,
-};
+} as const;
+
+const PRE = {
+  major: "premajor",
+  minor: "preminor",
+  patch: "prepatch",
+} as const;
 
 export function maxBump(a: BumpType, b: BumpType): BumpType {
   if (WEIGHTS[a] > WEIGHTS[b]) return a;
   return b;
 }
 
-export function bumpVersion(version: string, type: BumpType, prerelease?: string): string {
-  let next: string | null;
+export function bumpVersion(version: string, type?: BumpType, prerelease?: string): string {
+  let next: string | null = version;
 
   if (prerelease) {
     const parsed = parse(version);
     if (parsed?.prerelease[0] === prerelease) {
       next = inc(version, "prerelease", prerelease);
-    } else {
-      const preType = type === "major" ? "premajor" : type === "minor" ? "preminor" : "prepatch";
-      next = inc(version, preType, prerelease);
+    } else if (type) {
+      next = inc(version, PRE[type], prerelease);
     }
-  } else {
+  } else if (type) {
     next = inc(version, type);
   }
 

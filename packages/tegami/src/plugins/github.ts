@@ -129,12 +129,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
   function defaultVersionPRBody(draft: DraftPlan, context: TegamiContext): string {
     const packageLines: string[] = [];
 
-    for (const id of draft.getPackageIds()) {
-      const packagePlan = draft.getPackage(id);
-      if (!packagePlan) continue;
-
-      const pkg = context.graph.get(id);
-      if (!pkg) continue;
+    for (const pkg of context.graph.getPackages()) {
+      const packagePlan = draft.getPackagePlan(pkg.id);
+      if (!packagePlan?.type) continue;
 
       const publishTxt = packagePlan.publish ? "" : " (no publish)";
       const distTagTxt = formatNpmDistTag(packagePlan.npm?.distTag);
@@ -143,11 +140,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       );
     }
 
-    const changelogLines = draft
-      .getChangelogIds()
-      .map((id) => draft.getChangelog(id))
-      .filter((entry) => entry !== undefined)
-      .map((entry) => `- ${entry.title}`);
+    const changelogLines = draft.getChangelogs().map((entry) => `- ${entry.title}`);
     const sections = ["## Summary", ...packageLines];
 
     if (changelogLines.length > 0) {

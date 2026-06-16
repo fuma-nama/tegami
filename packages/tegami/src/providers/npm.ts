@@ -5,14 +5,12 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import type { PackagePlan } from "../plans/draft";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
 import type { Awaitable, PublishPlanStatus, RegistryClient, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
 import type { PackagePlanStore, PlanStore } from "../plans/store";
-import { bumpVersion } from "../utils/semver";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -43,7 +41,7 @@ export class NpmPackage extends WorkspacePackage {
     await writeFile(join(this.path, "package.json"), `${JSON.stringify(this.manifest, null, 2)}\n`);
   }
 
-  onPlan(context: TegamiContext): Partial<PackagePlan> {
+  onPlan(context: TegamiContext) {
     const defaults = super.onPlan(context);
     defaults.publish ??= this.manifest.private !== true;
 
@@ -247,7 +245,6 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
       function bumpDeps(pkg: NpmPackage) {
         const existing = bumpedPackages.get(pkg);
         if (existing) return existing;
-        let pkgPlan = draft.getPackage(pkg.id);
 
         for (const field of DEP_FIELDS) {
           const dependencies = pkg.manifest[field];
@@ -268,16 +265,13 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
             dependencies[k] = result;
 
             // TODO: allow user config
-            pkgPlan ??= draft.setPackage(pkg.id, {
-              type: "patch",
-            });
+            draft.bumpPackage(pkg, { type: "patch", reason: `update dependency "${k}"` });
           }
         }
 
+        const bumpedVersion = draft.getPackagePlan(pkg.id)?.bumpVersion(pkg);
         const result = {
-          $updateVersion: pkgPlan
-            ? bumpVersion(pkg.manifest.version ?? "0.0.0", pkgPlan.type, pkgPlan.prerelease)
-            : null,
+          $updateVersion: bumpedVersion && bumpedVersion !== pkg.version ? bumpedVersion : null,
         };
 
         bumpedPackages.set(pkg, result);
