@@ -132,7 +132,10 @@ describe("cargo packages", () => {
 
     const result = await tegami({ cwd, npm: { client: "npm" } }).publish();
 
-    expect(result.state).toBe("created");
+    if (result.state !== "created") {
+      throw new Error(`expected created, got ${result.state}`);
+    }
+
     expect(result.packages.map((pkg) => ({ name: pkg.name, state: pkg.state }))).toEqual(
       expect.arrayContaining([
         { name: "@acme/js", state: "success" },

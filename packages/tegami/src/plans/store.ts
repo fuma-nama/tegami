@@ -2,6 +2,7 @@ import z from "zod";
 import { jsonCodec } from "../schemas";
 import { DraftPlan } from "./draft";
 import { TegamiContext } from "../context";
+import { readFile } from "fs/promises";
 
 const packagePlanStoreSchema = z.object({
   type: z.enum(["major", "minor", "patch"]).optional(),
@@ -78,4 +79,10 @@ export function createPlanStore(draft: DraftPlan, context: TegamiContext): strin
 
 export function parsePlanStore(content: string): PlanStore {
   return planStoreSchema.decode(content);
+}
+
+export async function readPlanStore(context: TegamiContext) {
+  try {
+    return planStoreSchema.decode(await readFile(context.planPath, "utf8"));
+  } catch {}
 }

@@ -6,6 +6,7 @@ import { x } from "tinyexec";
 import { createTegamiContext } from "../src/context";
 import { publishPlanStatus } from "../src/plans/draft";
 import type { PlanStore } from "../src/plans/store";
+import { readPlanStore } from "../src/plans/store";
 import { NpmPackage, NpmRegistryClient } from "../src/providers/npm";
 import { PackageGraph } from "../src/graph";
 
@@ -28,7 +29,8 @@ describe("registry client", () => {
   test("caches package version lookups and reads the registry from the graph", async () => {
     const packageGraph = graph("https://registry.example.test");
     const client = new NpmRegistryClient("/repo", "pnpm", packageGraph);
-    const pkg = packageGraph.get("npm:@acme/core")!;
+    const pkg = packageGraph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
 
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
@@ -57,7 +59,8 @@ describe("registry client", () => {
   test("returns false for missing package versions", async () => {
     const packageGraph = graph(undefined, "9.9.9");
     const client = new NpmRegistryClient("/repo", "npm", packageGraph);
-    const pkg = packageGraph.get("npm:@acme/core")!;
+    const pkg = packageGraph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
 
     exec.mockResolvedValue(
       execResult({
@@ -71,17 +74,17 @@ describe("registry client", () => {
 });
 
 describe("publish plan status", () => {
-  test("returns missing when no publish plan exists", async () => {
+  test("readPlanStore returns undefined when no publish plan exists", async () => {
     const context = await createTestContext();
 
-    await expect(publishPlanStatus(context)).resolves.toEqual({ state: "missing" });
+    await expect(readPlanStore(context)).resolves.toBeUndefined();
   });
 
   test("returns success when publishable packages are on the registry", async () => {
     const context = await createTestContext({ plan: storedPlan() });
     exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
 
-    await expect(publishPlanStatus(context)).resolves.toEqual({ state: "success" });
+    await expect(publishPlanStatus(storedPlan(), context)).resolves.toEqual({ state: "success" });
     expect(exec).toHaveBeenCalledWith(
       "npm",
       [
@@ -109,7 +112,7 @@ describe("publish plan status", () => {
       }),
     );
 
-    await expect(publishPlanStatus(context)).resolves.toEqual({ state: "pending" });
+    await expect(publishPlanStatus(storedPlan(), context)).resolves.toEqual({ state: "pending" });
   });
 });
 
@@ -129,7 +132,7 @@ async function createTestContext(options: { plan?: PlanStore } = {}) {
               id,
               {
                 ...plan,
-                changelogIds: Array.from(plan.changelogIds),
+                changelogIds: Array.from(plan.changelogIds ?? []),
               },
             ]),
           ),
@@ -174,7 +177,7 @@ function storedPlan(): PlanStore {
     packages: {
       "npm:@acme/core": {
         type: "patch",
-        changelogIds: new Set(),
+        changelogIds: [],
         npm: { distTag: "latest" },
         publish: true,
       },

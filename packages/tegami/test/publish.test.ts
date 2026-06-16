@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { x } from "tinyexec";
@@ -7,6 +7,7 @@ import { tegami } from "../src";
 import { createTegamiContext, TegamiContext } from "../src/context";
 import type { PackagePublishResult, PublishOptions, PublishResult } from "../src/publish";
 import { publishFromPlan } from "../src/publish";
+import { cleanupPublishPlan } from "../src/plans/draft";
 import { parsePlanStore } from "../src/plans/store";
 
 vi.mock("tinyexec", () => ({
@@ -18,6 +19,7 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  mockPendingPlan();
 });
 
 afterEach(async () => {
@@ -49,18 +51,34 @@ describe("publish plans", () => {
         state: "success",
       }),
     ]);
-    expect(exec).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledWith(
+      "pnpm",
+      [
+        "view",
+        "@acme/core@1.0.1",
+        "version",
+        "--json",
+        "--registry",
+        "https://registry.example.test",
+      ],
+      {
+        nodeOptions: {
+          cwd,
+        },
+      },
+    );
   });
 
-  test("does not republish versions that already exist in the registry", async () => {
+  test("skips publish when the plan is already finished", async () => {
     const { cwd, planPath } = await createPublishFixture({
       registry: "https://registry.example.test",
     });
 
     exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
 
-    const result = createdResult(
-      await publishFixture(
+    await expect(
+      publishFixture(
         planPath,
         await createTegamiContext({
           cwd,
@@ -71,14 +89,7 @@ describe("publish plans", () => {
           dryRun: false,
         },
       ),
-    );
-
-    expect(result.packages).toEqual([
-      expect.objectContaining({
-        name: "@acme/core",
-        state: "success",
-      }),
-    ]);
+    ).resolves.toEqual({ state: "skipped" });
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith(
@@ -273,7 +284,6 @@ Not versioned yet.
 
     await expect(tegami({ cwd, planPath }).publish()).resolves.toEqual({
       state: "skipped",
-      planPath,
     });
     expect(exec).not.toHaveBeenCalled();
   });
@@ -284,7 +294,6 @@ Not versioned yet.
 
     await expect(tegami({ cwd }).publish()).resolves.toEqual({
       state: "skipped",
-      planPath: join(cwd, ".tegami/publish-plan"),
     });
   });
 
@@ -315,6 +324,70 @@ Not versioned yet.
 
     expect(result).toEqual({
       state: "skipped",
+    });
+  });
+});
+
+describe("cleanup publish plan", () => {
+  test("removes the publish plan when publishing has finished", async () => {
+    const { cwd, planPath } = await createPublishFixture({
+      registry: "https://registry.example.test",
+    });
+
+    exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
+
+    const context = await createTegamiContext({
+      cwd,
+      planPath,
+      npm: { client: "npm" },
+    });
+
+    await expect(cleanupPublishPlan(context)).resolves.toEqual({
+      state: "removed",
+      planPath,
+    });
+    await expect(access(planPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("skips cleanup when the publish plan is still pending", async () => {
+    const { cwd, planPath } = await createPublishFixture();
+
+    const context = await createTegamiContext({
+      cwd,
+      planPath,
+    });
+
+    await expect(cleanupPublishPlan(context)).resolves.toEqual({
+      state: "skipped",
+      reason: "pending",
+      planPath,
+    });
+    await expect(readFile(planPath, "utf8")).resolves.toBeTruthy();
+  });
+
+  test("skips cleanup when no publish plan exists", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-publish-cleanup-"));
+    tempDirs.push(cwd);
+    const planPath = join(cwd, ".tegami/publish-plan");
+
+    const context = await createTegamiContext({ cwd, planPath });
+
+    await expect(cleanupPublishPlan(context)).resolves.toEqual({
+      state: "skipped",
+      reason: "missing",
+      planPath,
+    });
+  });
+
+  test("tegami.cleanup removes a finished publish plan", async () => {
+    const { cwd, planPath } = await createPublishFixture({
+      registry: "https://registry.example.test",
+    });
+
+    exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
+
+    await expect(tegami({ cwd, planPath, npm: { client: "npm" } }).cleanup()).resolves.toEqual({
+      state: "removed",
       planPath,
     });
   });
@@ -447,6 +520,15 @@ function execResult(overrides: Partial<ExecResult> = {}): ExecResult {
 
 function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x> {
   return execResult(overrides) as unknown as ReturnType<typeof x>;
+}
+
+function mockPendingPlan() {
+  exec.mockResolvedValue(
+    execResult({
+      exitCode: 1,
+      stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
+    }),
+  );
 }
 
 function createdResult(result: PublishResult) {

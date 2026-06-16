@@ -5,7 +5,7 @@ import { simpleGenerator } from "../generators/simple";
 import { BumpType, maxBump } from "../utils/semver";
 import type { WorkspacePackage } from "../graph";
 import type { ChangelogEntry } from "../changelog/parse";
-import { createPlanStore, parsePlanStore, PlanStore } from "./store";
+import { createPlanStore, PlanStore, readPlanStore } from "./store";
 import type { Awaitable, PublishPlanStatus } from "../types";
 import { handlePluginError } from "../utils/error";
 
@@ -162,7 +162,9 @@ export class DraftPlan {
   }
 
   private async assertPublishPlanFinished(): Promise<void> {
-    const status = await publishPlanStatus(this.context);
+    const store = await readPlanStore(this.context);
+    if (!store) return;
+    const status = await publishPlanStatus(store, this.context);
 
     if (status.state === "pending") {
       throw new Error(
@@ -211,17 +213,10 @@ export class DraftPlan {
   }
 }
 
-export async function publishPlanStatus(context: TegamiContext): Promise<PublishPlanStatus> {
-  const content = await readFile(context.planPath, "utf8").catch(() => undefined);
-  if (!content) return { state: "missing" };
-
-  let store: PlanStore;
-  try {
-    store = parsePlanStore(content);
-  } catch {
-    return { state: "missing" };
-  }
-
+export async function publishPlanStatus(
+  store: PlanStore,
+  context: TegamiContext,
+): Promise<PublishPlanStatus> {
   async function defaultStatus(): Promise<PublishPlanStatus> {
     for (const [id, pkgPlan] of Object.entries(store.packages)) {
       const pkg = context.graph.get(id);
@@ -242,6 +237,32 @@ export async function publishPlanStatus(context: TegamiContext): Promise<Publish
     if (resolved) status = resolved;
   }
   return status;
+}
+
+export type CleanupResult =
+  | {
+      state: "removed";
+      planPath: string;
+    }
+  | {
+      state: "skipped";
+      reason: "missing" | "pending";
+      planPath: string;
+    };
+
+export async function cleanupPublishPlan(context: TegamiContext): Promise<CleanupResult> {
+  const store = await readPlanStore(context);
+  if (!store) {
+    return { state: "skipped", reason: "missing", planPath: context.planPath };
+  }
+
+  const status = await publishPlanStatus(store, context);
+  if (status.state !== "success") {
+    return { state: "skipped", reason: "pending", planPath: context.planPath };
+  }
+
+  await rm(context.planPath, { force: true });
+  return { state: "removed", planPath: context.planPath };
 }
 
 export async function createDraftPlan(

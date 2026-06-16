@@ -1,6 +1,7 @@
 import type { TegamiContext } from "./context";
 import type { ChangelogEntry } from "./changelog/parse";
 import type { PlanStore } from "./plans/store";
+import { publishPlanStatus } from "./plans/draft";
 
 export interface PublishOptions {
   /** Validate the publish plan without publishing packages, creating tags, or running release plugins. */
@@ -11,9 +12,6 @@ export type PublishResult =
   | {
       state: "created";
       packages: PackagePublishResult[];
-
-      /** Path to the publish plan that was executed. */
-      planPath: string;
       /** the persisted plan object. This is not a public API, can be changed without notice */
       _rawPlan: PlanStore;
     }
@@ -22,15 +20,11 @@ export type PublishResult =
       error?: string;
       packages: PackagePublishResult[];
 
-      /** Path to the publish plan that was executed. */
-      planPath: string;
       /** the persisted plan object. This is not a public API, can be changed without notice */
       _rawPlan: PlanStore;
     }
   | {
       state: "skipped";
-      /** Path to the publish plan that was executed or missing. */
-      planPath: string;
     };
 
 export type PackagePublishResult = (
@@ -60,6 +54,10 @@ export async function publishFromPlan(
 ): Promise<PublishResult> {
   const { dryRun = false } = options;
   const packages: PackagePublishResult[] = [];
+  const status = await publishPlanStatus(store, context);
+  if (status.state !== "pending") {
+    return { state: "skipped" };
+  }
 
   for (const [id, plan] of Object.entries(store.packages)) {
     if (!plan.publish) continue;
@@ -121,10 +119,9 @@ export async function publishFromPlan(
     }
   }
 
-  if (packages.length === 0) return { state: "skipped", planPath: context.planPath };
+  if (packages.length === 0) return { state: "skipped" };
 
   return {
-    planPath: context.planPath,
     state: packages.some((pkg) => pkg.state === "failed") ? "failed" : "created",
     packages,
     _rawPlan: store,

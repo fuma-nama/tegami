@@ -63,6 +63,11 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
       runAction(tegami, () => publishPackages(tegami, { ...commandOptions, cli: options })),
     );
 
+  program
+    .command("cleanup")
+    .description("remove the publish plan after all packages have been published")
+    .action(() => runAction(tegami, () => runCleanup(tegami)));
+
   return program;
 }
 
@@ -237,8 +242,9 @@ async function publishPackages(
   const result = customPublish ? await customPublish() : await tegami.publish({ dryRun });
 
   if (result.state === "skipped") {
+    const { planPath } = await tegami._internal.context();
     s.stop(dryRun ? "No publish plan to validate" : "Nothing to publish");
-    outro(`No publishable packages were found in ${result.planPath}.`);
+    outro(`No publishable packages were found in ${planPath}.`);
     return;
   }
 
@@ -261,6 +267,27 @@ async function publishPackages(
   }
 
   outro(dryRun ? "Publish plan is valid." : "Packages published.");
+}
+
+async function runCleanup(tegami: Tegami): Promise<void> {
+  intro("Cleanup publish plan");
+
+  const s = spinner();
+  s.start("Checking publish plan status");
+  const result = await tegami.cleanup();
+  s.stop(result.state === "removed" ? "Publish plan removed" : "Publish plan kept");
+
+  if (result.state === "removed") {
+    outro(`Removed ${result.planPath}.`);
+    return;
+  }
+
+  if (result.reason === "missing") {
+    outro(`No publish plan found at ${result.planPath}.`);
+    return;
+  }
+
+  outro(`Publish plan at ${result.planPath} is still pending. Publish it before cleanup.`);
 }
 
 function renderManualChangelog(packages: string[], type: BumpType, message: string): string {
@@ -296,14 +323,13 @@ async function runAction(tegami: Tegami, action: () => Awaitable<void>): Promise
 
     await action();
   } catch (error) {
-    process.exitCode = 1;
-
     if (error instanceof CancelledError) {
       outro(error.message);
-      return;
+    } else {
+      note(error instanceof Error ? error.message : String(error), "Error");
+      outro("Command failed.");
     }
 
-    note(error instanceof Error ? error.message : String(error), "Error");
-    outro("Command failed.");
+    process.exit(1);
   }
 }

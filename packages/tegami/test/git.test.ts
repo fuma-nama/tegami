@@ -316,7 +316,6 @@ class TestPackage extends WorkspacePackage {
 
 function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
   return {
-    planPath: "/repo/.tegami/publish-plan",
     _rawPlan: {
       version: "0.0.0",
       id: "tegami-test",

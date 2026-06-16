@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { DraftPlan } from "../src/plans/draft";
 import { github } from "../src/plugins/github";
+import type { TegamiContext } from "../src/context";
 import type { TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 
@@ -588,7 +589,7 @@ function publishContext() {
   };
 }
 
-function testPackage(): WorkspacePackage {
+function testPackage(): TestPackage {
   return new TestPackage();
 }
 
@@ -608,8 +609,11 @@ class TestPackage extends WorkspacePackage {
     this.#version = version;
   }
 
-  onPlan() {
-    return { publish: true };
+  onPlan(context: TegamiContext) {
+    return {
+      ...super.onPlan(context),
+      publish: true,
+    };
   }
 
   async write(): Promise<void> {}
@@ -633,8 +637,8 @@ async function runVersionPullRequest(
   context: ReturnType<typeof publishContext>,
   draft: DraftPlan,
 ) {
-  const pkg = context.graph.get("test:@acme/core") as TestPackage;
-  if (!pkg) throw new Error("missing package");
+  const pkg = context.graph.get("test:@acme/core");
+  if (!(pkg instanceof TestPackage)) throw new Error("missing package");
 
   await plugin.cli?.publishPlanCreated?.call(context, draft);
   pkg.setVersion("1.1.0");
@@ -654,7 +658,6 @@ function registryClient() {
 
 function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
   return {
-    planPath: "/repo/.tegami/publish-plan",
     _rawPlan: {
       version: "0.0.0",
       id: "tegami-test",

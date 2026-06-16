@@ -1,15 +1,15 @@
-import { readFile } from "node:fs/promises";
 import { createChangelog } from "./changelog/create";
 import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
 import { createTegamiContext, TegamiContext } from "./context";
-import { DraftPlan, createDraftPlan } from "./plans/draft";
+import { DraftPlan, cleanupPublishPlan, createDraftPlan } from "./plans/draft";
+import type { CleanupResult } from "./plans/draft";
 import { getChangelogFiles, readChangelogEntries } from "./changelog/parse";
 import { publishFromPlan } from "./publish";
 import type { PublishOptions, PublishResult } from "./publish";
 import type { TegamiOptions } from "./types";
-import { isNodeError, handlePluginError } from "./utils/error";
+import { handlePluginError } from "./utils/error";
 import { PackageGraph } from "./graph";
-import { parsePlanStore } from "./plans/store";
+import { readPlanStore } from "./plans/store";
 
 export type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
 export type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
@@ -32,6 +32,8 @@ export interface Tegami {
   draft(): Promise<DraftPlan>;
   /** Publish the current publish plan. */
   publish(options?: PublishOptions): Promise<PublishResult>;
+  /** Remove the publish plan file after it has finished successfully. */
+  cleanup(): Promise<CleanupResult>;
 
   /** Internal APIs, do not use it unless you know what you are doing */
   _internal: {
@@ -75,17 +77,11 @@ export function tegami<const Groups extends string = string>(
 
       // it implies a new versioning cycle has started
       if (changelogs.length > 0) {
-        return { state: "skipped", planPath: context.planPath };
+        return { state: "skipped" };
       }
 
-      const parsed = await readFile(context.planPath, "utf8")
-        .then((content) => parsePlanStore(content))
-        .catch((error: unknown) => {
-          if (isNodeError(error) && error.code === "ENOENT") return undefined;
-          throw error;
-        });
-
-      if (parsed === undefined) return { state: "skipped", planPath: context.planPath };
+      const parsed = await readPlanStore(context);
+      if (!parsed) return { state: "skipped" };
 
       let result = await publishFromPlan(context, parsed, publishOptions);
 
@@ -98,6 +94,10 @@ export function tegami<const Groups extends string = string>(
       }
 
       return result;
+    },
+
+    async cleanup() {
+      return cleanupPublishPlan(await $context);
     },
   };
 }
