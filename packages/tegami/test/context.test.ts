@@ -92,6 +92,7 @@ describe("tegami context", () => {
       cwd: "/repo",
     });
 
+    expect(context.changelogDir).toBe("/repo/.tegami");
     expect(context.planPath).toBe("/repo/.tegami/publish-plan");
   });
 

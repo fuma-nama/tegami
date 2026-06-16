@@ -107,7 +107,10 @@ export class DraftPlan {
 
   /** Apply the publish plan: update package versions, write the plan file, and consume changelog files. */
   async applyPlan(): Promise<void> {
-    this.assertEditable();
+    if (this.#applied) {
+      throw new Error("This draft has already applied a publish plan.");
+    }
+    this.#applied = true;
     await this.assertPublishPlanFinished();
 
     for (const plugin of this.context.plugins) {
@@ -117,7 +120,6 @@ export class DraftPlan {
     }
 
     this.applyGroupPolicy();
-    this.#applied = true;
 
     const { graph } = this.context;
     const writes: Awaitable<void>[] = [];
@@ -176,16 +178,10 @@ export class DraftPlan {
   private async removeConsumedChangelogs() {
     const writes: Promise<void>[] = [];
     for (const entry of this.changelogs.values()) {
-      const file = path.resolve(this.context.cwd, this.context.changelogDir, entry.filename);
+      const file = path.resolve(this.context.changelogDir, entry.filename);
       writes.push(rm(file, { force: true }));
     }
     await Promise.all(writes);
-  }
-
-  private assertEditable(): void {
-    if (this.#applied) {
-      throw new Error("This draft has already applied a publish plan.");
-    }
   }
 
   private async appendChangelog(pkg: WorkspacePackage, plan: PackagePlan): Promise<void> {
@@ -242,27 +238,25 @@ export async function publishPlanStatus(
 export type CleanupResult =
   | {
       state: "removed";
-      planPath: string;
     }
   | {
       state: "skipped";
       reason: "missing" | "pending";
-      planPath: string;
     };
 
 export async function cleanupPublishPlan(context: TegamiContext): Promise<CleanupResult> {
   const store = await readPlanStore(context);
   if (!store) {
-    return { state: "skipped", reason: "missing", planPath: context.planPath };
+    return { state: "skipped", reason: "missing" };
   }
 
   const status = await publishPlanStatus(store, context);
   if (status.state !== "success") {
-    return { state: "skipped", reason: "pending", planPath: context.planPath };
+    return { state: "skipped", reason: "pending" };
   }
 
   await rm(context.planPath, { force: true });
-  return { state: "removed", planPath: context.planPath };
+  return { state: "removed" };
 }
 
 export async function createDraftPlan(

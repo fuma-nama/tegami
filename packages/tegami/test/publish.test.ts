@@ -344,7 +344,6 @@ describe("cleanup publish plan", () => {
 
     await expect(cleanupPublishPlan(context)).resolves.toEqual({
       state: "removed",
-      planPath,
     });
     await expect(access(planPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -360,7 +359,6 @@ describe("cleanup publish plan", () => {
     await expect(cleanupPublishPlan(context)).resolves.toEqual({
       state: "skipped",
       reason: "pending",
-      planPath,
     });
     await expect(readFile(planPath, "utf8")).resolves.toBeTruthy();
   });
@@ -375,7 +373,6 @@ describe("cleanup publish plan", () => {
     await expect(cleanupPublishPlan(context)).resolves.toEqual({
       state: "skipped",
       reason: "missing",
-      planPath,
     });
   });
 
@@ -388,7 +385,6 @@ describe("cleanup publish plan", () => {
 
     await expect(tegami({ cwd, planPath, npm: { client: "npm" } }).cleanup()).resolves.toEqual({
       state: "removed",
-      planPath,
     });
   });
 });

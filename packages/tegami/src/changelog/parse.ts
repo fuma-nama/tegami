@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import type { Heading, Root, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
@@ -20,16 +20,13 @@ export interface ChangelogEntry {
 }
 
 export async function getChangelogFiles(context: TegamiContext): Promise<string[]> {
-  const { cwd, changelogDir } = context;
-  const dir = resolve(cwd, changelogDir);
-  const files = await readdir(dir).catch(() => []);
+  const files = await readdir(context.changelogDir).catch(() => []);
 
   return files.filter((file) => file.endsWith(".md"));
 }
 
 export async function readChangelogEntries(context: TegamiContext): Promise<ChangelogEntry[]> {
-  const { cwd, changelogDir } = context;
-  const dir = resolve(cwd, changelogDir);
+  const dir = context.changelogDir;
 
   const files = await getChangelogFiles(context);
   const entries = await Promise.all(

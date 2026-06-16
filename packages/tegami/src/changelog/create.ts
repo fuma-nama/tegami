@@ -41,7 +41,7 @@ export async function createChangelog(
     else groups.set(key, [commit]);
   }
 
-  const directory = join(context.cwd, context.changelogDir);
+  const directory = context.changelogDir;
   await mkdir(directory, { recursive: true });
 
   const created: CreatedChangelog[] = [];

@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   confirm,
   intro,
@@ -76,7 +76,7 @@ async function createChangelogs(
   _options: ChangelogCommandOptions & { cli: TegamiCLIOptions },
 ): Promise<void> {
   intro("Create changelogs");
-  const { graph, cwd, changelogDir } = await tegami._internal.context();
+  const { graph, changelogDir } = await tegami._internal.context();
   const packages = graph.getPackages();
   let selectedPackages: string[] = [];
 
@@ -153,7 +153,7 @@ async function createChangelogs(
   if (isCancel(message)) throw new CancelledError();
 
   const filename = changelogFilename();
-  const directory = resolve(cwd, changelogDir);
+  const directory = changelogDir;
 
   const s = spinner();
   s.start("Creating changelog");
@@ -275,19 +275,20 @@ async function runCleanup(tegami: Tegami): Promise<void> {
   const s = spinner();
   s.start("Checking publish plan status");
   const result = await tegami.cleanup();
+  const { planPath } = await tegami._internal.context();
   s.stop(result.state === "removed" ? "Publish plan removed" : "Publish plan kept");
 
   if (result.state === "removed") {
-    outro(`Removed ${result.planPath}.`);
+    outro(`Removed ${planPath}.`);
     return;
   }
 
   if (result.reason === "missing") {
-    outro(`No publish plan found at ${result.planPath}.`);
+    outro(`No publish plan found at ${planPath}.`);
     return;
   }
 
-  outro(`Publish plan at ${result.planPath} is still pending. Publish it before cleanup.`);
+  outro(`Publish plan at ${planPath} is still pending. Publish it before cleanup.`);
 }
 
 function renderManualChangelog(packages: string[], type: BumpType, message: string): string {
