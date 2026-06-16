@@ -10,10 +10,15 @@ export function formatPackageVersion(name: string, version: string, distTag?: st
   return `${name}@${version}${formatNpmDistTag(distTag)}`;
 }
 
+const WEIGHTS = {
+  major: 3,
+  minor: 2,
+  patch: 1,
+};
+
 export function maxBump(a: BumpType, b: BumpType): BumpType {
-  if (a === "major" || b === "major") return "major";
-  if (a === "minor" || b === "minor") return "minor";
-  return "patch";
+  if (WEIGHTS[a] > WEIGHTS[b]) return a;
+  return b;
 }
 
 export function bumpVersion(version: string, type: BumpType, prerelease?: string): string {

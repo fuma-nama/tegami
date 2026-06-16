@@ -66,16 +66,7 @@ export function tegami<const Groups extends string = string>(
     async draft() {
       const context = await $context;
       const changelogs = await readChangelogEntries(context);
-      let plan = createDraftPlan(changelogs, context);
-
-      for (const plugin of context.plugins) {
-        const next = await handlePluginError(plugin, "initPlan", () =>
-          plugin.initPlan?.call(context, plan),
-        );
-        plan = next ?? plan;
-      }
-
-      return plan;
+      return createDraftPlan(changelogs, context);
     },
 
     async publish(publishOptions = {}) {

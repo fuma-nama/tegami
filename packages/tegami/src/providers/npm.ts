@@ -7,11 +7,12 @@ import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { PackagePlan } from "../plans/draft";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
-import type { PublishPlanStatus, RegistryClient, DependencySpec, TegamiPlugin } from "../types";
+import type { Awaitable, PublishPlanStatus, RegistryClient, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
 import type { PackagePlanStore, PlanStore } from "../plans/store";
+import { bumpVersion } from "../utils/semver";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -38,29 +39,6 @@ export class NpmPackage extends WorkspacePackage {
     return this.manifest.version ?? "0.0.0";
   }
 
-  setVersion(version: string): void {
-    this.manifest.version = version;
-  }
-
-  async updateDependency(target: WorkspacePackage, version: string, context: TegamiContext) {
-    if (!(target instanceof NpmPackage)) return;
-
-    const next = semver.parse(version);
-    if (!next) return;
-
-    for (const field of DEP_FIELDS) {
-      const dependencies = this.manifest[field];
-      if (!dependencies) continue;
-
-      for (const [rawName, rawRange] of Object.entries(dependencies)) {
-        const spec = parseNpmDependency(rawName, rawRange);
-        if (!spec || spec.name !== target.name) continue;
-
-        dependencies[rawName] = formatNpmDependency(await this.updateRange(context, spec, next));
-      }
-    }
-  }
-
   async write(): Promise<void> {
     await writeFile(join(this.path, "package.json"), `${JSON.stringify(this.manifest, null, 2)}\n`);
   }
@@ -79,10 +57,6 @@ export class NpmPackage extends WorkspacePackage {
 }
 
 type NpmClient = "npm" | "pnpm";
-
-interface NpmDependencySpec extends DependencySpec {
-  protocol?: "npm" | "workspace";
-}
 
 export class NpmRegistryClient implements RegistryClient {
   readonly id = "npm";
@@ -184,6 +158,12 @@ function isMissingRegistryEntry(output: string): boolean {
   );
 }
 
+interface NpmDependencySpec {
+  name: string;
+  range: string;
+  protocol?: "npm" | "workspace";
+}
+
 function parseNpmDependency(rawName: string, rawRange: string): NpmDependencySpec | undefined {
   if (rawRange.startsWith("workspace:")) {
     return {
@@ -208,13 +188,12 @@ function parseNpmDependency(rawName: string, rawRange: string): NpmDependencySpe
   return { name: rawName, range: rawRange };
 }
 
-function formatNpmDependency(spec: DependencySpec): string {
-  const npmSpec = spec as NpmDependencySpec;
-  if (npmSpec.protocol === "workspace") {
+function formatNpmDependency(spec: NpmDependencySpec): string {
+  if (spec.protocol === "workspace") {
     return `workspace:${spec.range}`;
   }
 
-  if (npmSpec.protocol === "npm") {
+  if (spec.protocol === "npm") {
     return `npm:${spec.name}@${spec.range}`;
   }
 
@@ -228,6 +207,16 @@ export interface NpmPluginOptions {
 
 export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlugin {
   let client: NpmClient;
+
+  function updateRange(spec: NpmDependencySpec, next: semver.SemVer): string | false {
+    // Ignore special syntax like "latest".
+    if (!semver.validRange(spec.range)) return false;
+    const range = new semver.Range(spec.range);
+    if (range.test(next)) return false;
+
+    spec.range = next.format();
+    return formatNpmDependency(spec);
+  }
 
   return {
     name: "npm",
@@ -249,6 +238,62 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
     },
     createRegistryClient() {
       return new NpmRegistryClient(this.cwd, client, this.graph);
+    },
+    async applyPlan(draft) {
+      const { graph } = this;
+      const bumpedPackages = new Map<NpmPackage, { $updateVersion: string | null }>();
+      const writes: Awaitable<void>[] = [];
+
+      function bumpDeps(pkg: NpmPackage) {
+        const existing = bumpedPackages.get(pkg);
+        if (existing) return existing;
+        let pkgPlan = draft.getPackage(pkg.id);
+
+        for (const field of DEP_FIELDS) {
+          const dependencies = pkg.manifest[field];
+          if (!dependencies) continue;
+
+          for (const [k, v] of Object.entries(dependencies)) {
+            const spec = parseNpmDependency(k, v);
+            if (!spec) continue;
+
+            const linked = graph.get(`npm:${spec.name}`);
+            if (!linked || !(linked instanceof NpmPackage)) continue;
+            const next = semver.parse(bumpDeps(linked).$updateVersion);
+            if (!next) continue;
+
+            const result = updateRange(spec, next);
+            if (result === false) continue;
+
+            dependencies[k] = result;
+
+            // TODO: allow user config
+            pkgPlan ??= draft.setPackage(pkg.id, {
+              type: "patch",
+            });
+          }
+        }
+
+        const result = {
+          $updateVersion: pkgPlan
+            ? bumpVersion(pkg.manifest.version ?? "0.0.0", pkgPlan.type, pkgPlan.prerelease)
+            : null,
+        };
+
+        bumpedPackages.set(pkg, result);
+        if (result.$updateVersion) {
+          pkg.manifest.version = result.$updateVersion;
+        }
+
+        writes.push(pkg.write());
+        return result;
+      }
+
+      for (const pkg of graph.getPackages()) {
+        if (pkg instanceof NpmPackage) bumpDeps(pkg);
+      }
+
+      await Promise.all(writes);
     },
   };
 }

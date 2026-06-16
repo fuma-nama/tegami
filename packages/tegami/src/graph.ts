@@ -1,8 +1,6 @@
 import type { TegamiContext } from "./context";
 import type { PackagePlan } from "./plans/draft";
-import type { Awaitable, DependencySpec, GroupOptions, PackageOptions } from "./types";
-import { handlePluginError } from "./utils/error";
-import * as semver from "semver";
+import type { GroupOptions, PackageOptions } from "./types";
 
 /** Package discovered in the workspace. */
 export abstract class WorkspacePackage {
@@ -13,35 +11,6 @@ export abstract class WorkspacePackage {
 
   get id(): string {
     return `${this.manager}:${this.name}`;
-  }
-
-  abstract setVersion(version: string): void;
-  abstract updateDependency(
-    target: WorkspacePackage,
-    version: string,
-    context: TegamiContext,
-  ): Awaitable<void>;
-  abstract write(): Awaitable<void>;
-
-  protected async updateRange(
-    context: TegamiContext,
-    spec: DependencySpec,
-    next: semver.SemVer,
-  ): Promise<DependencySpec> {
-    for (const plugin of context.plugins) {
-      const result = await handlePluginError(plugin, "onUpdateRange", () =>
-        plugin.onUpdateRange?.call(context, this, spec, next),
-      );
-      if (result) return result;
-    }
-
-    // Ignore special syntax like "latest".
-    if (!semver.validRange(spec.range)) return spec;
-    const range = new semver.Range(spec.range);
-    if (range.test(next)) return spec;
-
-    spec.range = next.format();
-    return spec;
   }
 
   private opts: PackageOptions = {};

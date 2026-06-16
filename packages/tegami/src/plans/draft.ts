@@ -2,11 +2,12 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path, { dirname, join } from "node:path";
 import type { TegamiContext } from "../context";
 import { simpleGenerator } from "../generators/simple";
-import { BumpType, bumpVersion, maxBump } from "../utils/semver";
+import { BumpType, maxBump } from "../utils/semver";
 import type { WorkspacePackage } from "../graph";
 import type { ChangelogEntry } from "../changelog/parse";
 import { createPlanStore, parsePlanStore, PlanStore } from "./store";
 import type { Awaitable, PublishPlanStatus } from "../types";
+import { handlePluginError } from "../utils/error";
 
 export interface PackagePlan {
   type: BumpType;
@@ -39,13 +40,15 @@ export class DraftPlan {
     return this.packages.get(id);
   }
 
-  setPackage(id: string, plan: Partial<PackagePlan> = {}) {
-    this.packages.set(id, {
+  setPackage(id: string, plan: Partial<PackagePlan> = {}): PackagePlan {
+    const out: PackagePlan = {
       ...plan,
       changelogIds: plan.changelogIds ?? new Set(),
       publish: plan.publish ?? true,
       type: plan.type ?? "patch",
-    });
+    };
+    this.packages.set(id, out);
+    return out;
   }
 
   deletePackage(id: string) {
@@ -73,13 +76,25 @@ export class DraftPlan {
     this.assertEditable();
     await this.assertPublishPlanFinished();
 
-    this.#applied = true;
+    for (const plugin of this.context.plugins) {
+      await handlePluginError(plugin, "applyPlan", () =>
+        plugin.applyPlan?.call(this.context, this),
+      );
+    }
 
-    await this.applyVersionChanges();
+    const { graph } = this.context;
+    const writes: Awaitable<void>[] = [];
+    for (const [id, packagePlan] of this.packages) {
+      const pkg = graph.get(id);
+      if (!pkg) continue;
+      writes.push(this.appendChangelog(pkg, packagePlan));
+    }
+    await Promise.all(writes);
 
     await mkdir(dirname(this.context.planPath), { recursive: true });
     await writeFile(this.context.planPath, createPlanStore(this));
     await this.removeConsumedChangelogs();
+    this.#applied = true;
   }
 
   editable() {
@@ -103,40 +118,6 @@ export class DraftPlan {
 
     const message = `Publish plan already exists at ${this.context.planPath} and is ${status.state}. Publish it before applying a new plan.`;
     throw new Error(status.error ? `${message}\n${status.error}` : message);
-  }
-
-  private async applyVersionChanges(): Promise<void> {
-    const { graph } = this.context;
-    const updatedPackages = new Map<string, { plan: PackagePlan; version: string }>();
-    const writes: Awaitable<void>[] = [];
-
-    for (const [id, plan] of this.packages) {
-      const pkg = graph.get(id);
-      if (!pkg) continue;
-
-      updatedPackages.set(id, {
-        plan,
-        version: bumpVersion(pkg.version, plan.type, plan.prerelease),
-      });
-    }
-
-    for (const pkg of graph.getPackages()) {
-      const updated = updatedPackages.get(pkg.id);
-
-      for (const [id, updatedDep] of updatedPackages) {
-        const target = graph.get(id);
-        if (target) await pkg.updateDependency(target, updatedDep.version, this.context);
-      }
-
-      if (updated) {
-        pkg.setVersion(updated.version);
-        writes.push(this.appendChangelog(pkg, updated.plan));
-      }
-
-      writes.push(pkg.write());
-    }
-
-    await Promise.all(writes);
   }
 
   private async removeConsumedChangelogs() {
@@ -199,7 +180,10 @@ async function publishPlanStatus(
   return { state: "success" };
 }
 
-export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiContext): DraftPlan {
+export async function createDraftPlan(
+  changelogs: ChangelogEntry[],
+  context: TegamiContext,
+): Promise<DraftPlan> {
   const changelogMap = new Map<string, ChangelogEntry>();
   const byPackage = new Map<WorkspacePackage, ChangelogEntry[]>();
 
@@ -262,7 +246,15 @@ export function createDraftPlan(changelogs: ChangelogEntry[], context: TegamiCon
     }
   }
 
-  return new DraftPlan(changelogMap, packages, context);
+  let draft = new DraftPlan(changelogMap, packages, context);
+  for (const plugin of context.plugins) {
+    const next = await handlePluginError(plugin, "initPlan", () =>
+      plugin.initPlan?.call(context, draft),
+    );
+    draft = next ?? draft;
+  }
+
+  return draft;
 }
 
 function createPackagePlan(

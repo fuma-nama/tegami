@@ -6,10 +6,11 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { PlanStore } from "../plans/store";
 import type { TegamiContext } from "../context";
-import type { TegamiPlugin, PublishPlanStatus, RegistryClient } from "../types";
+import type { DraftPlan, PackagePlan } from "../plans/draft";
+import type { Awaitable, TegamiPlugin, PublishPlanStatus, RegistryClient } from "../types";
 import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
-import { PackagePlan } from "../plans/draft";
+import { bumpVersion } from "../utils/semver";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
@@ -30,43 +31,6 @@ export class CargoPackage extends WorkspacePackage {
 
   get version(): string {
     return stringValue(this.packageInfo.version) ?? this.workspaceVersion ?? "0.0.0";
-  }
-
-  setVersion(version: string): void {
-    this.packageInfo.version = version;
-  }
-
-  async updateDependency(
-    target: WorkspacePackage,
-    version: string,
-    context: TegamiContext,
-  ): Promise<void> {
-    if (!(target instanceof CargoPackage)) return;
-
-    const next = semver.parse(version);
-    if (!next) return;
-
-    for (const table of dependencyTables(this.manifest)) {
-      for (const [rawName, rawSpec] of Object.entries(table)) {
-        const spec = tableValue(rawSpec);
-        const packageName = stringValue(spec?.package) ?? rawName;
-        if (packageName !== target.name) continue;
-
-        if (typeof rawSpec === "string") {
-          table[rawName] = (
-            await this.updateRange(context, { name: packageName, range: rawSpec }, next)
-          ).range;
-          continue;
-        }
-
-        if (spec) {
-          const current = stringValue(spec.version);
-          spec.version = current
-            ? (await this.updateRange(context, { name: packageName, range: current }, next)).range
-            : next.format();
-        }
-      }
-    }
   }
 
   onPlan(context: TegamiContext): Partial<PackagePlan> {
@@ -143,6 +107,15 @@ export class CargoRegistryClient implements RegistryClient {
 }
 
 export function cargo(): TegamiPlugin {
+  function updateRange(range: string, next: semver.SemVer): string | false {
+    // Ignore special syntax like "latest".
+    if (!semver.validRange(range)) return false;
+    const semverRange = new semver.Range(range);
+    if (semverRange.test(next)) return false;
+
+    return next.format();
+  }
+
   return {
     name: "cargo",
     enforce: "pre",
@@ -151,6 +124,78 @@ export function cargo(): TegamiPlugin {
     },
     createRegistryClient() {
       return new CargoRegistryClient(this.graph);
+    },
+    async applyPlan(draft: DraftPlan) {
+      const { graph } = this;
+      const bumpedPackages = new Map<CargoPackage, { $updateVersion: string | null }>();
+      const writes: Awaitable<void>[] = [];
+
+      function bumpDeps(pkg: CargoPackage) {
+        const existing = bumpedPackages.get(pkg);
+        if (existing) return existing;
+        let pkgPlan = draft.getPackage(pkg.id);
+
+        for (const table of dependencyTables(pkg.manifest)) {
+          for (const [rawName, rawSpec] of Object.entries(table)) {
+            const spec = tableValue(rawSpec);
+            const packageName = stringValue(spec?.package) ?? rawName;
+
+            const linked = graph.get(`cargo:${packageName}`);
+            if (!linked || !(linked instanceof CargoPackage)) continue;
+            const next = semver.parse(bumpDeps(linked).$updateVersion);
+            if (!next) continue;
+
+            if (typeof rawSpec === "string") {
+              const result = updateRange(rawSpec, next);
+              if (result === false) continue;
+
+              table[rawName] = result;
+
+              // TODO: allow user config
+              pkgPlan ??= draft.setPackage(pkg.id, {
+                type: "patch",
+              });
+              continue;
+            }
+
+            if (spec) {
+              const current = stringValue(spec.version);
+              if (current) {
+                const result = updateRange(current, next);
+                if (result === false) continue;
+                spec.version = result;
+              } else {
+                spec.version = next.format();
+              }
+
+              // TODO: allow user config
+              pkgPlan ??= draft.setPackage(pkg.id, {
+                type: "patch",
+              });
+            }
+          }
+        }
+
+        const result = {
+          $updateVersion: pkgPlan
+            ? bumpVersion(pkg.version, pkgPlan.type, pkgPlan.prerelease)
+            : null,
+        };
+
+        bumpedPackages.set(pkg, result);
+        if (result.$updateVersion) {
+          tableValue(pkg.manifest.package)!.version = result.$updateVersion;
+        }
+
+        writes.push(pkg.write());
+        return result;
+      }
+
+      for (const pkg of graph.getPackages()) {
+        if (pkg instanceof CargoPackage) bumpDeps(pkg);
+      }
+
+      await Promise.all(writes);
     },
   };
 }

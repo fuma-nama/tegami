@@ -79,8 +79,12 @@ export interface TegamiPlugin {
   createRegistryClient?(
     this: TegamiContext,
   ): Awaitable<RegistryClient | RegistryClient[] | void | undefined>;
+
   /** Called after Tegami builds the initial draft plan and before it is returned. */
   initPlan?(this: TegamiContext, plan: DraftPlan): Awaitable<DraftPlan | void | undefined>;
+  /** Called when Tegami applies the draft plan. */
+  applyPlan?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
+
   /** Called after publishing finishes. */
   afterPublish?(
     this: TegamiContext & { publishOptions: PublishOptions },
@@ -98,19 +102,6 @@ export interface TegamiPlugin {
     /** Called after `tegami version` applies a publish plan. */
     publishPlanApplied?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
   };
-
-  /**
-   * @param pkg - the package that referenced the dependency
-   * @param spec - the referenced dependency & its range
-   * @param target - the target version to update to
-   * @returns fallback to the default behaviour if `undefined`, otherwise replace with updated spec (can reuse the same instance, as long as a value is returned).
-   */
-  onUpdateRange?(
-    this: TegamiContext,
-    pkg: WorkspacePackage,
-    spec: DependencySpec,
-    target: SemVer,
-  ): Awaitable<DependencySpec | void | undefined>;
 }
 
 export type Awaitable<T> = T | Promise<T>;
@@ -129,9 +120,4 @@ export interface RegistryClient {
     env: { store: PlanStore; packageStore: PackagePlanStore },
   ): Promise<void>;
   publishPlanStatus(plan: PlanStore): Promise<PublishPlanStatus>;
-}
-
-export interface DependencySpec {
-  name: string;
-  range: string;
 }

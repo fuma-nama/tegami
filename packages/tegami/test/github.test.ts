@@ -608,8 +608,6 @@ class TestPackage extends WorkspacePackage {
     this.#version = version;
   }
 
-  async updateDependency(): Promise<void> {}
-
   async write(): Promise<void> {}
 }
 
@@ -646,7 +644,7 @@ async function runVersionPullRequest(
   context: ReturnType<typeof publishContext>,
   draft: DraftPlan,
 ) {
-  const pkg = context.graph.get("test:@acme/core");
+  const pkg = context.graph.get("test:@acme/core") as TestPackage;
   if (!pkg) throw new Error("missing package");
 
   await plugin.cli?.publishPlanCreated?.call(context, draft);
