@@ -5,6 +5,7 @@ import type { PublishOptions, PublishResult } from "./publish";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
 import type { PlanStore, PackagePlanStore } from "./plans/store";
+import type { CargoPluginOptions } from "./providers/cargo";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -38,6 +39,7 @@ export interface TegamiOptions<Groups extends string = string> {
   groups?: Record<Groups, GroupOptions>;
 
   npm?: NpmPluginOptions;
+  cargo?: CargoPluginOptions;
 }
 
 export interface GroupOptions {

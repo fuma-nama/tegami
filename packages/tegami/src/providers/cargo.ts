@@ -9,6 +9,7 @@ import type { DraftPlan } from "../plans/draft";
 import type { Awaitable, TegamiPlugin, RegistryClient } from "../types";
 import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
+import type { BumpType } from "../utils/semver";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
@@ -56,7 +57,7 @@ export class CargoRegistryClient implements RegistryClient {
 
   #versionMap = new Map<string, Promise<boolean>>();
 
-  constructor(private readonly _graph: PackageGraph) {}
+  constructor(_graph: PackageGraph) {}
 
   supports(pkg: WorkspacePackage): boolean {
     return pkg instanceof CargoPackage;
@@ -92,14 +93,32 @@ export class CargoRegistryClient implements RegistryClient {
   }
 }
 
-export function cargo(): TegamiPlugin {
-  function updateRange(range: string, next: semver.SemVer): string | false {
+export interface CargoPluginOptions {
+  bumpDep?: (opts: {
+    kind: (typeof DEP_FIELDS)[number];
+    name: string;
+    version: string;
+  }) => BumpType | false;
+}
+
+export function cargo({
+  bumpDep: getBumpDepType = ({ kind }) => {
+    switch (kind) {
+      case "dependencies":
+        return "patch";
+      case "build-dependencies":
+      case "dev-dependencies":
+        return false;
+    }
+  },
+}: CargoPluginOptions = {}): TegamiPlugin {
+  function updateRange(range: string, next: string): string | false {
     // Ignore special syntax like "latest".
     if (!semver.validRange(range)) return false;
     const semverRange = new semver.Range(range);
     if (semverRange.test(next)) return false;
 
-    return next.format();
+    return next;
   }
 
   return {
@@ -116,52 +135,55 @@ export function cargo(): TegamiPlugin {
       const bumpedPackages = new Map<CargoPackage, { $updateVersion: string | null }>();
       const writes: Awaitable<void>[] = [];
 
+      const calc = (pkg: CargoPackage) => {
+        const bumpedVersion = draft.getPackagePlan(pkg.id)?.bumpVersion(pkg);
+        return {
+          $updateVersion: bumpedVersion && pkg.version !== bumpedVersion ? bumpedVersion : null,
+        };
+      };
+
       const bumpDeps = (pkg: CargoPackage) => {
         const existing = bumpedPackages.get(pkg);
         if (existing) return existing;
 
-        for (const table of dependencyTables(pkg.manifest)) {
+        // handle recursive
+        bumpedPackages.set(pkg, calc(pkg));
+
+        for (const { table, kind } of dependencyTables(pkg.manifest)) {
           for (const [rawName, rawSpec] of Object.entries(table)) {
             const spec = tableValue(rawSpec);
             const packageName = stringValue(spec?.package) ?? rawName;
 
             const linked = graph.get(`cargo:${packageName}`);
             if (!linked || !(linked instanceof CargoPackage)) continue;
-            const next = semver.parse(bumpDeps(linked).$updateVersion);
+            const next = bumpDeps(linked).$updateVersion;
             if (!next) continue;
+            let version: string | undefined;
 
             if (typeof rawSpec === "string") {
-              const result = updateRange(rawSpec, next);
-              if (result === false) continue;
+              version = rawSpec;
+            } else if (spec) {
+              version = stringValue(spec.version);
+            }
 
+            if (version === undefined) continue;
+            const result = updateRange(version, next);
+            if (result === false) continue;
+
+            if (typeof rawSpec === "string") {
               table[rawName] = result;
-
-              // TODO: allow user config
-              draft.bumpPackage(pkg, { type: "patch", reason: `update dependency "${rawName}"` });
-              continue;
+            } else if (spec) {
+              spec.version = result;
             }
 
-            if (spec) {
-              const current = stringValue(spec.version);
-              if (current) {
-                const result = updateRange(current, next);
-                if (result === false) continue;
-                spec.version = result;
-              } else {
-                spec.version = next.format();
-              }
+            const bumpType = getBumpDepType({ kind, name: packageName, version });
+            if (bumpType === false) continue;
 
-              // TODO: allow user config
-              draft.bumpPackage(pkg, { type: "patch", reason: `update dependency "${rawName}"` });
-            }
+            draft.bumpPackage(pkg, { type: bumpType, reason: `update dependency "${rawName}"` });
           }
         }
 
-        const bumpedVersion = draft.getPackagePlan(pkg.id)?.bumpVersion(pkg);
-        const result = {
-          $updateVersion: bumpedVersion && pkg.version !== bumpedVersion ? bumpedVersion : null,
-        };
-
+        const result = calc(pkg);
         bumpedPackages.set(pkg, result);
         if (result.$updateVersion) {
           tableValue(pkg.manifest.package)!.version = result.$updateVersion;
@@ -251,12 +273,12 @@ async function expandWorkspaceMembers(
   return paths.map(normalize);
 }
 
-function dependencyTables(manifest: TomlTable): TomlTable[] {
-  const tables: TomlTable[] = [];
+function dependencyTables(manifest: TomlTable) {
+  const tables: { kind: (typeof DEP_FIELDS)[number]; table: TomlTable }[] = [];
 
   for (const field of DEP_FIELDS) {
     const table = tableValue(manifest[field]);
-    if (table) tables.push(table);
+    if (table) tables.push({ kind: field, table });
   }
 
   const target = tableValue(manifest.target);
@@ -267,7 +289,7 @@ function dependencyTables(manifest: TomlTable): TomlTable[] {
 
       for (const field of DEP_FIELDS) {
         const table = tableValue(targetTable[field]);
-        if (table) tables.push(table);
+        if (table) tables.push({ kind: field, table });
       }
     }
   }

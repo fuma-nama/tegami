@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join, normalize } from "node:path";
+import { join } from "node:path";
 import { load } from "js-yaml";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
@@ -8,9 +8,10 @@ import type { TegamiContext } from "../context";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
 import type { Awaitable, RegistryClient, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { WorkspacePackage } from "../graph";
+import { PackageGraph, WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
 import type { PackagePlanStore, PlanStore } from "../plans/store";
+import type { BumpType } from "../utils/semver";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -65,7 +66,7 @@ export class NpmRegistryClient implements RegistryClient {
   constructor(
     private readonly cwd: string,
     private readonly client: NpmClient,
-    private readonly graph: { get(id: string): WorkspacePackage | undefined },
+    _graph: PackageGraph,
   ) {}
 
   supports(pkg: WorkspacePackage): boolean {
@@ -187,19 +188,39 @@ function formatNpmDependency(spec: NpmDependencySpec): string {
 export interface NpmPluginOptions {
   /** Package manager command used for npm registry operations. */
   client?: NpmClient;
+
+  bumpDep?: (opts: {
+    kind: (typeof DEP_FIELDS)[number];
+    spec: NpmDependencySpec;
+  }) => BumpType | false;
 }
 
-export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlugin {
+export function npm({
+  client: defaultClient,
+  bumpDep: getBumpDepType = ({ kind }) => {
+    switch (kind) {
+      case "dependencies":
+      case "optionalDependencies":
+        return "patch";
+      case "devDependencies":
+        return false;
+      case "peerDependencies":
+        return "major";
+    }
+  },
+}: NpmPluginOptions = {}): TegamiPlugin {
   let client: NpmClient;
 
-  function updateRange(spec: NpmDependencySpec, next: semver.SemVer): string | false {
+  function updateRange(spec: NpmDependencySpec, next: string): string | false {
     // Ignore special syntax like "latest".
     if (!semver.validRange(spec.range)) return false;
     const range = new semver.Range(spec.range);
     if (range.test(next)) return false;
 
-    spec.range = next.format();
-    return formatNpmDependency(spec);
+    return formatNpmDependency({
+      ...spec,
+      range: next,
+    });
   }
 
   return {
@@ -228,9 +249,19 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
       const bumpedPackages = new Map<NpmPackage, { $updateVersion: string | null }>();
       const writes: Awaitable<void>[] = [];
 
-      function bumpDeps(pkg: NpmPackage) {
+      const calc = (pkg: NpmPackage) => {
+        const bumpedVersion = draft.getPackagePlan(pkg.id)?.bumpVersion(pkg);
+        return {
+          $updateVersion: bumpedVersion && bumpedVersion !== pkg.version ? bumpedVersion : null,
+        };
+      };
+
+      const bumpDeps = (pkg: NpmPackage) => {
         const existing = bumpedPackages.get(pkg);
         if (existing) return existing;
+
+        // handle recursive
+        bumpedPackages.set(pkg, calc(pkg));
 
         for (const field of DEP_FIELDS) {
           const dependencies = pkg.manifest[field];
@@ -242,7 +273,7 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
 
             const linked = graph.get(`npm:${spec.name}`);
             if (!linked || !(linked instanceof NpmPackage)) continue;
-            const next = semver.parse(bumpDeps(linked).$updateVersion);
+            const next = bumpDeps(linked).$updateVersion;
             if (!next) continue;
 
             const result = updateRange(spec, next);
@@ -250,16 +281,14 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
 
             dependencies[k] = result;
 
-            // TODO: allow user config
-            draft.bumpPackage(pkg, { type: "patch", reason: `update dependency "${k}"` });
+            const bumpType = getBumpDepType({ kind: field, spec });
+            if (bumpType === false) continue;
+
+            draft.bumpPackage(pkg, { type: bumpType, reason: `update dependency "${k}"` });
           }
         }
 
-        const bumpedVersion = draft.getPackagePlan(pkg.id)?.bumpVersion(pkg);
-        const result = {
-          $updateVersion: bumpedVersion && bumpedVersion !== pkg.version ? bumpedVersion : null,
-        };
-
+        const result = calc(pkg);
         bumpedPackages.set(pkg, result);
         if (result.$updateVersion) {
           pkg.manifest.version = result.$updateVersion;
@@ -267,7 +296,7 @@ export function npm({ client: defaultClient }: NpmPluginOptions = {}): TegamiPlu
 
         writes.push(pkg.write());
         return result;
-      }
+      };
 
       for (const pkg of graph.getPackages()) {
         if (pkg instanceof NpmPackage) bumpDeps(pkg);
@@ -289,9 +318,9 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
     });
 
   if (pnpmPatterns) {
-    patterns = pnpmPatterns.packages ?? ["."];
+    patterns = pnpmPatterns.packages ?? [];
   } else {
-    patterns = rootManifest?.workspaces ?? ["."];
+    patterns = rootManifest?.workspaces ?? [];
   }
 
   const candidatePaths = await expandWorkspacePatterns(cwd, patterns);
@@ -314,22 +343,15 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
 }
 
 async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise<string[]> {
-  const paths = patterns.includes(".") ? [cwd] : [];
-  const globPatterns = patterns.filter((pattern) => pattern !== ".");
+  if (patterns.length === 0) return [];
 
-  if (globPatterns.length > 0) {
-    paths.push(
-      ...(await glob(globPatterns, {
-        absolute: true,
-        cwd,
-        ignore: ["**/node_modules/**"],
-        onlyDirectories: true,
-        onlyFiles: false,
-      })),
-    );
-  }
-
-  return paths.map(normalize);
+  return glob(patterns, {
+    absolute: true,
+    cwd,
+    ignore: ["**/node_modules/**", "**/dist/**"],
+    onlyDirectories: true,
+    onlyFiles: false,
+  });
 }
 
 async function readManifest(packagePath: string): Promise<PackageManifest> {
