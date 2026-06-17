@@ -5,7 +5,6 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import type { PackageManifest } from "../src/schemas";
-import { parsePlanStore } from "../src/plans/store";
 import { getPendingPackageIds, normalizePackagePlan } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
@@ -96,7 +95,7 @@ describe("draft publish plans", () => {
         "version": "2.0.0",
         "dependencies": {
           "@acme/core": "^1.0.0",
-          "@acme/core-alias": "npm:@acme/core@1.1.0"
+          "@acme/core-alias": "npm:@acme/core@~1.1.0"
         },
         "devDependencies": {
           "@acme/core": "workspace:^1.0.0"
@@ -105,7 +104,7 @@ describe("draft publish plans", () => {
           "@acme/core": "workspace:*"
         },
         "optionalDependencies": {
-          "@acme/core": "1.1.0"
+          "@acme/core": "~1.1.0"
         }
       }
       "

@@ -206,11 +206,30 @@ export interface NpmPluginOptions {
   /** Package manager command used for npm registry operations. */
   client?: NpmClient;
 
-  bumpDep?: (opts: { kind: (typeof DEP_FIELDS)[number]; spec: DependencySpec }) => BumpType | false;
+  /**
+   * Decide how to bump the dependents of a bumped package.
+   */
+  bumpDep?: (opts: {
+    kind: (typeof DEP_FIELDS)[number];
+    name: string;
+    spec: DependencySpec;
+  }) => BumpType | false;
+
+  /**
+   * What to do when a workspace dependency's version has gone beyond peer dependency constraints:
+   *
+   * - `set` (default): set to the current version (won't preserve prefix).
+   * - `error`: throw error.
+   * - `ignore`: do nothing.
+   *
+   * Note: `workspace:` protocols are not included.
+   */
+  onBreakPeerDep?: "set" | "error" | "ignore";
 }
 
 export function npm({
   client: defaultClient,
+  onBreakPeerDep = "set",
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -219,6 +238,7 @@ export function npm({
       case "devDependencies":
         return false;
       case "peerDependencies":
+        if (onBreakPeerDep === "ignore") return false;
         return "major";
     }
   },
@@ -271,7 +291,7 @@ export function npm({
               if (!spec || spec.linked !== pkg) continue;
               if (!needsUpdate(dependent, spec, plan.bumpVersion(pkg))) continue;
 
-              const bumpType = getBumpDepType({ kind: field, spec });
+              const bumpType = getBumpDepType({ kind: field, spec, name: k });
               if (bumpType === false) continue;
 
               this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
@@ -333,10 +353,25 @@ export function npm({
             if (!semver.validRange(spec.range) || spec.protocol === "workspace") continue;
             if (semver.satisfies(spec.linked.version, spec.range)) continue;
 
-            dependencies[k] = formatDependencySpec({
-              ...spec,
-              range: spec.linked.version,
-            });
+            let updatedRange: string;
+            const isPeer = field === "peerDependencies";
+            if (isPeer && onBreakPeerDep === "ignore") {
+              continue;
+            } else if (isPeer && onBreakPeerDep === "set") {
+              updatedRange = spec.linked.version;
+            } else if (isPeer && onBreakPeerDep === "error") {
+              throw new Error(
+                `[Tegami] the version of "${spec.linked.name}" is beyond its peer dependency constraint "${v}" in package "${pkg.name}", please update the constraint to satisfy.`,
+              );
+            } else if (spec.range.startsWith("^")) {
+              updatedRange = `^${spec.linked.version}`;
+            } else if (spec.range.startsWith("~")) {
+              updatedRange = `~${spec.linked.version}`;
+            } else {
+              updatedRange = spec.linked.version;
+            }
+
+            dependencies[k] = formatDependencySpec({ ...spec, range: updatedRange });
           }
         }
 
