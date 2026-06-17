@@ -230,6 +230,47 @@ describe("draft publish plans", () => {
     });
   });
 
+  test("excludes packages listed in ignore", async () => {
+    const cwd = await createWorkspace({ changelog: false });
+    tempDirs.push(cwd);
+
+    const graph = await tegami({
+      cwd,
+      ignore: ["@acme/ui"],
+    })._internal.graph();
+
+    expect(graph.get("npm:@acme/core")).toBeDefined();
+    expect(graph.getByName("@acme/ui")).toEqual([]);
+
+    const graphById = await tegami({
+      cwd,
+      ignore: ["npm:@acme/core"],
+    })._internal.graph();
+
+    expect(graphById.get("npm:@acme/core")).toBeUndefined();
+    expect(graphById.get("npm:@acme/ui")).toBeDefined();
+  });
+
+  test("excludes packages matching ignore regex", async () => {
+    const cwd = await createWorkspace({ changelog: false });
+    tempDirs.push(cwd);
+
+    const graph = await tegami({
+      cwd,
+      ignore: [/^@acme\/ui$/],
+    })._internal.graph();
+
+    expect(graph.get("npm:@acme/core")).toBeDefined();
+    expect(graph.getByName("@acme/ui")).toEqual([]);
+
+    const graphByPattern = await tegami({
+      cwd,
+      ignore: [/^npm:@acme/],
+    })._internal.graph();
+
+    expect(graphByPattern.getPackages()).toEqual([]);
+  });
+
   test("discovers packages with nested workspace globs", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-"));
     tempDirs.push(cwd);

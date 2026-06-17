@@ -38,6 +38,9 @@ export interface TegamiOptions<Groups extends string = string> {
 
   groups?: Record<Groups, GroupOptions>;
 
+  /** Package names, ids, or regex patterns to exclude from the dependency graph. */
+  ignore?: (string | RegExp)[];
+
   npm?: NpmPluginOptions;
   cargo?: CargoPluginOptions;
 }

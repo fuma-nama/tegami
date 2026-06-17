@@ -61,11 +61,24 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
     await handlePluginError(plugin, "resolve", () => plugin.resolve?.call(ctx));
   }
 
+  const ignoreMatchers = options.ignore?.map((pattern): ((pkg: WorkspacePackage) => boolean) => {
+    if (pattern instanceof RegExp) {
+      return (pkg) => pattern.test(pkg.name) || pattern.test(pkg.id);
+    }
+
+    return (pkg) => pkg.name === pattern || pkg.id === pattern;
+  });
+
   for (const [name, groupOptions] of Object.entries(options.groups ?? {})) {
     graph.registerGroup(name, groupOptions);
   }
 
   for (const pkg of graph.getPackages()) {
+    if (ignoreMatchers?.length && ignoreMatchers.some((matcher) => matcher(pkg))) {
+      graph.delete(pkg.id);
+      continue;
+    }
+
     const packageOptions = options.packages?.[pkg.id] ?? options.packages?.[pkg.name];
     if (!packageOptions) continue;
 
