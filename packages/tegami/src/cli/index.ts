@@ -53,7 +53,20 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
     .command("version")
     .description("draft and apply a publish plan")
     .action((commandOptions: VersionCommandOptions) =>
-      runAction(tegami, () => versionPackages(tegami, { ...commandOptions, cli: options })),
+      runAction(tegami, async () => {
+        await versionPackages(tegami, { ...commandOptions, cli: options });
+      }),
+    );
+
+  program
+    .command("ci")
+    .description("version and publish packages")
+    .action(() =>
+      runAction(tegami, async () => {
+        const versioned = await versionPackages(tegami, { cli: options });
+        if (versioned) return;
+        await publishPackages(tegami, { cli: options });
+      }),
     );
 
   program
@@ -61,7 +74,9 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
     .description("publish packages from the applied publish plan")
     .option("--dry-run", "validate the publish plan without publishing packages")
     .action((commandOptions: PublishCommandOptions) =>
-      runAction(tegami, () => publishPackages(tegami, { ...commandOptions, cli: options })),
+      runAction(tegami, async () => {
+        await publishPackages(tegami, { ...commandOptions, cli: options });
+      }),
     );
 
   program
@@ -173,7 +188,7 @@ async function createChangelogs(
 async function versionPackages(
   tegami: Tegami,
   options: VersionCommandOptions & { cli: TegamiCLIOptions },
-): Promise<void> {
+): Promise<boolean> {
   intro("Version Packages");
 
   const { version: customVersion } = options.cli;
@@ -192,7 +207,7 @@ async function versionPackages(
   if (!draft.hasPending()) {
     note("No pending changelog entries matched workspace packages.", "Nothing to version");
     outro("No versions changed.");
-    return;
+    return false;
   }
 
   const planEntries: string[] = [];
@@ -228,6 +243,7 @@ async function versionPackages(
   }
 
   outro("Publish plan applied.");
+  return true;
 }
 
 async function publishPackages(
@@ -235,7 +251,7 @@ async function publishPackages(
   options: PublishCommandOptions & {
     cli: TegamiCLIOptions;
   },
-): Promise<void> {
+): Promise<boolean> {
   const dryRun = options.dryRun ?? false;
   const { publish: customPublish } = options.cli;
   intro(dryRun ? "Publish packages (dry run)" : "Publish packages");
@@ -248,7 +264,7 @@ async function publishPackages(
     const { planPath } = await tegami._internal.context();
     s.stop(dryRun ? "No publish plan to validate" : "Nothing to publish");
     outro(`No publishable packages were found in ${planPath}.`);
-    return;
+    return false;
   }
 
   s.stop(dryRun ? "Publish plan validated" : "Publish complete");
@@ -266,10 +282,11 @@ async function publishPackages(
   if (result.state === "failed") {
     process.exitCode = 1;
     outro("Some packages failed to publish.");
-    return;
+    return false;
   }
 
   outro(dryRun ? "Publish plan is valid." : "Packages published.");
+  return true;
 }
 
 async function runCleanup(tegami: Tegami): Promise<void> {
