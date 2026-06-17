@@ -69,7 +69,7 @@ export function createPlanStore(draft: DraftPlan, context: TegamiContext): strin
         type: plan.type,
         npm: plan.npm,
         changelogIds: plan.changelogs?.map((entry) => entry.id),
-        bumpReasons: plan.bumpReasons,
+        bumpReasons: plan.bumpReasons ? Array.from(plan.bumpReasons) : undefined,
       };
     }
   }

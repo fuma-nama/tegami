@@ -8,15 +8,21 @@ export async function publishPlanStatus(
   context: TegamiContext,
 ): Promise<PublishPlanStatus> {
   async function defaultStatus(): Promise<PublishPlanStatus> {
-    for (const [id, pkgPlan] of Object.entries(store.packages)) {
-      const pkg = context.graph.get(id);
-      if (!pkg || !pkgPlan.publish) continue;
+    try {
+      await Promise.all(
+        Object.entries(store.packages).map(async ([id, plan]) => {
+          const pkg = context.graph.get(id);
+          if (!pkg || !plan.publish) return;
 
-      const published = await context.getRegistryClient(pkg).isPackagePublished(pkg);
-      if (!published) return { state: "pending" };
+          const published = await context.getRegistryClient(pkg).isPackagePublished(pkg);
+          if (!published) throw "pending";
+        }),
+      );
+      return { state: "success" };
+    } catch (err) {
+      if (err === "pending") return { state: "pending" };
+      throw err;
     }
-
-    return { state: "success" };
   }
 
   let status = await defaultStatus();

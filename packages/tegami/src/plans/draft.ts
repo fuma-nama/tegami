@@ -13,7 +13,7 @@ import { publishPlanStatus, assertPublishPlanFinished } from "./checks";
 
 export interface PackagePlan {
   type?: BumpType;
-  bumpReasons?: string[];
+  bumpReasons?: Set<string>;
 
   changelogs?: ChangelogEntry[];
   prerelease?: string;
@@ -57,8 +57,8 @@ export class DraftPlan {
     const prevVersion = plan.bumpVersion(pkg);
     plan.type = plan.type ? maxBump(plan.type, type) : type;
     if (reason) {
-      plan.bumpReasons ??= [];
-      plan.bumpReasons.push(reason);
+      plan.bumpReasons ??= new Set();
+      plan.bumpReasons.add(reason);
     }
 
     if (prevVersion !== plan.bumpVersion(pkg)) {

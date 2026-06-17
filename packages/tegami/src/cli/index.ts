@@ -201,9 +201,10 @@ async function versionPackages(
     if (!plan?.type) continue;
 
     planEntries.push(`${pkg.id}: ${plan.type} (${plan.changelogs?.length ?? 0} changelogs)`);
-    for (const reason of plan.bumpReasons ?? []) {
-      planEntries.push(`  - ${reason}`);
-    }
+    if (plan.bumpReasons)
+      for (const reason of plan.bumpReasons) {
+        planEntries.push(`  - ${reason}`);
+      }
   }
 
   note(planEntries.join("\n"), "Release plan");

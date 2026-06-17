@@ -66,10 +66,10 @@ describe("draft publish plans", () => {
           "npm:@acme/ui",
         ],
         "ui": {
-          "bumpReasons": [
+          "bumpReasons": Set {
             "update dependency "@acme/core-alias"",
             "update dependency "@acme/core"",
-          ],
+          },
           "bumpVersion": [Function],
           "changelogIds": [
             "change.md:0",
