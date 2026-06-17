@@ -1,3 +1,9 @@
+## tegami@0.1.0-beta.1
+
+### Improve CI integration
+
+Add `ci` command and will publish hooks.
+
 ## tegami@0.1.0-beta.0
 
 ### Minor beta
