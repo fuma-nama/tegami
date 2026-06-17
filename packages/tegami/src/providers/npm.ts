@@ -144,43 +144,59 @@ function isMissingRegistryEntry(output: string): boolean {
   );
 }
 
-interface NpmDependencySpec {
-  name: string;
-  range: string;
-  protocol?: "npm" | "workspace";
-}
+type DependencySpec =
+  | {
+      protocol: "npm";
+      alias: string;
+      range: string;
+      linked?: WorkspacePackage;
+    }
+  | {
+      protocol?: "workspace";
+      range: string;
+      linked?: WorkspacePackage;
+    };
 
-function parseNpmDependency(rawName: string, rawRange: string): NpmDependencySpec | undefined {
-  if (rawRange.startsWith("workspace:")) {
+// TODO: support file: protocol
+function parseDependencySpec(
+  context: TegamiContext,
+  name: string,
+  range: string,
+): DependencySpec | undefined {
+  const { graph } = context;
+
+  if (range.startsWith("workspace:")) {
     return {
-      name: rawName,
-      range: rawRange.slice("workspace:".length),
+      range: range.slice("workspace:".length),
+      linked: graph.get(`npm:${name}`),
       protocol: "workspace",
     };
   }
 
-  if (rawRange.startsWith("npm:")) {
-    const spec = rawRange.slice("npm:".length);
+  if (range.startsWith("npm:")) {
+    const spec = range.slice("npm:".length);
     const separator = spec.lastIndexOf("@");
-    if (separator <= 0) return undefined;
+    if (separator <= 0) return;
+    const alias = spec.slice(0, separator);
 
     return {
-      name: spec.slice(0, separator),
+      alias,
+      linked: graph.get(`npm:${alias}`),
       range: spec.slice(separator + 1),
       protocol: "npm",
     };
   }
 
-  return { name: rawName, range: rawRange };
+  return { linked: graph.get(`npm:${name}`), range: range };
 }
 
-function formatNpmDependency(spec: NpmDependencySpec): string {
+function formatDependencySpec(spec: DependencySpec): string {
   if (spec.protocol === "workspace") {
     return `workspace:${spec.range}`;
   }
 
   if (spec.protocol === "npm") {
-    return `npm:${spec.name}@${spec.range}`;
+    return `npm:${spec.alias}@${spec.range}`;
   }
 
   return spec.range;
@@ -190,10 +206,7 @@ export interface NpmPluginOptions {
   /** Package manager command used for npm registry operations. */
   client?: NpmClient;
 
-  bumpDep?: (opts: {
-    kind: (typeof DEP_FIELDS)[number];
-    spec: NpmDependencySpec;
-  }) => BumpType | false;
+  bumpDep?: (opts: { kind: (typeof DEP_FIELDS)[number]; spec: DependencySpec }) => BumpType | false;
 }
 
 export function npm({
@@ -212,40 +225,56 @@ export function npm({
 }: NpmPluginOptions = {}): TegamiPlugin {
   let client: NpmClient;
 
-  function updateRange(spec: NpmDependencySpec, next: string): string | false {
-    // Ignore special syntax like "latest".
-    if (!semver.validRange(spec.range)) return false;
-    const range = new semver.Range(spec.range);
-    if (range.test(next)) return false;
+  function depsPolicy(context: TegamiContext): PlanPolicy {
+    const { graph } = context;
 
-    return formatNpmDependency({
-      ...spec,
-      range: next,
-    });
-  }
+    function needsUpdate(dependent: NpmPackage, spec: DependencySpec, target: string): boolean {
+      if (spec.linked) {
+        const group = graph.getPackageGroup(dependent.id);
 
-  function depsPolicy({ graph }: TegamiContext): PlanPolicy {
+        if (group?.options.syncBump && graph.getPackageGroup(spec.linked.id) === group) {
+          // they will always bump together
+          return false;
+        }
+
+        if (spec.protocol === "workspace") {
+          switch (spec.range) {
+            case "":
+            case "*":
+              return true;
+            case "^":
+            case "~":
+              return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
+          }
+        }
+      }
+
+      // Ignore special syntax like "latest".
+      if (!semver.validRange(spec.range)) return false;
+      return !semver.satisfies(target, spec.range);
+    }
+
     return {
       id: "npm:deps",
       onUpdate({ pkg, plan }) {
-        for (const other of graph.getPackages()) {
-          if (!(other instanceof NpmPackage)) continue;
+        if (!(pkg instanceof NpmPackage)) return;
+
+        for (const dependent of graph.getPackages()) {
+          if (!(dependent instanceof NpmPackage)) continue;
 
           for (const field of DEP_FIELDS) {
-            const dependencies = other.manifest[field];
+            const dependencies = dependent.manifest[field];
             if (!dependencies) continue;
 
             for (const [k, v] of Object.entries(dependencies)) {
-              const spec = parseNpmDependency(k, v);
-              if (!spec || pkg.id !== `npm:${spec.name}`) continue;
-
-              const result = updateRange(spec, plan.bumpVersion(pkg));
-              if (result === false) continue;
+              const spec = parseDependencySpec(context, k, v);
+              if (!spec || spec.linked !== pkg) continue;
+              if (!needsUpdate(dependent, spec, plan.bumpVersion(pkg))) continue;
 
               const bumpType = getBumpDepType({ kind: field, spec });
               if (bumpType === false) continue;
 
-              this.bumpPackage(other, { type: bumpType, reason: `update dependency "${k}"` });
+              this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
             }
           }
         }
@@ -297,16 +326,17 @@ export function npm({
           if (!dependencies) continue;
 
           for (const [k, v] of Object.entries(dependencies)) {
-            const spec = parseNpmDependency(k, v);
-            if (!spec) continue;
+            const spec = parseDependencySpec(this, k, v);
+            if (!spec || !spec.linked) continue;
 
-            const linked = graph.get(`npm:${spec.name}`);
-            if (!linked || !(linked instanceof NpmPackage)) continue;
+            // Ignore special syntax like "latest"
+            if (!semver.validRange(spec.range) || spec.protocol === "workspace") continue;
+            if (semver.satisfies(spec.linked.version, spec.range)) continue;
 
-            const result = updateRange(spec, linked.version);
-            if (result === false) continue;
-
-            dependencies[k] = result;
+            dependencies[k] = formatDependencySpec({
+              ...spec,
+              range: spec.linked.version,
+            });
           }
         }
 

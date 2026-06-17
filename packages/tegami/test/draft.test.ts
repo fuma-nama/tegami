@@ -77,7 +77,7 @@ describe("draft publish plans", () => {
           "npm": undefined,
           "prerelease": undefined,
           "publish": true,
-          "type": "minor",
+          "type": "major",
         },
       }
     `);
@@ -93,7 +93,7 @@ describe("draft publish plans", () => {
     expect(await readFile(join(cwd, "packages/ui/package.json"), "utf-8")).toMatchInlineSnapshot(`
       "{
         "name": "@acme/ui",
-        "version": "1.1.0",
+        "version": "2.0.0",
         "dependencies": {
           "@acme/core": "^1.0.0",
           "@acme/core-alias": "npm:@acme/core@1.1.0"
@@ -159,7 +159,7 @@ describe("draft publish plans", () => {
               "change.md:0",
             ],
             "publish": true,
-            "type": "minor",
+            "type": "major",
           },
         },
         "version": "0.0.0",
