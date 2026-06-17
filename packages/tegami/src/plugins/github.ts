@@ -140,7 +140,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       );
     }
 
-    const changelogLines = draft.getChangelogs().map((entry) => `- ${entry.title}`);
+    const changelogLines = draft
+      .getChangelogs()
+      .flatMap((entry) => entry.sections.map((section) => `- ${section.title}`));
     const sections = ["## Summary", ...packageLines];
 
     if (changelogLines.length > 0) {
@@ -319,7 +321,11 @@ function defaultGroupedTitle(packages: PackagePublishResult[]): string {
 function defaultNotes(pkg: PackagePublishResult): string {
   if (pkg.changelogs.length > 0) {
     return pkg.changelogs
-      .map((entry) => [`### ${entry.title}`, entry.content].filter(Boolean).join("\n\n"))
+      .flatMap((entry) =>
+        entry.sections.map((section) =>
+          [`### ${section.title}`, section.content].filter(Boolean).join("\n\n"),
+        ),
+      )
       .join("\n\n");
   }
 
@@ -343,7 +349,11 @@ function defaultGroupedNotes(packages: PackagePublishResult[]): string {
     sections.push(
       "",
       Array.from(changelogs.values())
-        .map((entry) => [`### ${entry.title}`, entry.content].filter(Boolean).join("\n\n"))
+        .flatMap((entry) =>
+          entry.sections.map((section) =>
+            [`### ${section.title}`, section.content].filter(Boolean).join("\n\n"),
+          ),
+        )
         .join("\n\n"),
     );
   } else {

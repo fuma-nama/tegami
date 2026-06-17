@@ -92,13 +92,13 @@ describe("createChangelog", () => {
       {
         "npm:@acme/core": {
           "changelogIds": [
-            "changes-<stamp>-acme-core.md:0",
+            "changes-<stamp>-acme-core.md",
           ],
           "type": "minor",
         },
         "npm:@acme/ui": {
           "changelogIds": [
-            "changes-<stamp>-acme-ui.md:0",
+            "changes-<stamp>-acme-ui.md",
           ],
           "type": "patch",
         },

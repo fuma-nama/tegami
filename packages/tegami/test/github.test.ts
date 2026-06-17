@@ -101,10 +101,8 @@ describe("github release plugin", () => {
               {
                 id: "change-1",
                 filename: "change.md",
-                packages: new Set(["@acme/core"]),
-                type: "minor",
-                title: "Add proxy server",
-                content: "Some description.",
+                packages: new Map([["@acme/core", "minor"]]),
+                sections: [{ title: "Add proxy server", content: "Some description." }],
               },
             ],
           }),
@@ -170,10 +168,8 @@ describe("github release plugin", () => {
               {
                 id: "change-1",
                 filename: "change.md",
-                packages: new Set(["group:acme"]),
-                type: "minor",
-                title: "Add shared API",
-                content: "Useful release note.",
+                packages: new Map([["group:acme", "minor"]]),
+                sections: [{ title: "Add shared API", content: "Useful release note." }],
               },
             ],
           }),
@@ -184,10 +180,8 @@ describe("github release plugin", () => {
               {
                 id: "change-1",
                 filename: "change.md",
-                packages: new Set(["group:acme"]),
-                type: "minor",
-                title: "Add shared API",
-                content: "Useful release note.",
+                packages: new Map([["group:acme", "minor"]]),
+                sections: [{ title: "Add shared API", content: "Useful release note." }],
               },
             ],
           }),
@@ -624,10 +618,8 @@ function versionDraft(context = publishContext()): DraftPlan {
   draft.addChangelog({
     id: "change-1",
     filename: "change.md",
-    packages: new Set(["@acme/core"]),
-    type: "minor",
-    title: "Add feature",
-    content: "Description.",
+    packages: new Map([["@acme/core", "minor"]]),
+    sections: [{ title: "Add feature", content: "Description." }],
   });
   return draft;
 }

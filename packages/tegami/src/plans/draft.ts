@@ -90,14 +90,14 @@ export class DraftPlan {
   addChangelog(entry: ChangelogEntry) {
     this.changelogs.set(entry.id, entry);
     const { graph } = this.context;
-    const groupPackages = new Set<WorkspacePackage>();
+    const groupPackages = new Map<WorkspacePackage, BumpType>();
 
-    for (const name of entry.packages) {
-      for (const pkg of graph.getByName(name)) groupPackages.add(pkg);
+    for (const [name, bumpType] of entry.packages) {
+      for (const pkg of graph.getByName(name)) groupPackages.set(pkg, bumpType);
     }
 
-    for (const pkg of groupPackages) {
-      const plan = this.bumpPackage(pkg, { type: entry.type });
+    for (const [pkg, bumpType] of groupPackages) {
+      const plan = this.bumpPackage(pkg, { type: bumpType });
       plan.changelogs ??= [];
       plan.changelogs.push(entry);
     }

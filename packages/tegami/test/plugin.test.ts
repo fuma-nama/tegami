@@ -90,19 +90,17 @@ async function writePublishPlan(cwd: string): Promise<void> {
     createdAt: "2026-01-01T00:00:00.000Z",
     changelogs: changelog
       ? {
-          "change.md:0": {
+          "change.md": {
             filename: "change.md",
-            packages: ["@acme/core"],
-            type: "patch",
-            title: "Patch",
-            content: "",
+            packages: { "@acme/core": "patch" },
+            sections: [{ title: "Patch", content: "" }],
           },
         }
       : {},
     packages: {
       "@acme/core": {
         type: "patch",
-        changelogIds: changelog ? ["change.md:0"] : [],
+        changelogIds: changelog ? ["change.md"] : [],
         npm: { distTag: "latest" },
         publish: true,
       },

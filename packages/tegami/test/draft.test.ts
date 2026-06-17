@@ -51,7 +51,7 @@ describe("draft publish plans", () => {
         "core": {
           "bumpVersion": [Function],
           "changelogIds": [
-            "change.md:0",
+            "change.md",
           ],
           "npm": {
             "distTag": "alpha",
@@ -71,7 +71,7 @@ describe("draft publish plans", () => {
           },
           "bumpVersion": [Function],
           "changelogIds": [
-            "change.md:0",
+            "change.md",
           ],
           "npm": undefined,
           "prerelease": undefined,
@@ -127,21 +127,24 @@ describe("draft publish plans", () => {
     expect(rawPlan).toMatchInlineSnapshot(`
       {
         "changelogs": {
-          "change.md:0": {
-            "content": "Useful release note.",
+          "change.md": {
             "filename": "change.md",
-            "packages": [
-              "@acme/core",
-              "@acme/ui",
+            "packages": {
+              "@acme/core": "minor",
+              "@acme/ui": "minor",
+            },
+            "sections": [
+              {
+                "content": "Useful release note.",
+                "title": "Add shared API",
+              },
             ],
-            "title": "Add shared API",
-            "type": "minor",
           },
         },
         "packages": {
           "npm:@acme/core": {
             "changelogIds": [
-              "change.md:0",
+              "change.md",
             ],
             "npm": {
               "distTag": "alpha",
@@ -155,7 +158,7 @@ describe("draft publish plans", () => {
               "update dependency "@acme/core"",
             ],
             "changelogIds": [
-              "change.md:0",
+              "change.md",
             ],
             "publish": true,
             "type": "major",

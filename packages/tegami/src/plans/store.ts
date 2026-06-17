@@ -1,11 +1,11 @@
 import z from "zod";
-import { jsonCodec } from "../schemas";
+import { bumpTypeSchema, jsonCodec } from "../schemas";
 import { DraftPlan } from "./draft";
 import { TegamiContext } from "../context";
 import { readFile } from "fs/promises";
 
 const packagePlanStoreSchema = z.object({
-  type: z.enum(["major", "minor", "patch"]).optional(),
+  type: bumpTypeSchema.optional(),
   changelogIds: z.array(z.string()).optional(),
   bumpReasons: z.array(z.string()).optional(),
   npm: z
@@ -29,10 +29,13 @@ const planStoreSchema = jsonCodec(
       z.object({
         filename: z.string(),
         subject: z.string().optional(),
-        packages: z.array(z.string()),
-        type: z.enum(["major", "minor", "patch"]),
-        title: z.string(),
-        content: z.string(),
+        packages: z.record(z.string(), bumpTypeSchema),
+        sections: z.array(
+          z.object({
+            title: z.string(),
+            content: z.string(),
+          }),
+        ),
       }),
     ),
     /** package id -> package info */
@@ -55,10 +58,8 @@ export function createPlanStore(draft: DraftPlan, context: TegamiContext): strin
     store.changelogs[entry.id] = {
       filename: entry.filename,
       subject: entry.subject,
-      packages: Array.from(entry.packages),
-      type: entry.type,
-      title: entry.title,
-      content: entry.content,
+      packages: Object.fromEntries(entry.packages.entries()),
+      sections: entry.sections,
     };
   }
   for (const pkg of context.graph.getPackages()) {

@@ -10,7 +10,7 @@ afterEach(async () => {
 
 describe("markdown changelog parsing", () => {
   test("parses yaml frontmatter and release headings", () => {
-    const entries = parseChangelogFile(
+    const entry = parseChangelogFile(
       "/repo/.tegami/change.md",
       `---
 subject: OpenAPI v11
@@ -37,47 +37,36 @@ Ignored for release planning.
 `,
     );
 
-    expect(entries.map(normalizeEntry)).toMatchInlineSnapshot(`
-      [
-        {
-          "content": "\`\`\`ts
+    expect(normalizeEntry(entry)).toMatchInlineSnapshot(`
+      {
+        "filename": "change.md",
+        "id": "change.md",
+        "packages": {
+          "core": "major",
+          "ui": "major",
+        },
+        "sections": [
+          {
+            "content": "\`\`\`ts
       import { ui } from "openapi";
       \`\`\`",
-          "filename": "change.md",
-          "id": "change.md:0",
-          "packages": [
-            "core",
-            "ui",
-          ],
-          "subject": "OpenAPI v11",
-          "title": "Breaking export path",
-          "type": "major",
-        },
-        {
-          "content": "Some description.",
-          "filename": "change.md",
-          "id": "change.md:1",
-          "packages": [
-            "core",
-            "ui",
-          ],
-          "subject": "OpenAPI v11",
-          "title": "Add proxy server",
-          "type": "minor",
-        },
-        {
-          "content": "- Handles relative paths.",
-          "filename": "change.md",
-          "id": "change.md:2",
-          "packages": [
-            "core",
-            "ui",
-          ],
-          "subject": "OpenAPI v11",
-          "title": "Fix path resolution",
-          "type": "patch",
-        },
-      ]
+            "title": "Breaking export path",
+          },
+          {
+            "content": "Some description.",
+            "title": "Add proxy server",
+          },
+          {
+            "content": "- Handles relative paths.",
+            "title": "Fix path resolution",
+          },
+          {
+            "content": "Ignored for release planning.",
+            "title": "Notes",
+          },
+        ],
+        "subject": "OpenAPI v11",
+      }
     `);
   });
 
@@ -95,31 +84,18 @@ packages: core
     ).toThrow();
   });
 
-  test("parses empty crlf frontmatter", () => {
-    const entries = parseChangelogFile(
-      "/repo/.tegami/change.md",
-      "---\r\n---\r\n\r\n### Patch release\r\n",
-    );
-
-    expect(entries.map(normalizeEntry)).toMatchInlineSnapshot(`
-      [
-        {
-          "content": "",
-          "filename": "change.md",
-          "id": "change.md:0",
-          "packages": [],
-          "subject": undefined,
-          "title": "Patch release",
-          "type": "patch",
-        },
-      ]
-    `);
+  test("returns undefined when frontmatter has no packages", () => {
+    expect(
+      parseChangelogFile("/repo/.tegami/change.md", "---\r\n---\r\n\r\n### Patch release\r\n"),
+    ).toBeUndefined();
   });
 });
 
-function normalizeEntry(entry: ReturnType<typeof parseChangelogFile>[number]) {
+function normalizeEntry(entry: ReturnType<typeof parseChangelogFile>) {
+  if (!entry) return entry;
+
   return {
     ...entry,
-    packages: Array.from(entry.packages),
+    packages: Object.fromEntries(entry.packages),
   };
 }

@@ -1,11 +1,8 @@
 import { z } from "zod";
 
-export const changelogFrontmatterSchema = z.object({
-  subject: z.string().optional(),
-  packages: z.array(z.string()).default([]),
-});
-
 const stringRecordSchema = z.record(z.string(), z.string());
+
+export const bumpTypeSchema = z.enum(["major", "minor", "patch"]);
 
 export const jsonCodec = <T extends z.core.$ZodType>(schema: T) =>
   z.codec(z.string(), schema, {

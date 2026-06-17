@@ -72,7 +72,7 @@ export async function publishFromPlan(
       if (entry)
         changelogs.push({
           ...entry,
-          packages: new Set(entry.packages),
+          packages: new Map(Object.entries(entry.packages)),
           id,
         });
     }

@@ -3,21 +3,31 @@ import { basename, join } from "node:path";
 import type { Heading, Root, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
-import { changelogFrontmatterSchema } from "../schemas";
-import type { BumpType } from "../utils/semver";
+import { maxBump, type BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
 import type { TegamiContext } from "../context";
+import z from "zod";
+import { bumpTypeSchema } from "../schemas";
 
 export interface ChangelogEntry {
   id: string;
   /** file name like `my-change.md` */
   filename: string;
   subject?: string;
-  packages: Set<string>;
-  type: BumpType;
-  title: string;
-  content: string;
+  packages: Map<string, BumpType>;
+  /** will not be empty */
+  sections: {
+    title: string;
+    content: string;
+  }[];
 }
+
+const changelogFrontmatterSchema = z.object({
+  subject: z.string().optional(),
+  packages: z
+    .union([z.array(z.string()), z.record(z.string(), bumpTypeSchema.or(z.null()))])
+    .optional(),
+});
 
 export async function getChangelogFiles(context: TegamiContext): Promise<string[]> {
   const files = await readdir(context.changelogDir).catch(() => []);
@@ -37,33 +47,53 @@ export async function readChangelogEntries(context: TegamiContext): Promise<Chan
     }),
   );
 
-  return entries.flat();
+  return entries.filter((v) => v !== undefined);
 }
 
 /** Parse one changelog markdown file into release entries. */
-export function parseChangelogFile(file: string, content: string): ChangelogEntry[] {
+export function parseChangelogFile(file: string, content: string): ChangelogEntry | undefined {
   const parsed = frontmatter(content);
   const data = changelogFrontmatterSchema.parse(parsed.data);
+  if (!data.packages) return;
+
   const tree = fromMarkdown(parsed.content);
-  const entries: ChangelogEntry[] = [];
+  let bumpType: BumpType | undefined;
+  const packages = new Map<string, BumpType>();
+  const sections: ChangelogEntry["sections"] = [];
+  const filename = basename(file);
 
   for (const section of getHeadingSections(tree)) {
-    const type = headingToBump(section.heading.depth);
-    if (!type) continue;
+    const sectionBumpType = headingToBump(section.heading.depth);
+    if (sectionBumpType) {
+      bumpType = bumpType ? maxBump(bumpType, sectionBumpType) : sectionBumpType;
+    }
 
-    const filename = basename(file);
-    entries.push({
-      id: `${filename}:${entries.length}`,
-      filename,
-      subject: data.subject,
-      packages: new Set(data.packages),
-      type,
+    sections.push({
       title: headingText(section.heading),
       content: sectionToMarkdown(section.children),
     });
   }
 
-  return entries;
+  // no sections & no bumps
+  if (!bumpType) return;
+
+  if (Array.isArray(data.packages)) {
+    for (const pkg of data.packages) {
+      packages.set(pkg, bumpType);
+    }
+  } else {
+    for (const [k, v] of Object.entries(data.packages)) {
+      packages.set(k, v ?? bumpType);
+    }
+  }
+
+  return {
+    id: filename,
+    filename,
+    subject: data.subject,
+    packages,
+    sections,
+  };
 }
 
 interface HeadingSection {

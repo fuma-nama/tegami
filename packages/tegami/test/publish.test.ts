@@ -117,10 +117,8 @@ describe("publish plans", () => {
         string,
         {
           filename: string;
-          packages: string[];
-          type: "major" | "minor" | "patch";
-          title: string;
-          content: string;
+          packages: Record<string, "major" | "minor" | "patch">;
+          sections: { title: string; content: string }[];
         }
       >;
       packages: Record<
@@ -133,10 +131,8 @@ describe("publish plans", () => {
     plan.changelogs = {
       "change-1": {
         filename: "change.md",
-        packages: ["@acme/core"],
-        type: "minor",
-        title: "Add proxy server",
-        content: "Some description.",
+        packages: { "@acme/core": "minor" },
+        sections: [{ title: "Add proxy server", content: "Some description." }],
       },
     };
     plan.packages["npm:@acme/core"]!.changelogIds = ["change-1"];
@@ -156,14 +152,17 @@ describe("publish plans", () => {
     expect(result.packages[0]?.changelogs.map(normalizeChangelog)).toMatchInlineSnapshot(`
       [
         {
-          "content": "Some description.",
           "filename": "change.md",
           "id": "change-1",
-          "packages": [
-            "@acme/core",
+          "packages": {
+            "@acme/core": "minor",
+          },
+          "sections": [
+            {
+              "content": "Some description.",
+              "title": "Add proxy server",
+            },
           ],
-          "title": "Add proxy server",
-          "type": "minor",
         },
       ]
     `);
@@ -536,7 +535,7 @@ function createdResult(result: PublishResult) {
 function normalizeChangelog(changelog: PackagePublishResult["changelogs"][number]) {
   return {
     ...changelog,
-    packages: Array.from(changelog.packages),
+    packages: Object.fromEntries(changelog.packages),
   };
 }
 
