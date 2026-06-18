@@ -13,6 +13,12 @@ export default defineConfig({
   content: docs.toFumadocsSource(),
   site: {
     name: "Tegami",
+    baseUrl: "https://tegami.fuma-nama.dev",
+    git: {
+      user: "fuma-nama",
+      branch: "main",
+      repo: "tegami",
+    },
   },
 })
   .layouts({
