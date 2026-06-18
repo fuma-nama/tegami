@@ -3,7 +3,15 @@ title: Introduction
 description: Manage changelogs, versioning, and publishing for monorepos.
 ---
 
-Tegami manages changelogs, versioning, and publishing. Describe changes in changelog files, bump your packages, and publish to registries like npm and crates.io.
+## Introduction
+
+Tegami (手紙) is a tool that manages changelogs, versioning, and publishing. Describe changes in changelog files, bump your packages, and publish to registries like npm and crates.io.
+
+Tegami was mainly created as a better alternative for Changesets, with solutions to some unsolved issues & problems.
+
+- **Cross-registry version management**: support across npm, cargo, and other registries via plugins.
+- **Weird update dependencies bump**: changesets will generate a major bump for `workspace:*` in peer dependencies, but it is not configurable. Tegami allows flexible dependencies bump behaviour, and it detects package groups to avoid unnecessary bumps.
+- **Programmatic API**: allows robust use cases of the tool, such as using the `willPublish()` hook on plugins to build packages only when published.
 
 ## Release cycle
 

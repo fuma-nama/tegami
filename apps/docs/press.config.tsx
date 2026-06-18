@@ -6,6 +6,8 @@ import { takumiPlugin } from "fumapress/plugins/takumi";
 import { docs } from "./.source/server";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { TypeTable } from "fumadocs-ui/components/type-table";
+import { Image } from "fumapress/image";
+import { imagePlugin } from "fumapress/plugins/image/vercel";
 
 export default defineConfig({
   content: docs.toFumadocsSource(),
@@ -13,7 +15,19 @@ export default defineConfig({
     name: "Tegami",
   },
 })
-  .plugins(flexsearchPlugin(), llmsPlugin(), takumiPlugin())
+  .layouts({
+    defaultProps: () => ({
+      nav: {
+        title: (
+          <>
+            <Image src="/logo.png" width={64} height={64} className="size-8 rounded-sm" />
+            Tegami
+          </>
+        ),
+      },
+    }),
+  })
+  .plugins(flexsearchPlugin(), llmsPlugin(), takumiPlugin(), imagePlugin())
   .adapters(
     fumadocsMdx({
       getMdxComponents() {

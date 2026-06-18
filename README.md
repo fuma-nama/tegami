@@ -1,3 +1,5 @@
+![Logo](./apps/docs/public/logo.png)
+
 > This project is still in beta, the API is unstable and may contains bugs. Not recommended to use in production or serious projects.
 
 ## Tegami
