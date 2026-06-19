@@ -18,6 +18,7 @@ export interface TegamiContext {
   /** additional context when GitHub plugin is configured */
   github?: {
     repo?: string;
+    token?: string;
   };
 }
 

@@ -45,6 +45,8 @@ interface VersionPullRequestOptions {
 export interface GitHubPluginOptions extends GitPluginOptions {
   /** GitHub repository. */
   repo?: string;
+  /** Optional GitHub token for Git & GitHub operations. */
+  token?: string;
 
   /** Override release details for a single package, return `false` to skip. */
   onCreateRelease?: (result: PackagePublishResult) => Awaitable<GithubRelease | false>;
@@ -173,16 +175,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       name: "github",
       init() {
         const repository = options.repo ?? process.env.GITHUB_REPOSITORY;
+        const token = options.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
         this.github = {
           repo: repository,
+          token,
         };
       },
       cli: {
         async init() {
           if (!isCI()) return;
 
-          const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
           const repository = this.github?.repo;
+          const token = this.github?.token;
           if (!token || !repository) return;
 
           const result = await x(
