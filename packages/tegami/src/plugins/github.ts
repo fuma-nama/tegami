@@ -149,13 +149,19 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       }
     }
 
-    const sections = ["## Summary", ...packageLines];
+    const sections = [
+      "## Summary",
+      "",
+      "Merge this PR to publish the versioned packages.",
+      "",
+      ...packageLines,
+    ];
 
     if (changelogLines.length > 0) {
       sections.push("", "## Changelogs", ...changelogLines);
     }
 
-    sections.push("", "Merge this PR to publish the versioned packages.");
+    sections.push("");
 
     return sections.join("\n");
   }

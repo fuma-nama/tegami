@@ -382,6 +382,9 @@ describe("github version pull request", () => {
               "Version Packages",
               "--body",
               "## Summary
+
+        Merge this PR to publish the versioned packages.
+
         - @acme/core@1.0.0 → @acme/core@1.1.0
 
         ## Changelogs
@@ -390,8 +393,7 @@ describe("github version pull request", () => {
         #### Add feature
 
         Description.
-
-        Merge this PR to publish the versioned packages.",
+        ",
               "--repo",
               "acme/repo",
             ],
@@ -515,6 +517,9 @@ describe("github version pull request", () => {
               "Version Packages",
               "--body",
               "## Summary
+
+        Merge this PR to publish the versioned packages.
+
         - @acme/core@1.0.0 → @acme/core@1.1.0
 
         ## Changelogs
@@ -523,8 +528,7 @@ describe("github version pull request", () => {
         #### Add feature
 
         Description.
-
-        Merge this PR to publish the versioned packages.",
+        ",
               "--head",
               "tegami/version-packages",
               "--base",
