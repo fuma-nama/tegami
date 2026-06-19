@@ -16,6 +16,12 @@ const WEIGHTS = {
   patch: 1,
 } as const;
 
+const NAMES = {
+  major: "Major",
+  minor: "Minor",
+  patch: "Patch",
+};
+
 const PRE = {
   major: "premajor",
   minor: "preminor",
@@ -25,6 +31,10 @@ const PRE = {
 export function maxBump(a: BumpType, b: BumpType): BumpType {
   if (WEIGHTS[a] > WEIGHTS[b]) return a;
   return b;
+}
+
+export function bumpName(bumpType: BumpType) {
+  return NAMES[bumpType];
 }
 
 export function bumpVersion(version: string, type?: BumpType, prerelease?: string): string {

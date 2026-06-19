@@ -492,7 +492,11 @@ describe("github version pull request", () => {
         - @acme/core@1.0.0 → @acme/core@1.1.0
 
         ## Changelogs
-        - Add feature
+        ### \`change.md\`
+
+        #### Add feature
+
+        Description.
 
         Merge this PR to publish the versioned packages.",
               "--head",

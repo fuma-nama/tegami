@@ -50,18 +50,22 @@ Ignored for release planning.
             "content": "\`\`\`ts
       import { ui } from "openapi";
       \`\`\`",
+            "depth": 1,
             "title": "Breaking export path",
           },
           {
             "content": "Some description.",
+            "depth": 2,
             "title": "Add proxy server",
           },
           {
             "content": "- Handles relative paths.",
+            "depth": 3,
             "title": "Fix path resolution",
           },
           {
             "content": "Ignored for release planning.",
+            "depth": 4,
             "title": "Notes",
           },
         ],

@@ -140,9 +140,15 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       );
     }
 
-    const changelogLines = draft
-      .getChangelogs()
-      .flatMap((entry) => entry.sections.map((section) => `- ${section.title}`));
+    const changelogLines: string[] = [];
+    for (const entry of draft.getChangelogs()) {
+      changelogLines.push(`### ${entry.subject ?? `\`${entry.filename}\``}`, "");
+      for (const section of entry.sections) {
+        changelogLines.push(`#### ${section.title}`, "");
+        changelogLines.push(section.content);
+      }
+    }
+
     const sections = ["## Summary", ...packageLines];
 
     if (changelogLines.length > 0) {
