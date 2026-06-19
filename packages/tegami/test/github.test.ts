@@ -373,6 +373,32 @@ describe("github version pull request", () => {
             "cwd": undefined,
             "throwOnError": undefined,
           },
+          {
+            "args": [
+              "pr",
+              "edit",
+              "42",
+              "--title",
+              "Version Packages",
+              "--body",
+              "## Summary
+        - @acme/core@1.0.0 → @acme/core@1.1.0
+
+        ## Changelogs
+        ### \`change.md\`
+
+        #### Add feature
+
+        Description.
+
+        Merge this PR to publish the versioned packages.",
+              "--repo",
+              "acme/repo",
+            ],
+            "command": "gh",
+            "cwd": undefined,
+            "throwOnError": undefined,
+          },
         ]
       `);
     } finally {

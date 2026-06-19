@@ -232,7 +232,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             );
           }
 
-          if (await hasOpenPullRequest(branch, options.repo)) return;
+          const openPr = await findOpenPullRequest(branch, options.repo);
+
+          if (openPr !== undefined) {
+            const editArgs = ["pr", "edit", String(openPr), "--title", pr.title, "--body", pr.body];
+            if (options.repo) editArgs.push("--repo", options.repo);
+
+            const editResult = await x("gh", editArgs);
+            if (editResult.exitCode !== 0) {
+              throw execFailure("Failed to update the version pull request.", editResult);
+            }
+            return;
+          }
 
           const args = [
             "pr",
@@ -279,7 +290,10 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
   return result.stdout.trim().length > 0;
 }
 
-async function hasOpenPullRequest(branch: string, repo: string | undefined): Promise<boolean> {
+async function findOpenPullRequest(
+  branch: string,
+  repo: string | undefined,
+): Promise<number | undefined> {
   const args = ["pr", "list", "--head", branch, "--state", "open", "--json", "number"];
   if (repo) args.push("--repo", repo);
 
@@ -288,7 +302,8 @@ async function hasOpenPullRequest(branch: string, repo: string | undefined): Pro
     throw execFailure("Failed to check for an existing version pull request.", result);
   }
 
-  return result.stdout.trim() !== "[]";
+  const pullRequests = JSON.parse(result.stdout) as Array<{ number: number }>;
+  return pullRequests[0]?.number;
 }
 
 function groupPackagesByGitTag(
