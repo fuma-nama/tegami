@@ -1,5 +1,5 @@
-import { createChangelog } from "./changelog/create";
-import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
+import { generateChangelog } from "./changelog/generate";
+import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/generate";
 import { createTegamiContext, TegamiContext } from "./context";
 import { DraftPlan, cleanupPublishPlan, createDraftPlan } from "./plans/draft";
 import type { CleanupResult } from "./plans/draft";
@@ -12,7 +12,7 @@ import { PackageGraph } from "./graph";
 import { readPlanStore } from "./plans/store";
 
 export type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
-export type { CreateChangelogOptions, CreatedChangelog } from "./changelog/create";
+export type { CreateChangelogOptions, CreatedChangelog } from "./changelog/generate";
 export type {
   LogGenerator,
   TegamiOptions,
@@ -54,7 +54,7 @@ export function tegami<const Groups extends string = string>(
 
   return {
     async generateChangelog(createOptions = {}) {
-      return createChangelog(await $context, createOptions);
+      return generateChangelog(await $context, createOptions);
     },
     _internal: {
       options,

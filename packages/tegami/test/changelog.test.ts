@@ -3,6 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  conventionalCommitToBump,
+  createConventionalCommitParser,
+} from "../src/utils/conventional-commit";
+import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { tegami } from "../src";
 import { getPendingPackageIds } from "./helpers/draft";
 
@@ -19,6 +24,83 @@ beforeEach(() => {
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
+});
+
+describe("conventional commits", () => {
+  const graph = new PackageGraph([
+    testPackage("@acme/core", "/repo/packages/core"),
+    testPackage("@acme/ui", "/repo/packages/ui"),
+  ]);
+  const parse = createConventionalCommitParser(graph);
+
+  test("parses angular and semantic-release style headers", () => {
+    expect(parse("feat(core): add widgets")).toEqual({
+      type: "feat",
+      packages: ["@acme/core"],
+      breaking: false,
+      title: "add widgets",
+    });
+    expect(parse("fix(@acme/ui): repair button state")).toEqual({
+      type: "fix",
+      packages: ["@acme/ui"],
+      breaking: false,
+      title: "repair button state",
+    });
+    expect(parse("feat!: drop legacy api")).toEqual({
+      type: "feat",
+      packages: [],
+      breaking: true,
+      title: "drop legacy api",
+    });
+    expect(parse("fix(scope)!: breaking patch")).toEqual({
+      type: "fix",
+      packages: ["scope"],
+      breaking: true,
+      title: "breaking patch",
+    });
+    expect(parse("revert: undo release")).toEqual({
+      type: "revert",
+      packages: [],
+      breaking: false,
+      title: "undo release",
+    });
+    expect(parse("fix(core): update api", "BREAKING CHANGE: removed old api")).toEqual({
+      type: "fix",
+      packages: ["@acme/core"],
+      breaking: true,
+      title: "update api",
+    });
+  });
+
+  test("rejects non-conventional subjects", () => {
+    expect(parse("chore:missing space")).toBeUndefined();
+    expect(parse("feat: ")).toBeUndefined();
+    expect(parse("not a commit")).toBeUndefined();
+  });
+
+  test("maps releasable types to semver bumps", () => {
+    expect(conventionalCommitToBump("feat", false)).toBe("minor");
+    expect(conventionalCommitToBump("fix", false)).toBe("patch");
+    expect(conventionalCommitToBump("perf", false)).toBe("patch");
+    expect(conventionalCommitToBump("revert", false)).toBe("patch");
+    expect(conventionalCommitToBump("chore", false)).toBeUndefined();
+    expect(conventionalCommitToBump("feat", true)).toBe("major");
+  });
+
+  test("resolves scopes with a cached short-name index", () => {
+    expect(parse("fix(core): patch")).toEqual({
+      type: "fix",
+      packages: ["@acme/core"],
+      breaking: false,
+      title: "patch",
+    });
+    expect(parse("feat(@acme/ui,core): change")).toEqual({
+      type: "feat",
+      packages: ["@acme/ui", "@acme/core"],
+      breaking: false,
+      title: "change",
+    });
+  });
 });
 
 describe("createChangelog", () => {
@@ -92,13 +174,13 @@ describe("createChangelog", () => {
       {
         "npm:@acme/core": {
           "changelogIds": [
-            "changes-<stamp>-acme-core.md",
+            "<stamp>.md:0",
           ],
           "type": "minor",
         },
         "npm:@acme/ui": {
           "changelogIds": [
-            "changes-<stamp>-acme-ui.md",
+            "<stamp>.md:0",
           ],
           "type": "patch",
         },
@@ -146,7 +228,7 @@ function normalizeFile(file: { packages: string[]; changes: number; content: str
   return {
     packages: file.packages,
     changes: file.changes,
-    content: file.content.replaceAll(/changes-[a-z0-9]+/g, "changes-<stamp>"),
+    content: file.content.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md/g, "<stamp>.md"),
   };
 }
 
@@ -163,10 +245,26 @@ async function normalizePlan(
         {
           type: plan.type,
           changelogIds: (plan.changelogs ?? []).map((item) =>
-            item.id.replaceAll(/changes-[a-z0-9]+/g, "changes-<stamp>"),
+            item.id.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md:\d+/g, "<stamp>.md:0"),
           ),
         },
       ];
     }),
   );
+}
+
+function testPackage(name: string, path: string): WorkspacePackage {
+  return new ChangelogTestPackage(name, path);
+}
+
+class ChangelogTestPackage extends WorkspacePackage {
+  readonly manager = "npm";
+  readonly version = "1.0.0";
+
+  constructor(
+    readonly name: string,
+    readonly path: string,
+  ) {
+    super();
+  }
 }

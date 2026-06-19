@@ -14,6 +14,7 @@ import {
 import { Command } from "commander";
 import type { Awaitable } from "../types";
 import { bumpDepth, type BumpType } from "../utils/semver";
+import { changelogFilename } from "../utils/changelog";
 import { isCI } from "../utils/constants";
 import { handlePluginError } from "../utils/error";
 import { assertPublishPlanFinished } from "../plans/checks";
@@ -358,16 +359,6 @@ function renderManualChangelog(packages: string[], type: BumpType, message: stri
     `${prefix} ${message}`,
     "",
   ].join("\n");
-}
-
-function changelogFilename(): string {
-  const date = new Date();
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hash = Date.now().toString(36);
-
-  return `${yyyy}-${mm}-${dd}-${hash}.md`;
 }
 
 async function runAction(tegami: Tegami, action: () => Awaitable<void>): Promise<void> {
