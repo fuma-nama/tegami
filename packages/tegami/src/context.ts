@@ -6,8 +6,11 @@ import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
 
 export interface TegamiContext {
+  /** absolute path */
   cwd: string;
+  /** absolute path */
   changelogDir: string;
+  /** absolute path */
   planPath: string;
   options: TegamiOptions;
   plugins: TegamiPlugin[];

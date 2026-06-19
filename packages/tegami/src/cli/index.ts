@@ -12,13 +12,16 @@ import {
   spinner,
 } from "@clack/prompts";
 import { Command } from "commander";
-import type { DraftPlan, PublishResult, Tegami, WorkspacePackage } from "..";
 import type { Awaitable } from "../types";
 import { bumpDepth, type BumpType } from "../utils/semver";
 import { isCI } from "../utils/constants";
 import { handlePluginError } from "../utils/error";
 import { assertPublishPlanFinished } from "../plans/checks";
 import { dump } from "js-yaml";
+import type { Tegami } from "..";
+import type { WorkspacePackage } from "../graph";
+import type { DraftPlan } from "../plans/draft";
+import type { PublishResult } from "../publish";
 
 export interface TegamiCLIOptions {
   /** create a custom draft plan, it must not be applied */

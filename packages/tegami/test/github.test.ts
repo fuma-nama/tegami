@@ -110,24 +110,69 @@ describe("github release plugin", () => {
       }),
     );
 
-    expect(exec.mock.calls).toMatchInlineSnapshot(`
+    expect(ghReleaseCall()).toMatchInlineSnapshot(`
       [
+        "gh",
         [
-          "gh",
-          [
-            "release",
-            "create",
-            "@acme/core@1.0.1",
-            "--title",
-            "@acme/core@1.0.1",
-            "--notes",
-            "### Add proxy server
+          "release",
+          "create",
+          "@acme/core@1.0.1",
+          "--title",
+          "@acme/core@1.0.1",
+          "--notes",
+          "### Add proxy server
 
       Some description.",
-          ],
         ],
       ]
     `);
+  });
+
+  test("links changelog entry commits in default release notes", async () => {
+    exec.mockImplementation((command, args) => {
+      if (command === "git" && args[0] === "log") {
+        return commandResult({
+          stdout: "abc1234567890abcdef1234567890abcdef123456\n",
+        });
+      }
+
+      return commandResult();
+    });
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+
+    await plugin.afterPublish?.call(
+      {
+        ...publishContext(),
+        github: { repo: "acme/repo" },
+      },
+      publishResult({
+        packages: [
+          packageResult({
+            changelogs: [
+              {
+                id: "change-1",
+                filename: "change.md",
+                packages: new Map([["@acme/core", "minor"]]),
+                sections: [{ title: "Add proxy server", content: "Some description." }],
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(ghReleaseCall()?.[1]).toEqual([
+      "release",
+      "create",
+      "@acme/core@1.0.1",
+      "--title",
+      "@acme/core@1.0.1",
+      "--notes",
+      "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
+      "--repo",
+      "acme/repo",
+    ]);
   });
 
   test("marks semver prerelease versions as GitHub prerelease by default", async () => {
@@ -189,8 +234,8 @@ describe("github release plugin", () => {
       }),
     );
 
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec.mock.calls[0]?.[1]).toEqual([
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(ghReleaseCall()?.[1]).toEqual([
       "release",
       "create",
       "acme@1.0.1",
@@ -609,7 +654,7 @@ function githubPlugin(options?: Parameters<typeof github>[0]): TegamiPlugin {
 function publishContext() {
   return {
     cwd: "/repo",
-    changelogDir: ".tegami",
+    changelogDir: "/repo/.tegami",
     planPath: "/repo/.tegami/publish-plan",
     options: {},
     plugins: [],
@@ -711,6 +756,10 @@ function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePu
     state: "success",
     ...overrides,
   };
+}
+
+function ghReleaseCall() {
+  return exec.mock.calls.find((call) => call[0] === "gh");
 }
 
 type ExecResult = Awaited<ReturnType<typeof x>>;

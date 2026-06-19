@@ -1,4 +1,5 @@
 import { x } from "tinyexec";
+import { join, relative } from "node:path";
 import { prerelease as getPrerelease } from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
@@ -49,11 +50,20 @@ export interface GitHubPluginOptions extends GitPluginOptions {
   token?: string;
 
   /** Override release details for a single package, return `false` to skip. */
-  onCreateRelease?: (result: PackagePublishResult) => Awaitable<GithubRelease | false>;
+  onCreateRelease?: (
+    this: TegamiContext,
+    result: PackagePublishResult,
+  ) => Awaitable<GithubRelease | false>;
   /** Override release details when multiple packages share a git tag, return `false` to skip. */
-  onCreateGroupedRelease?: (packages: PackagePublishResult[]) => Awaitable<GithubRelease | false>;
+  onCreateGroupedRelease?: (
+    this: TegamiContext,
+    packages: PackagePublishResult[],
+  ) => Awaitable<GithubRelease | false>;
   /** Override details for "Version Packages" PR. */
-  onCreateVersionPullRequest?: (publishPlan: DraftPlan) => Awaitable<VersionPullRequest | false>;
+  onCreateVersionPullRequest?: (
+    this: TegamiContext,
+    publishPlan: DraftPlan,
+  ) => Awaitable<VersionPullRequest | false>;
 
   cli?: {
     /**
@@ -89,31 +99,34 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     }
   }
 
-  async function createRelease(pkg: PackagePublishResult): Promise<void> {
+  async function createRelease(context: TegamiContext, pkg: PackagePublishResult): Promise<void> {
     if (!pkg.gitTag) return;
 
-    const release = (await options.onCreateRelease?.(pkg)) ?? {};
+    const release = (await options.onCreateRelease?.call(context, pkg)) ?? {};
     if (release === false) return;
 
     await runGithubRelease(
       pkg.gitTag,
       release.title ?? defaultTitle(pkg),
-      release.notes ?? defaultNotes(pkg),
+      release.notes ?? (await defaultNotes(context, pkg)),
       release.prerelease ?? getPrerelease(pkg.version) !== null,
     );
   }
 
-  async function createGroupedRelease(packages: PackagePublishResult[]): Promise<void> {
+  async function createGroupedRelease(
+    context: TegamiContext,
+    packages: PackagePublishResult[],
+  ): Promise<void> {
     const primary = packages[0];
     if (!primary?.gitTag) return;
 
-    const release = (await options.onCreateGroupedRelease?.(packages)) ?? {};
+    const release = (await options.onCreateGroupedRelease?.call(context, packages)) ?? {};
     if (release === false) return;
 
     await runGithubRelease(
       primary.gitTag,
       release.title ?? defaultGroupedTitle(packages),
-      release.notes ?? defaultGroupedNotes(packages),
+      release.notes ?? (await defaultGroupedNotes(context, packages)),
       release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
     );
   }
@@ -215,7 +228,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
           const { branch = "tegami/version-packages", base = "main" } = config;
 
-          const basePR = await options.onCreateVersionPullRequest?.(draft);
+          const basePR = await options.onCreateVersionPullRequest?.call(this, draft);
           if (basePR === false) return;
           const pr: Required<VersionPullRequest> = {
             title: basePR?.title ?? "Version Packages",
@@ -286,9 +299,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
         for (const packages of groupPackagesByGitTag(result.packages).values()) {
           if (packages.length > 1) {
-            await createGroupedRelease(packages);
+            await createGroupedRelease(this, packages);
           } else {
-            await createRelease(packages[0]!);
+            await createRelease(this, packages[0]!);
           }
         }
       },
@@ -355,21 +368,63 @@ function defaultGroupedTitle(packages: PackagePublishResult[]): string {
   );
 }
 
-function defaultNotes(pkg: PackagePublishResult): string {
+function formatCommitLink(commit: string, repo?: string): string {
+  const short = commit.slice(0, 7);
+  if (!repo) return `\`${short}\``;
+
+  return `[${short}](https://github.com/${repo}/commit/${commit})`;
+}
+
+async function resolveChangelogEntryCommit(
+  context: TegamiContext,
+  filename: string,
+): Promise<string | undefined> {
+  const relativePath = relative(context.cwd, join(context.changelogDir, filename));
+  const result = await x(
+    "git",
+    ["log", "--diff-filter=A", "-1", "--format=%H", "--", relativePath],
+    {
+      nodeOptions: { cwd: context.cwd },
+    },
+  );
+
+  if (result.exitCode !== 0) return;
+  return result.stdout.trim() || undefined;
+}
+
+async function renderChangelogEntryNotes(
+  context: TegamiContext,
+  entry: ChangelogEntry,
+): Promise<string> {
+  const repo = context.github?.repo;
+  const commit = await resolveChangelogEntryCommit(context, entry.filename);
+  const commitSuffix = commit ? ` (${formatCommitLink(commit, repo)})` : "";
+  const lines: string[] = [];
+
+  for (const section of entry.sections) {
+    lines.push(`### ${section.title}${commitSuffix}`, "");
+    if (section.content) lines.push(section.content, "");
+  }
+
+  return lines.join("\n").trim();
+}
+
+async function defaultNotes(context: TegamiContext, pkg: PackagePublishResult): Promise<string> {
   if (pkg.changelogs.length > 0) {
-    return pkg.changelogs
-      .flatMap((entry) =>
-        entry.sections.map((section) =>
-          [`### ${section.title}`, section.content].filter(Boolean).join("\n\n"),
-        ),
-      )
-      .join("\n\n");
+    const notes = await Promise.all(
+      pkg.changelogs.map(async (entry) => renderChangelogEntryNotes(context, entry)),
+    );
+
+    return notes.join("\n\n");
   }
 
   return `Published ${formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag)}.`;
 }
 
-function defaultGroupedNotes(packages: PackagePublishResult[]): string {
+async function defaultGroupedNotes(
+  context: TegamiContext,
+  packages: PackagePublishResult[],
+): Promise<string> {
   const changelogs = new Map<string, ChangelogEntry>();
 
   for (const pkg of packages) {
@@ -383,16 +438,11 @@ function defaultGroupedNotes(packages: PackagePublishResult[]): string {
   ];
 
   if (changelogs.size > 0) {
-    sections.push(
-      "",
-      Array.from(changelogs.values())
-        .flatMap((entry) =>
-          entry.sections.map((section) =>
-            [`### ${section.title}`, section.content].filter(Boolean).join("\n\n"),
-          ),
-        )
-        .join("\n\n"),
+    const notes = await Promise.all(
+      Array.from(changelogs.values()).map((entry) => renderChangelogEntryNotes(context, entry)),
     );
+
+    sections.push("", notes.join("\n\n"));
   } else {
     sections.push("", `Published ${packages[0]!.gitTag}.`);
   }
