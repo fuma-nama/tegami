@@ -16,6 +16,12 @@ const WEIGHTS = {
   patch: 1,
 } as const;
 
+const DEPTH = {
+  major: 1,
+  minor: 2,
+  patch: 3,
+} as const;
+
 const NAMES = {
   major: "Major",
   minor: "Minor",
@@ -35,6 +41,10 @@ export function maxBump(a: BumpType, b: BumpType): BumpType {
 
 export function bumpName(bumpType: BumpType) {
   return NAMES[bumpType];
+}
+
+export function bumpDepth(type: BumpType) {
+  return DEPTH[type];
 }
 
 export function bumpVersion(version: string, type?: BumpType, prerelease?: string): string {

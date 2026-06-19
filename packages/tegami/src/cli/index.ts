@@ -1,23 +1,24 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  autocompleteMultiselect,
   confirm,
   intro,
   isCancel,
-  multiselect,
+  multiline,
   note,
   outro,
   select,
   spinner,
-  text,
 } from "@clack/prompts";
 import { Command } from "commander";
-import type { DraftPlan, PublishResult, Tegami } from "..";
+import type { DraftPlan, PublishResult, Tegami, WorkspacePackage } from "..";
 import type { Awaitable } from "../types";
-import type { BumpType } from "../utils/semver";
+import { bumpDepth, type BumpType } from "../utils/semver";
 import { isCI } from "../utils/constants";
 import { handlePluginError } from "../utils/error";
 import { assertPublishPlanFinished } from "../plans/checks";
+import { dump } from "js-yaml";
 
 export interface TegamiCLIOptions {
   /** create a custom draft plan, it must not be applied */
@@ -95,20 +96,44 @@ async function createChangelogs(
   await assertPublishPlanFinished(context);
 
   intro("Create changelogs");
-  const packages = context.graph.getPackages();
   let selectedPackages: string[] = [];
 
-  if (isCI()) {
-    selectedPackages = [];
-  } else {
-    const selected = await multiselect({
+  if (!isCI()) {
+    const packages = context.graph.getPackages();
+    const useShortname = new Map<string, boolean>();
+
+    for (const pkg of packages) {
+      if (useShortname.has(pkg.name)) useShortname.set(pkg.name, false);
+      else useShortname.set(pkg.name, true);
+    }
+
+    const getPackageLabel = (pkg: WorkspacePackage) => {
+      return useShortname.get(pkg.name) ? pkg.name : pkg.id;
+    };
+
+    const selectOptions: {
+      label: string;
+      value: string;
+      hint?: string;
+    }[] = [];
+    for (const group of context.graph.getGroups()) {
+      selectOptions.push({
+        label: `Group ${group.name}`,
+        value: `group:${group.name}`,
+        hint: group.packages.map(getPackageLabel).join(", "),
+      });
+    }
+    for (const pkg of packages) {
+      selectOptions.push({
+        label: getPackageLabel(pkg),
+        value: pkg.id,
+      });
+    }
+
+    const selected = await autocompleteMultiselect({
       message: "Select packages (leave empty to auto-generate from commits)",
       required: false,
-      options: packages.map((pkg) => ({
-        value: pkg.id,
-        label: pkg.id,
-        hint: pkg.version,
-      })),
+      options: selectOptions,
     });
 
     if (isCancel(selected)) throw new CancelledError();
@@ -161,9 +186,10 @@ async function createChangelogs(
   });
   if (isCancel(type)) throw new CancelledError();
 
-  const message = await text({
-    message: "Change message",
-    placeholder: "Add a concise release note",
+  const message = await multiline({
+    message: "Describe change (Markdown supported, press tab then enter to exit)",
+    placeholder: "The first line is heading\n\nAdditional description.",
+    showSubmit: true,
     validate(value) {
       if (!value?.trim()) return "Enter a message.";
     },
@@ -312,14 +338,21 @@ async function runCleanup(tegami: Tegami): Promise<void> {
 }
 
 function renderManualChangelog(packages: string[], type: BumpType, message: string): string {
-  const heading = "#".repeat(type === "major" ? 1 : type === "minor" ? 2 : 3);
+  const prefix = "#".repeat(bumpDepth(type));
+  const packageMap: Record<string, BumpType> = {};
+
+  for (const name of packages) {
+    packageMap[name] = type;
+  }
 
   return [
     "---",
-    `packages: ${JSON.stringify(packages)}`,
+    dump({
+      packages: packageMap,
+    }).trim(),
     "---",
     "",
-    `${heading} ${message}`,
+    `${prefix} ${message}`,
     "",
   ].join("\n");
 }

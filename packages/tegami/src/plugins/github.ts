@@ -171,12 +171,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     git(options),
     {
       name: "github",
+      init() {
+        const repository = options.repo ?? process.env.GITHUB_REPOSITORY;
+        this.github = {
+          repo: repository,
+        };
+      },
       cli: {
         async init() {
           if (!isCI()) return;
 
           const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-          const repository = options.repo ?? process.env.GITHUB_REPOSITORY;
+          const repository = this.github?.repo;
           if (!token || !repository) return;
 
           const result = await x(

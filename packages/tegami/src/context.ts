@@ -14,6 +14,11 @@ export interface TegamiContext {
   graph: PackageGraph;
   /** error if doesn't exist */
   getRegistryClient(pkgOrId: WorkspacePackage | string): RegistryClient;
+
+  /** additional context when GitHub plugin is configured */
+  github?: {
+    repo?: string;
+  };
 }
 
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {

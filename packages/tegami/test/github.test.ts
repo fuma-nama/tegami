@@ -169,7 +169,7 @@ describe("github release plugin", () => {
                 id: "change-1",
                 filename: "change.md",
                 packages: new Map([["group:acme", "minor"]]),
-                sections: [{ title: "Add shared API", content: "Useful release note." }],
+                sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
               },
             ],
           }),
@@ -181,7 +181,7 @@ describe("github release plugin", () => {
                 id: "change-1",
                 filename: "change.md",
                 packages: new Map([["group:acme", "minor"]]),
-                sections: [{ title: "Add shared API", content: "Useful release note." }],
+                sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
               },
             ],
           }),
@@ -250,9 +250,11 @@ describe("github version pull request", () => {
 
     try {
       const plugin = githubPlugin({ repo: "acme/repo" });
+      const context = publishContext();
       exec.mockImplementation(() => commandResult());
 
-      await plugin.cli?.init?.call(publishContext());
+      await plugin.init?.call(context);
+      await plugin.cli?.init?.call(context);
 
       expect(exec).toHaveBeenCalledWith(
         "git",
@@ -653,7 +655,7 @@ function versionDraft(context = publishContext()): DraftPlan {
     id: "change-1",
     filename: "change.md",
     packages: new Map([["@acme/core", "minor"]]),
-    sections: [{ title: "Add feature", content: "Description." }],
+    sections: [{ title: "Add feature", content: "Description.", depth: 2 }],
   });
   return draft;
 }
