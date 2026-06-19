@@ -1,3 +1,17 @@
+## tegami@0.1.0-beta.2
+
+### Support better changelog design
+
+
+
+### Improve changelog & PR styles
+
+
+
+### Improve TUI for adding changelogs
+
+Add search + group selection support
+
 ## tegami@0.1.0-beta.1
 
 ### Improve CI integration
