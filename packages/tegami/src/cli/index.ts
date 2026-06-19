@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   autocompleteMultiselect,
   confirm,
@@ -23,6 +23,7 @@ import type { Tegami } from "..";
 import type { WorkspacePackage } from "../graph";
 import type { DraftPlan } from "../plans/draft";
 import type { PublishResult } from "../publish";
+import { initAgent } from "./init-agent";
 
 export interface TegamiCLIOptions {
   /** create a custom draft plan, it must not be applied */
@@ -36,6 +37,10 @@ interface VersionCommandOptions {}
 
 interface PublishCommandOptions {
   dryRun?: boolean;
+}
+
+interface InitAgentCommandOptions {
+  output?: string;
 }
 
 class CancelledError extends Error {
@@ -88,6 +93,14 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
     .command("cleanup")
     .description("remove the publish plan after all packages have been published")
     .action(() => runAction(tegami, () => runCleanup(tegami)));
+
+  program
+    .command("init-agent")
+    .description("write AGENTS.md with changelog instructions for AI agents")
+    .option("-o, --output <path>", "output path", "AGENTS.md")
+    .action((commandOptions: InitAgentCommandOptions) =>
+      runAction(tegami, () => runInitAgent(tegami, commandOptions)),
+    );
 
   return program;
 }
@@ -317,6 +330,19 @@ async function publishPackages(
 
   outro(dryRun ? "Publish plan is valid." : "Packages published.");
   return true;
+}
+
+async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): Promise<void> {
+  intro("Init agent instructions");
+
+  const context = await tegami._internal.context();
+  const s = spinner();
+  s.start("Writing AGENTS.md");
+  const result = await initAgent(context, options);
+  s.stop(result.created ? "Created AGENTS.md" : "Appended to AGENTS.md");
+
+  note(relative(context.cwd, result.path) || "AGENTS.md", "Agent instructions");
+  outro("Agents can follow AGENTS.md to write changelogs.");
 }
 
 async function runCleanup(tegami: Tegami): Promise<void> {

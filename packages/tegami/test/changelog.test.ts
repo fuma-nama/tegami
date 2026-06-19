@@ -174,13 +174,13 @@ describe("createChangelog", () => {
       {
         "npm:@acme/core": {
           "changelogIds": [
-            "<stamp>.md:0",
+            "<stamp>.md",
           ],
           "type": "minor",
         },
         "npm:@acme/ui": {
           "changelogIds": [
-            "<stamp>.md:0",
+            "<stamp>.md",
           ],
           "type": "patch",
         },
@@ -245,7 +245,7 @@ async function normalizePlan(
         {
           type: plan.type,
           changelogIds: (plan.changelogs ?? []).map((item) =>
-            item.id.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md:\d+/g, "<stamp>.md:0"),
+            item.id.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md/g, "<stamp>.md"),
           ),
         },
       ];

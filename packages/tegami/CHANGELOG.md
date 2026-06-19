@@ -2,11 +2,7 @@
 
 ### Support better changelog design
 
-
-
 ### Improve changelog & PR styles
-
-
 
 ### Improve TUI for adding changelogs
 
