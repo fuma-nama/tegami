@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import path from "node:path";
 import { load } from "js-yaml";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
@@ -41,7 +41,10 @@ export class NpmPackage extends WorkspacePackage {
   }
 
   async write(): Promise<void> {
-    await writeFile(join(this.path, "package.json"), `${JSON.stringify(this.manifest, null, 2)}\n`);
+    await writeFile(
+      path.join(this.path, "package.json"),
+      `${JSON.stringify(this.manifest, null, 2)}\n`,
+    );
   }
 
   onPlan(context: TegamiContext) {
@@ -153,14 +156,24 @@ type DependencySpec =
       linked?: WorkspacePackage;
     }
   | {
-      protocol?: "workspace";
+      protocol: "workspace";
       range: string;
       linked?: WorkspacePackage;
+    }
+  | {
+      protocol: "file";
+      raw: string;
+      linked?: WorkspacePackage;
+    }
+  | {
+      range: string;
+      linked?: WorkspacePackage;
+      protocol?: undefined;
     };
 
-// TODO: support file: protocol
 function parseDependencySpec(
   context: TegamiContext,
+  dependent: NpmPackage,
   name: string,
   range: string,
 ): DependencySpec | undefined {
@@ -171,6 +184,19 @@ function parseDependencySpec(
       range: range.slice("workspace:".length),
       linked: graph.get(`npm:${name}`),
       protocol: "workspace",
+    };
+  }
+
+  if (range.startsWith("file:")) {
+    let target = path.resolve(dependent.path, range.slice("file:".length));
+    if (path.basename(target) === "package.json") {
+      target = path.dirname(target);
+    }
+
+    return {
+      protocol: "file",
+      raw: range,
+      linked: graph.getPackages().find((pkg) => pkg instanceof NpmPackage && pkg.path === target),
     };
   }
 
@@ -194,6 +220,10 @@ function parseDependencySpec(
 function formatDependencySpec(spec: DependencySpec): string {
   if (spec.protocol === "workspace") {
     return `workspace:${spec.range}`;
+  }
+
+  if (spec.protocol === "file") {
+    return spec.raw;
   }
 
   if (spec.protocol === "npm") {
@@ -272,10 +302,14 @@ export function npm({
               return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
           }
         }
+
+        if (spec.protocol === "file") {
+          return true;
+        }
       }
 
       // Ignore special syntax like "latest".
-      if (!semver.validRange(spec.range)) return false;
+      if (spec.protocol === "file" || !semver.validRange(spec.range)) return false;
       return !semver.satisfies(target, spec.range);
     }
 
@@ -292,7 +326,7 @@ export function npm({
             if (!dependencies) continue;
 
             for (const [k, v] of Object.entries(dependencies)) {
-              const spec = parseDependencySpec(context, k, v);
+              const spec = parseDependencySpec(context, dependent, k, v);
               if (!spec || spec.linked !== pkg) continue;
               if (!needsUpdate(dependent, spec, plan.bumpVersion(pkg))) continue;
 
@@ -351,11 +385,12 @@ export function npm({
           if (!dependencies) continue;
 
           for (const [k, v] of Object.entries(dependencies)) {
-            const spec = parseDependencySpec(this, k, v);
-            if (!spec || !spec.linked) continue;
+            const spec = parseDependencySpec(this, pkg, k, v);
 
+            if (!spec?.linked || spec.protocol === "workspace" || spec.protocol === "file")
+              continue;
             // Ignore special syntax like "latest"
-            if (!semver.validRange(spec.range) || spec.protocol === "workspace") continue;
+            if (!semver.validRange(spec.range)) continue;
             if (semver.satisfies(spec.linked.version, spec.range)) continue;
 
             let updatedRange: string;
@@ -414,7 +449,7 @@ export function npm({
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
   let patterns: string[];
   const rootManifest = await readManifest(cwd).catch(() => undefined);
-  const pnpmPatterns = await readFile(join(cwd, "pnpm-workspace.yaml"), "utf8")
+  const pnpmPatterns = await readFile(path.join(cwd, "pnpm-workspace.yaml"), "utf8")
     .then((content) => pnpmWorkspaceSchema.parse(load(content) ?? {}))
     .catch((error: unknown) => {
       if (isNodeError(error) && error.code === "ENOENT") return undefined;
@@ -449,17 +484,21 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
 async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise<string[]> {
   if (patterns.length === 0) return [];
 
-  return glob(patterns, {
+  const results = await glob(patterns, {
     absolute: true,
     cwd,
     ignore: ["**/node_modules/**", "**/dist/**"],
     onlyDirectories: true,
     onlyFiles: false,
   });
+
+  return results.map((item) => {
+    return item.endsWith(path.sep) ? item.slice(0, -1) : item;
+  });
 }
 
 async function readManifest(packagePath: string): Promise<PackageManifest> {
-  const content = await readFile(join(packagePath, "package.json"), "utf8");
+  const content = await readFile(path.join(packagePath, "package.json"), "utf8");
   const parsed = JSON.parse(content);
 
   // validation only

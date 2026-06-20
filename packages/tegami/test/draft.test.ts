@@ -183,6 +183,105 @@ describe("draft publish plans", () => {
     expect(getPendingPackageIds(draft, (await paper._internal.context()).graph)).toEqual([]);
   });
 
+  test("treats file: dependencies outside the workspace as external", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-file-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/ui"), { recursive: true });
+    await mkdir(join(cwd, "vendor/core"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+    });
+    await writeJson(join(cwd, "vendor/core/package.json"), {
+      name: "@acme/core",
+      version: "9.9.9",
+    });
+    await writeJson(join(cwd, "packages/ui/package.json"), {
+      name: "@acme/ui",
+      version: "1.0.0",
+      dependencies: {
+        "@acme/core": "file:../../vendor/core",
+      },
+    });
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["@acme/core"]
+---
+
+## Core release
+
+Core only.
+`,
+    );
+
+    const draft = await tegami({ cwd }).draft();
+
+    expect(draft.getPackagePlan("npm:@acme/core")?.type).toBe("minor");
+    expect(draft.getPackagePlan("npm:@acme/ui")).toBeUndefined();
+
+    await draft.applyPlan();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/ui/package.json"), "utf8"))).toMatchObject(
+      {
+        dependencies: {
+          "@acme/core": "file:../../vendor/core",
+        },
+      },
+    );
+  });
+
+  test("links file: dependencies to workspace packages by path", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-file-linked-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/ui"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+    });
+    await writeJson(join(cwd, "packages/ui/package.json"), {
+      name: "@acme/ui",
+      version: "1.0.0",
+      dependencies: {
+        "@acme/core": "file:../core",
+      },
+    });
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["@acme/core"]
+---
+
+## Core release
+
+Core only.
+`,
+    );
+
+    const draft = await tegami({ cwd }).draft();
+
+    expect(draft.getPackagePlan("npm:@acme/core")?.type).toBe("minor");
+    expect(draft.getPackagePlan("npm:@acme/ui")?.type).toBe("patch");
+  });
+
   test("uses a custom log generator", async () => {
     const cwd = await createWorkspace();
     tempDirs.push(cwd);
