@@ -1,0 +1,390 @@
+---
+title: Migrating from Changesets
+description: Move from @changesets/cli to Tegami.
+---
+
+If you already use [Changesets](https://github.com/changesets/changesets), the workflow is familiar: contributors add pending change files in pull requests, CI versions packages from those files, and CI publishes after a Version Packages PR merges. This guide maps each Changesets feature to its Tegami equivalent.
+
+## Setup
+
+### Changesets
+
+Originally, using `@changesets/cli` and configure the repo with `.changeset/config.json`:
+
+```json title=".changeset/config.json"
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.2/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [],
+  "access": "restricted",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}
+```
+
+Run commands through `changeset`, `changeset version`, and `changeset publish`.
+
+### In Tegami
+
+Install `tegami` and create an entry script. Tegami discovers workspace packages automatically; use the `packages` option only when you need per-package overrides.
+
+```npm
+npm i tegami -D -w
+```
+
+```ts title="scripts/tegami.mts"
+import { tegami } from "tegami";
+import { createCli } from "tegami/cli";
+import { github } from "tegami/plugins/github";
+
+const paper = tegami({
+  plugins: [
+    github({
+      repo: "your-org/your-repo",
+    }),
+  ],
+});
+
+void createCli(paper).parseAsync();
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "tegami": "node scripts/tegami.mts"
+  }
+}
+```
+
+## Pending change files
+
+### Changesets
+
+Contributors add Markdown files under `.changeset/` with package names and bump types in frontmatter:
+
+```md title=".changeset/my-change.md"
+---
+"@acme/ui": minor
+"@acme/utils": patch
+---
+
+Fix button hover state
+```
+
+### In Tegami
+
+Write Markdown files under `.tegami/` (configurable via `changelogDir`). Package keys go under a `packages` field, and the body needs at least one heading:
+
+```md title=".tegami/2026-06-19-abc123.md"
+---
+packages:
+  "@acme/ui": minor
+  "@acme/utils": patch
+---
+
+## Fix button hover state
+
+The hover color now matches the design system.
+```
+
+You can also use [implicit bump styles](/changelog#implicit) or [generate changelogs from conventional commits](/changelog#generate-from-commits).
+
+Convert only **pending** changesets that have not been versioned yet. Already-released changesets in git history do not need migration.
+
+## Adding a change
+
+### Changesets
+
+Run `changeset` or `changeset add` for an interactive prompt.
+
+### In Tegami
+
+Run `tegami` for an interactive prompt, or write a file under `.tegami/` manually. See [Changelogs](/changelog) for the file format.
+
+## Versioning and publishing
+
+### Changesets
+
+- `changeset version` — consume pending files, bump versions, update dependency ranges, write package `CHANGELOG.md` files.
+- `changeset publish` — publish bumped packages to registries.
+
+### In Tegami
+
+- `tegami version` — draft and apply a publish plan.
+- `tegami publish` — publish from the applied plan in `.tegami/publish-plan`.
+
+## CI on the default branch
+
+### Changesets
+
+Use [`@changesets/action`](https://github.com/changesets/action) to run `version` or `publish` depending on whether pending changesets exist.
+
+### In Tegami
+
+Run `tegami ci` on pushes to your main branch. It versions when pending changelogs exist; otherwise it publishes from the publish plan.
+
+```yaml title=".github/workflows/publish.yml"
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+        # build packages before publishing (may differs depending on use case)
+      - run: pnpm build
+
+      - run: pnpm tegami ci
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+```
+
+With the [GitHub plugin](/plugins/github), this follows the same two-PR flow Changesets popularized:
+
+1. Push commits that add `.tegami/*.md` files.
+2. CI runs `tegami ci`, applies versions, and opens a **Version Packages** PR.
+3. Merge the version PR; the next CI run publishes packages and creates GitHub releases.
+
+Because the publish plan lives in git, failed publish jobs can be retried safely. See [CI Setup](/ci) for build steps and other details.
+
+Remove `@changesets/cli`, `@changesets/action`, and `.changeset/config.json` once migration is complete.
+
+## Pull request comments
+
+### Changesets
+
+The Changesets GitHub app can comment on pull requests with a release summary, or fail PRs that lack a changeset.
+
+### In Tegami
+
+Run `tegami ci-pr` on pull requests. It posts (or updates) a comment with a release preview, a link to create a changelog file, and contributor guidance.
+
+```yaml title=".github/workflows/tegami-pr.yml"
+name: Tegami PR
+
+on:
+  pull_request:
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm tegami ci-pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+```
+
+See [CI Setup — Pull request comments](/ci#pull-request-comments) for details.
+
+## Package groups
+
+### Changesets
+
+`fixed` and `linked` in `config.json` tie packages together:
+
+- **`fixed`** — always bump and publish every package in the group together, using the highest bump type across the group.
+- **`linked`** — keep packages on the same version number over time.
+
+```json title=".changeset/config.json"
+{
+  "fixed": [["@acme/core", "@acme/ui"]],
+  "linked": [["@acme/icons", "@acme/icons-react"]]
+}
+```
+
+### In Tegami
+
+Use [package groups](/package-groups). Assign packages to a group, then reference `group:<name>` in changelogs:
+
+```ts title="scripts/tegami.mts"
+const paper = tegami({
+  groups: {
+    acme: {
+      syncBump: true,
+      syncGitTag: true,
+    },
+  },
+  packages: {
+    "@acme/core": { group: "acme" },
+    "@acme/ui": { group: "acme" },
+  },
+});
+```
+
+`syncBump` coordinates bump types across group members during a release — similar to Changesets `fixed`, but with different edge-case semantics. Tegami does **not** keep independent packages permanently aligned on the same version number like Changesets `linked`. Review [Package Groups](/package-groups) and test your monorepo before relying on group behavior in production.
+
+Changesets also supports glob patterns in `fixed`, `linked`, and `ignore`. Tegami groups use explicit package names, not glob strings.
+
+## Ignored packages
+
+### Changesets
+
+List package names in the `ignore` array in `config.json`.
+
+### In Tegami
+
+Use the `ignore` option with package names, package ids, or `RegExp`:
+
+```ts
+const paper = tegami({
+  ignore: ["@acme/internal-tools"],
+});
+```
+
+## Internal dependency bumps
+
+### Changesets
+
+`updateInternalDependencies` controls how dependents are bumped when a dependency changes (`"patch"`, `"minor"`, etc.). The experimental `updateInternalDependents: "always"` force-bumps all dependents regardless of range satisfaction.
+
+### In Tegami
+
+Configure bump behavior through `npm.bumpDep` and `npm.onBreakPeerDep`. By default, Tegami patch-bumps `dependencies` when a dependency is bumped and major-bumps peer dependencies that are out of range. There is no single `"always"` switch.
+
+```ts
+const paper = tegami({
+  npm: {
+    bumpDep: ({ kind }) => (kind === "dependencies" ? "patch" : false),
+  },
+});
+```
+
+See the [npm plugin — dependency bumps](/plugins/npm#dependency-bumps) for the full model.
+
+`bumpDep` receives the parsed dependency in `spec`, including `spec.protocol`, so you can limit **which dependents get version bumps** — for example, only when the link uses `workspace:`:
+
+```ts
+npm: {
+  bumpDep: ({ kind, spec }) => {
+    if (spec.protocol !== "workspace") return false;
+    return kind === "dependencies" ? "patch" : false;
+  },
+},
+```
+
+That is not the same as Changesets' `bumpVersionsWithWorkspaceProtocolOnly`, which controls whether dependency **range strings** in `package.json` get rewritten during versioning. Tegami handles that separately: `workspace:` ranges are left as-is, and plain semver ranges (for example `^1.0.0`) are updated when they no longer satisfy the bumped package. There is no config flag to flip that behavior.
+
+## Changelog output
+
+### Changesets
+
+Point `changelog` in `config.json` at a custom generator module, or use `@changesets/changelog-github` for GitHub release notes.
+
+### In Tegami
+
+Pass a `generator` function for custom changelog output. The [GitHub plugin](/plugins/github) creates GitHub releases after publish.
+
+```ts
+const paper = tegami({
+  generator: myLogGenerator,
+  plugins: [github({ repo: "your-org/your-repo" })],
+});
+```
+
+## Other config options
+
+| Changesets (`config.json`) | In Tegami                                                 |
+| -------------------------- | --------------------------------------------------------- |
+| `access`                   | `publishConfig.access` in each `package.json`             |
+| `baseBranch`               | `github({ cli: { versionPr: { base: "main" } } })`        |
+| `commit: true`             | There is no local auto-commit option                      |
+| `privatePackages.version`  | Private npm packages are versioned by default             |
+| `privatePackages.tag`      | Private packages are not published unless `publish: true` |
+
+## Pre mode and snapshot releases
+
+### Changesets
+
+- **Pre mode** (`changeset pre enter` / `exit`) switches the whole repo into a temporary prerelease channel.
+- **Snapshot releases** (`changeset version --snapshot`) publish canary builds from snapshot config templates.
+
+### In Tegami
+
+Tegami has no global pre mode or snapshot release flow. Use per-package or group `prerelease` tags for alpha/beta channels instead:
+
+```ts
+const paper = tegami({
+  groups: {
+    acme: { prerelease: "beta" },
+  },
+});
+```
+
+## Teach agents and contributors
+
+Run `tegami init-agent` to append `AGENTS.md` instructions for writing `.tegami/` changelogs. This replaces Changesets-specific contributor docs in your repo.
+
+## What Tegami adds
+
+Features Changesets does not cover out of the box:
+
+- **Cross-registry monorepos** — npm and Cargo in one graph ([npm](/plugins/npm), [cargo](/plugins/cargo)).
+- **Configurable dependency bump policy** — especially for `workspace:` peer dependencies ([npm plugin](/plugins/npm#dependency-bumps)).
+- **Publish plan in git** — `.tegami/publish-plan` makes failed publishes safe to retry ([CI Setup](/ci)).
+- **Programmatic API** — `generateChangelog()`, `draft()`, `publish()` for custom tooling ([API](/advanced/api)).
+- **Conventional commit generation** — draft changelogs from git history ([Changelogs](/changelog#generate-from-commits)).
+
+## Checklist
+
+1. Install `tegami` and create `scripts/tegami.mts`.
+2. Convert pending `.changeset/*.md` files to `.tegami/*.md`.
+3. Map `config.json` options to `tegami()` config.
+4. Update CI to run `tegami ci` on main and `tegami ci-pr` on pull requests.
+5. Remove `@changesets/cli`, `@changesets/action`, and `.changeset/`.
+6. Run `tegami init-agent` if you use AI coding agents.
+7. Run a test release on a branch and verify Version Packages PR contents before merging.
+
+## Next steps
+
+<Cards>
+  <Card title="Getting Started" href="/getting-started">
+    Install Tegami and configure your first release workflow.
+  </Card>
+  <Card title="Changelogs" href="/changelog">
+    Learn the changelog file format.
+  </Card>
+  <Card title="Package Groups" href="/package-groups">
+    Configure groups that release together.
+  </Card>
+  <Card title="CI Setup" href="/ci">
+    Run versioning and publishing in GitHub Actions.
+  </Card>
+</Cards>
