@@ -32,6 +32,7 @@ const planStoreSchema = jsonCodec(
         packages: z.record(z.string(), bumpTypeSchema),
         sections: z.array(
           z.object({
+            depth: z.number(),
             title: z.string(),
             content: z.string(),
           }),

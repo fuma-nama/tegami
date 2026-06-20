@@ -136,6 +136,7 @@ describe("draft publish plans", () => {
             "sections": [
               {
                 "content": "Useful release note.",
+                "depth": 2,
                 "title": "Add shared API",
               },
             ],

@@ -20,11 +20,12 @@ import { handlePluginError } from "../utils/error";
 import { assertPublishPlanFinished } from "../plans/checks";
 import { dump } from "js-yaml";
 import type { Tegami } from "..";
-import type { WorkspacePackage } from "../graph";
+import type { PackageGroup, WorkspacePackage } from "../graph";
 import type { DraftPlan } from "../plans/draft";
 import type { PublishResult } from "../publish";
 import { initAgent } from "./init-agent";
 import { runCiPr } from "./ci-pr";
+import { getChangedPackages } from "../utils/git-changes";
 
 export interface TegamiCLIOptions {
   /** create a custom draft plan, it must not be applied */
@@ -137,10 +138,9 @@ async function createChangelogs(
   let selectedPackages: string[] = [];
 
   if (!isCI()) {
-    const packages = context.graph.getPackages();
     const useShortname = new Map<string, boolean>();
 
-    for (const pkg of packages) {
+    for (const pkg of context.graph.getPackages()) {
       if (useShortname.has(pkg.name)) useShortname.set(pkg.name, false);
       else useShortname.set(pkg.name, true);
     }
@@ -149,22 +149,35 @@ async function createChangelogs(
       return useShortname.get(pkg.name) ? pkg.name : pkg.id;
     };
 
+    const changedPackages = new Set(await getChangedPackages(context.graph, context.cwd));
     const selectOptions: {
       label: string;
       value: string;
       hint?: string;
     }[] = [];
+    const groups: [PackageGroup, changed: boolean][] = [];
     for (const group of context.graph.getGroups()) {
+      const changed = group.packages.some((pkg) => changedPackages.has(pkg));
+      groups.push([group, changed]);
+    }
+    groups.sort((a, b) => (a[1] ? 0 : 1) - (b[1] ? 0 : 1));
+    for (const [group, changed] of groups) {
+      const members = group.packages.map(getPackageLabel).join(", ");
       selectOptions.push({
         label: `Group ${group.name}`,
         value: `group:${group.name}`,
-        hint: group.packages.map(getPackageLabel).join(", "),
+        hint: changed ? `changed · ${members}` : members,
       });
     }
+
+    const packages = context.graph
+      .getPackages()
+      .toSorted((a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1));
     for (const pkg of packages) {
       selectOptions.push({
         label: getPackageLabel(pkg),
         value: pkg.id,
+        hint: changedPackages.has(pkg) ? "changed" : undefined,
       });
     }
 

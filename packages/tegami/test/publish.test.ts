@@ -118,7 +118,7 @@ describe("publish plans", () => {
         {
           filename: string;
           packages: Record<string, "major" | "minor" | "patch">;
-          sections: { title: string; content: string }[];
+          sections: { depth: number; title: string; content: string }[];
         }
       >;
       packages: Record<
@@ -132,7 +132,7 @@ describe("publish plans", () => {
       "change-1": {
         filename: "change.md",
         packages: { "@acme/core": "minor" },
-        sections: [{ title: "Add proxy server", content: "Some description." }],
+        sections: [{ depth: 2, title: "Add proxy server", content: "Some description." }],
       },
     };
     plan.packages["npm:@acme/core"]!.changelogIds = ["change-1"];
@@ -160,6 +160,7 @@ describe("publish plans", () => {
           "sections": [
             {
               "content": "Some description.",
+              "depth": 2,
               "title": "Add proxy server",
             },
           ],
