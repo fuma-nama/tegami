@@ -16,7 +16,7 @@ export default defineConfig({
     baseUrl: "https://tegami.fuma-nama.dev",
     git: {
       user: "fuma-nama",
-      branch: "main",
+      branch: "dev",
       repo: "tegami",
     },
   },
