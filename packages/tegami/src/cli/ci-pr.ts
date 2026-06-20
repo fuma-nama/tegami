@@ -4,11 +4,9 @@ import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPlan } from "../plans/draft";
 import { changelogFilename } from "../utils/changelog";
-import { execFailure } from "../utils/error";
 import { formatRunScriptCommand } from "../utils/package-manager";
 import { formatNpmDistTag } from "../utils/semver";
 
-export const CI_PR_MARKER = "<!-- tegami-pr -->";
 export const TEGAMI_DOCS_URL = "https://tegami.fuma-nama.dev";
 export const CHANGELOG_DOCS_URL = `${TEGAMI_DOCS_URL}/changelog`;
 
@@ -19,7 +17,7 @@ export interface PullRequestEvent {
   headSha: string;
 }
 
-export interface RenderCiPrCommentOptions {
+export interface RenderCiPrPreviewOptions {
   repo?: string;
   branch?: string;
   prChangelogFiles?: string[];
@@ -28,25 +26,16 @@ export interface RenderCiPrCommentOptions {
 
 export interface CiPrOptions {
   repo?: string;
-  pr?: number;
   branch?: string;
-  print?: boolean;
-}
-
-export interface CiPrResult {
-  body: string;
-  posted: boolean;
-  action?: "created" | "updated";
 }
 
 export async function runCiPr(
   context: TegamiContext,
   draft: DraftPlan,
   options: CiPrOptions = {},
-): Promise<CiPrResult> {
+): Promise<string> {
   const event = await resolvePullRequestEvent();
   const repo = options.repo ?? context.github?.repo ?? process.env.GITHUB_REPOSITORY;
-  const pr = options.pr ?? event?.number;
   const branch = options.branch ?? event?.headRef;
   const prChangelogFiles =
     event && !options.branch
@@ -58,25 +47,18 @@ export async function runCiPr(
     context.options.npm?.client,
   );
 
-  const body = renderCiPrComment(context, draft, {
+  return renderCiPrPreview(context, draft, {
     repo,
     branch,
     prChangelogFiles,
     tegamiCommand,
   });
-
-  if (options.print || !repo || !pr) {
-    return { body, posted: false };
-  }
-
-  const action = await upsertPullRequestComment(repo, pr, body);
-  return { body, posted: true, action };
 }
 
-export function renderCiPrComment(
+export function renderCiPrPreview(
   context: TegamiContext,
   draft: DraftPlan,
-  options: RenderCiPrCommentOptions = {},
+  options: RenderCiPrPreviewOptions = {},
 ): string {
   const changelogDir = relative(context.cwd, context.changelogDir) || ".tegami";
   const tegamiCommand = options.tegamiCommand ?? "npm run tegami";
@@ -203,54 +185,6 @@ export async function getPullRequestChangelogFiles(
     .map((line) => line.trim())
     .filter((line) => line.endsWith(".md"))
     .map((line) => basename(line));
-}
-
-export async function upsertPullRequestComment(
-  repo: string,
-  pr: number,
-  body: string,
-): Promise<"created" | "updated"> {
-  const marked = `${CI_PR_MARKER}\n${body.trim()}\n`;
-
-  const listResult = await x("gh", ["api", `repos/${repo}/issues/${pr}/comments`, "--paginate"]);
-  if (listResult.exitCode !== 0) {
-    throw execFailure("Failed to list pull request comments.", listResult);
-  }
-
-  const comments = JSON.parse(listResult.stdout) as Array<{ id: number; body?: string }>;
-  const existing = comments.find((comment) => comment.body?.includes(CI_PR_MARKER));
-
-  if (existing) {
-    const patchResult = await x("gh", [
-      "api",
-      "-X",
-      "PATCH",
-      `repos/${repo}/issues/comments/${existing.id}`,
-      "-f",
-      `body=${marked}`,
-    ]);
-
-    if (patchResult.exitCode !== 0) {
-      throw execFailure("Failed to update pull request comment.", patchResult);
-    }
-
-    return "updated";
-  }
-
-  const createResult = await x("gh", [
-    "pr",
-    "comment",
-    String(pr),
-    "--repo",
-    repo,
-    "--body",
-    marked,
-  ]);
-  if (createResult.exitCode !== 0) {
-    throw execFailure("Failed to create pull request comment.", createResult);
-  }
-
-  return "created";
 }
 
 function getPendingPackages(context: TegamiContext, draft: DraftPlan) {

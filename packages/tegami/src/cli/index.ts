@@ -47,7 +47,6 @@ interface InitAgentCommandOptions {
 
 interface CiPrCommandOptions {
   repo?: string;
-  pr?: number;
   branch?: string;
   print?: boolean;
 }
@@ -88,15 +87,12 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
       }),
     );
 
-  // TODO: is there better way for this to avoid running any code?
-  // this will run tegami script on every PR, which can compromise the runner
   program
     .command("ci-pr")
-    .description("comment on a pull request with release preview and changelog guidance")
+    .description("show a pull request release preview and changelog guidance")
     .option("--repo <repo>", "GitHub repository (owner/name)")
-    .option("--pr <number>", "pull request number", (value) => Number(value))
     .option("--branch <branch>", "PR head branch for the create-changelog link")
-    .option("--print", "print the comment body without posting")
+    .option("--print", "print the preview markdown to stdout")
     .action((commandOptions: CiPrCommandOptions) =>
       runAction(tegami, () => runCiPrCommand(tegami, commandOptions)),
     );
@@ -369,19 +365,18 @@ async function publishPackages(
 async function runCiPrCommand(tegami: Tegami, options: CiPrCommandOptions): Promise<void> {
   const context = await tegami._internal.context();
   const draft = await tegami.draft();
-  const result = await runCiPr(context, draft, options);
+  const body = await runCiPr(context, draft, options);
 
-  if (result.posted) {
-    outro(
-      result.action === "updated"
-        ? "Updated pull request comment."
-        : "Created pull request comment.",
-    );
+  if (options.print) {
+    process.stdout.write(`${body}\n`);
+    if (!isCI()) {
+      outro("Release preview ready.");
+    }
     return;
   }
 
-  note(result.body, "Pull request comment");
-  outro(options.print ? "Comment preview ready." : "Pull request comment ready.");
+  note(body, "Release preview");
+  outro("Release preview ready.");
 }
 
 async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): Promise<void> {

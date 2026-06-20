@@ -172,7 +172,7 @@ Because the publish plan lives in git, failed publish jobs can be retried safely
 
 Remove `@changesets/cli`, `@changesets/action`, and `.changeset/config.json` once migration is complete.
 
-## Pull request comments
+## Pull request preview
 
 ### Changesets
 
@@ -180,7 +180,7 @@ The Changesets GitHub app can comment on pull requests with a release summary, o
 
 ### In Tegami
 
-Run `tegami ci-pr` on pull requests. It posts (or updates) a comment with a release preview, a link to create a changelog file, and contributor guidance.
+Run `tegami ci-pr` on pull requests. It writes a release preview to the GitHub Actions job summary, with a link to create a changelog file and contributor guidance. See [CI Setup — Pull request preview](/ci#pull-request-preview) for the workflow example.
 
 ```yaml title=".github/workflows/tegami-pr.yml"
 name: Tegami PR
@@ -189,10 +189,8 @@ on:
   pull_request:
 
 jobs:
-  comment:
+  preview:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -207,12 +205,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm tegami ci-pr
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Release preview
+        run: pnpm tegami ci-pr --print >> "$GITHUB_STEP_SUMMARY"
 ```
-
-See [CI Setup — Pull request comments](/ci#pull-request-comments) for details.
 
 ## Package groups
 

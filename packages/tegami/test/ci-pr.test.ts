@@ -9,12 +9,10 @@ import { createDraftPlan } from "../src/plans/draft";
 import { parseChangelogFile } from "../src/changelog/parse";
 import type { TegamiContext } from "../src/context";
 import {
-  CI_PR_MARKER,
   getPullRequestChangelogFiles,
-  renderCiPrComment,
+  renderCiPrPreview,
   resolvePullRequestEvent,
   runCiPr,
-  upsertPullRequestComment,
 } from "../src/cli/ci-pr";
 import { formatRunScriptCommand } from "../src/utils/package-manager";
 
@@ -73,7 +71,7 @@ packages:
       context,
     );
 
-    const body = renderCiPrComment(context, draft, {
+    const body = renderCiPrPreview(context, draft, {
       repo: "acme/repo",
       branch: "feature/release",
       prChangelogFiles: ["2026-06-19-core.md"],
@@ -95,7 +93,7 @@ packages:
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
     const draft = await createDraftPlan([], context);
 
-    const body = renderCiPrComment(context, draft, {
+    const body = renderCiPrPreview(context, draft, {
       repo: "acme/repo",
       branch: "main",
       prChangelogFiles: [],
@@ -154,48 +152,6 @@ packages:
     );
   });
 
-  test("creates and updates pull request comments", async () => {
-    exec.mockImplementation((_command, args = []) => {
-      if (args[0] === "api" && args[1]?.includes("/comments") && args[2] === "--paginate") {
-        return commandResult({
-          stdout: JSON.stringify([{ id: 99, body: `${CI_PR_MARKER}\nold` }]),
-        });
-      }
-
-      return commandResult();
-    });
-
-    await expect(upsertPullRequestComment("acme/repo", 7, "Updated body")).resolves.toBe("updated");
-
-    expect(exec.mock.calls.at(-1)).toEqual([
-      "gh",
-      [
-        "api",
-        "-X",
-        "PATCH",
-        "repos/acme/repo/issues/comments/99",
-        "-f",
-        `body=${CI_PR_MARKER}\nUpdated body\n`,
-      ],
-    ]);
-
-    exec.mockReset();
-    exec.mockImplementation((_command, args = []) => {
-      if (args[0] === "api") {
-        return commandResult({ stdout: "[]" });
-      }
-
-      return commandResult();
-    });
-
-    await expect(upsertPullRequestComment("acme/repo", 7, "New body")).resolves.toBe("created");
-
-    expect(exec.mock.calls.at(-1)).toEqual([
-      "gh",
-      ["pr", "comment", "7", "--repo", "acme/repo", "--body", `${CI_PR_MARKER}\nNew body\n`],
-    ]);
-  });
-
   test("formats run script commands for the detected package manager", async () => {
     detectPackageManager.mockResolvedValue({ name: "pnpm", agent: "pnpm" });
 
@@ -203,16 +159,15 @@ packages:
     await expect(formatRunScriptCommand("/repo", "tegami", "npm")).resolves.toBe("npm run tegami");
   });
 
-  test("prints comment body when posting is disabled", async () => {
+  test("builds preview markdown from pending changelogs", async () => {
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
     const draft = await createDraftPlan([], context);
 
-    const result = await runCiPr(context, draft, { print: true });
+    const body = await runCiPr(context, draft);
 
-    expect(result.posted).toBe(false);
-    expect(result.body).toContain("No changelogs yet");
-    expect(result.body).toContain("npm run tegami");
+    expect(body).toContain("No changelogs yet");
+    expect(body).toContain("npm run tegami");
   });
 });
 
@@ -249,15 +204,4 @@ class CiPrTestPackage extends WorkspacePackage {
   get path() {
     return `/repo/packages/${this.name}`;
   }
-}
-
-type ExecResult = Awaited<ReturnType<typeof x>>;
-
-function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x> {
-  return {
-    exitCode: 0,
-    stdout: "",
-    stderr: "",
-    ...overrides,
-  } as unknown as ReturnType<typeof x>;
 }

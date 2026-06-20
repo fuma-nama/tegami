@@ -1,0 +1,29 @@
+name: Tegami PR
+
+on:
+  pull_request:
+
+jobs:
+  preview:
+    name: Release preview
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Release preview
+        run: pnpm tegami ci-pr --print >> "$GITHUB_STEP_SUMMARY"

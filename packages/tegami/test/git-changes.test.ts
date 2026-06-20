@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
@@ -65,28 +64,25 @@ describe("getChangedFilePaths", () => {
 });
 
 describe("getChangedPackages", () => {
-  test("excludes changelog directory files from package detection", async () => {
+  test("resolves changed packages from git output", async () => {
     const graph = new PackageGraph([testPackage("@acme/core", "/repo/packages/core")]);
 
     exec.mockImplementation((_command, args = []) => {
-      if (args[0] === "diff" && args.length === 2) {
-        return commandResult({ stdout: ".tegami/2026-06-20-abc.md\n" });
-      }
-      if (args[0] === "diff" && args[1] === "--cached") {
+      if (args[0] === "diff" && args[1] === "--name-only" && args.length === 2) {
         return commandResult({ stdout: "packages/core/src/index.ts\n" });
       }
       return commandResult({ exitCode: 1 });
     });
 
-    const changed = await getChangedPackages(graph, cwd, {
-      exclude: [join(cwd, ".tegami")],
-    });
+    const changed = await getChangedPackages(graph, cwd);
 
     expect(changed.map((pkg) => pkg.name)).toEqual(["@acme/core"]);
   });
 });
 
-function commandResult(overrides: Partial<Awaited<ReturnType<typeof x>>> = {}): ReturnType<typeof x> {
+function commandResult(
+  overrides: Partial<Awaited<ReturnType<typeof x>>> = {},
+): ReturnType<typeof x> {
   return {
     exitCode: 0,
     stdout: "",

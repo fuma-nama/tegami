@@ -103,13 +103,15 @@ With the GitHub plugin enabled, CI follows a two-step flow:
 
 Because the publish plan lives in git, failed publish jobs can be retried safely without duplicating releases.
 
-## Pull request comments
+## Pull request preview
 
-Use `tegami ci-pr` on pull requests to replace the Changesets bot. It posts (or updates) a comment that:
+Use `tegami ci-pr` on pull requests to show a release preview in CI. It renders markdown that:
 
 1. Introduces Tegami and tells contributors to add changelog files.
 2. Links to create a new changelog file on GitHub.
-3. Shows a release preview from pending changelogs, including packages bumped in the PR.
+3. Shows pending package bumps and changelogs added in the PR.
+
+Write the preview to the GitHub Actions job summary. It renders as markdown on the workflow run page.
 
 ```yaml title=".github/workflows/tegami-pr.yml"
 name: Tegami PR
@@ -118,10 +120,8 @@ on:
   pull_request:
 
 jobs:
-  comment:
+  preview:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -136,15 +136,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Comment on pull request
-        run: pnpm tegami ci-pr
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Release preview
+        run: pnpm tegami ci-pr --print >> "$GITHUB_STEP_SUMMARY"
 ```
 
-`tegami ci-pr` reads pull request metadata from `GITHUB_EVENT_PATH` when run in GitHub Actions. Use `--print` locally to preview the comment body without posting.
-
-Requires the `gh` CLI and `GITHUB_TOKEN` with permission to comment on pull requests.
+`tegami ci-pr` reads pull request metadata from `GITHUB_EVENT_PATH` when run in GitHub Actions. Pass `--print` to write raw markdown (for example to `$GITHUB_STEP_SUMMARY`). Without `--print`, the preview is shown in the terminal with formatted output.
 
 ## Custom CLI hooks
 
