@@ -103,6 +103,49 @@ With the GitHub plugin enabled, CI follows a two-step flow:
 
 Because the publish plan lives in git, failed publish jobs can be retried safely without duplicating releases.
 
+## Pull request comments
+
+Use `tegami ci-pr` on pull requests to replace the Changesets bot. It posts (or updates) a comment that:
+
+1. Introduces Tegami and tells contributors to add changelog files.
+2. Links to create a new changelog file on GitHub.
+3. Shows a release preview from pending changelogs, including packages bumped in the PR.
+
+```yaml title=".github/workflows/tegami-pr.yml"
+name: Tegami PR
+
+on:
+  pull_request:
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Comment on pull request
+        run: pnpm tegami ci-pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+```
+
+`tegami ci-pr` reads pull request metadata from `GITHUB_EVENT_PATH` when run in GitHub Actions. Use `--print` locally to preview the comment body without posting.
+
+Requires the `gh` CLI and `GITHUB_TOKEN` with permission to comment on pull requests.
+
 ## Custom CLI hooks
 
 `createCli` accepts optional hooks to replace the default `draft()` or `publish()` behavior:

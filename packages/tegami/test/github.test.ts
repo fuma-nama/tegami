@@ -102,7 +102,7 @@ describe("github release plugin", () => {
                 id: "change-1",
                 filename: "change.md",
                 packages: new Map([["@acme/core", "minor"]]),
-                sections: [{ title: "Add proxy server", content: "Some description." }],
+                sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
               },
             ],
           }),
@@ -129,7 +129,7 @@ describe("github release plugin", () => {
   });
 
   test("links changelog entry commits in default release notes", async () => {
-    exec.mockImplementation((command, args) => {
+    exec.mockImplementation((command, args = []) => {
       if (command === "git" && args[0] === "log") {
         return commandResult({
           stdout: "abc1234567890abcdef1234567890abcdef123456\n",
@@ -154,7 +154,7 @@ describe("github release plugin", () => {
                 id: "change-1",
                 filename: "change.md",
                 packages: new Map([["@acme/core", "minor"]]),
-                sections: [{ title: "Add proxy server", content: "Some description." }],
+                sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
               },
             ],
           }),

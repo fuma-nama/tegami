@@ -24,6 +24,7 @@ import type { WorkspacePackage } from "../graph";
 import type { DraftPlan } from "../plans/draft";
 import type { PublishResult } from "../publish";
 import { initAgent } from "./init-agent";
+import { runCiPr } from "./ci-pr";
 
 export interface TegamiCLIOptions {
   /** create a custom draft plan, it must not be applied */
@@ -41,6 +42,13 @@ interface PublishCommandOptions {
 
 interface InitAgentCommandOptions {
   output?: string;
+}
+
+interface CiPrCommandOptions {
+  repo?: string;
+  pr?: number;
+  branch?: string;
+  print?: boolean;
 }
 
 class CancelledError extends Error {
@@ -77,6 +85,19 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
         if (versioned) return;
         await publishPackages(tegami, { cli: options });
       }),
+    );
+
+  // TODO: is there better way for this to avoid running any code?
+  // this will run tegami script on every PR, which can compromise the runner
+  program
+    .command("ci-pr")
+    .description("comment on a pull request with release preview and changelog guidance")
+    .option("--repo <repo>", "GitHub repository (owner/name)")
+    .option("--pr <number>", "pull request number", (value) => Number(value))
+    .option("--branch <branch>", "PR head branch for the create-changelog link")
+    .option("--print", "print the comment body without posting")
+    .action((commandOptions: CiPrCommandOptions) =>
+      runAction(tegami, () => runCiPrCommand(tegami, commandOptions)),
     );
 
   program
@@ -330,6 +351,24 @@ async function publishPackages(
 
   outro(dryRun ? "Publish plan is valid." : "Packages published.");
   return true;
+}
+
+async function runCiPrCommand(tegami: Tegami, options: CiPrCommandOptions): Promise<void> {
+  const context = await tegami._internal.context();
+  const draft = await tegami.draft();
+  const result = await runCiPr(context, draft, options);
+
+  if (result.posted) {
+    outro(
+      result.action === "updated"
+        ? "Updated pull request comment."
+        : "Created pull request comment.",
+    );
+    return;
+  }
+
+  note(result.body, "Pull request comment");
+  outro(options.print ? "Comment preview ready." : "Pull request comment ready.");
 }
 
 async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): Promise<void> {
