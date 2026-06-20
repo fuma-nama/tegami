@@ -29,6 +29,12 @@ interface VersionPullRequest {
 
 interface VersionPullRequestOptions {
   /**
+   * Create the PR even outside of CI.
+   *
+   * @default false
+   */
+  forceCreate?: boolean;
+  /**
    * Pull request branch.
    *
    * @default "tegami/version-packages"
@@ -138,7 +144,15 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       return [false];
     }
 
-    return [true, typeof setting === "object" ? setting : {}];
+    if (setting === true) {
+      return [true, {}];
+    }
+
+    if (setting.forceCreate || isCI()) {
+      return [true, setting];
+    }
+
+    return [false];
   }
 
   function defaultVersionPRBody(draft: DraftPlan, context: TegamiContext): string {
@@ -146,12 +160,14 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
     for (const pkg of context.graph.getPackages()) {
       const packagePlan = draft.getPackagePlan(pkg.id);
-      if (!packagePlan?.type) continue;
+      if (!packagePlan) continue;
+      const originalVersion = cliOriginalPackageVersions.get(pkg.id) ?? pkg.version;
+      if (originalVersion === pkg.version) continue;
 
       const publishTxt = packagePlan.publish ? "" : " (no publish)";
       const distTagTxt = formatNpmDistTag(packagePlan.npm?.distTag);
       packageLines.push(
-        `- ${pkg.name}@${cliOriginalPackageVersions.get(pkg.id) ?? pkg.version} → ${pkg.name}@${pkg.version}${distTagTxt}${publishTxt}`,
+        `- ${pkg.name}@${originalVersion} → ${pkg.name}@${pkg.version}${distTagTxt}${publishTxt}`,
       );
     }
 
@@ -160,7 +176,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       changelogLines.push(`### ${entry.subject ?? `\`${entry.filename}\``}`, "");
       for (const section of entry.sections) {
         changelogLines.push(`#### ${section.title}`, "");
-        changelogLines.push(section.content);
+        if (section.content) changelogLines.push(section.content);
       }
     }
 
