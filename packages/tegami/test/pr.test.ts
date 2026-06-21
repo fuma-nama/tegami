@@ -410,20 +410,11 @@ packages: ["@acme/core"]
     expect(body).toContain("npm run tegami");
   });
 
-  test("posts preview comment using workflow run metadata", async () => {
+  test("posts preview comment using workflow run event", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
+    await setWorkflowRunEvent({ pullRequestNumber: 42 });
 
     exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "api" && args[1]?.includes("/actions/runs/")) {
-        return commandResult({
-          stdout: JSON.stringify({
-            event: "pull_request",
-            conclusion: "success",
-            number: 42,
-          }),
-        });
-      }
-
       if (command === "gh" && args[0] === "api" && args[1]?.includes("/comments")) {
         return commandResult();
       }
@@ -435,7 +426,7 @@ packages: ["@acme/core"]
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     });
 
-    await postPrComment("### Tegami\n", 99);
+    await postPrComment("### Tegami\n");
 
     expect(exec).toHaveBeenCalledWith("gh", [
       "api",
@@ -457,18 +448,9 @@ packages: ["@acme/core"]
 
   test("updates the first existing pull request comment", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
+    await setWorkflowRunEvent({ pullRequestNumber: 42 });
 
     exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "api" && args[1]?.includes("/actions/runs/")) {
-        return commandResult({
-          stdout: JSON.stringify({
-            event: "pull_request",
-            conclusion: "success",
-            number: 42,
-          }),
-        });
-      }
-
       if (command === "gh" && args[0] === "api" && args[1]?.includes("/comments")) {
         return commandResult({ stdout: "12345\n" });
       }
@@ -480,7 +462,7 @@ packages: ["@acme/core"]
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     });
 
-    await postPrComment("### Tegami\n", 99);
+    await postPrComment("### Tegami\n");
 
     expect(exec).toHaveBeenCalledWith("gh", [
       "api",
@@ -494,19 +476,10 @@ packages: ["@acme/core"]
 
   test("updates comments with special characters using JSON input", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
+    await setWorkflowRunEvent({ pullRequestNumber: 42 });
     let patchInput = "";
 
     exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "api" && args[1]?.includes("/actions/runs/")) {
-        return commandResult({
-          stdout: JSON.stringify({
-            event: "pull_request",
-            conclusion: "success",
-            number: 42,
-          }),
-        });
-      }
-
       if (command === "gh" && args[0] === "api" && args[1]?.includes("/comments")) {
         return commandResult({ stdout: "12345\n" });
       }
@@ -520,7 +493,7 @@ packages: ["@acme/core"]
     });
 
     const preview = "### Tegami\n\n`code` and key=value\n";
-    await postPrComment(preview, 99);
+    await postPrComment(preview);
 
     expect(patchInput).toBe(
       JSON.stringify({ body: "<!-- tegami -->\n### Tegami\n\n`code` and key=value\n" }),
@@ -537,6 +510,29 @@ function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x
     stderr: "",
     ...overrides,
   } as unknown as ReturnType<typeof x>;
+}
+
+async function setWorkflowRunEvent(options: {
+  pullRequestNumber?: number;
+  conclusion?: string;
+  event?: string;
+}) {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-pr-comment-event-"));
+  tempDirs.push(cwd);
+  const eventPath = join(cwd, "event.json");
+  process.env.GITHUB_EVENT_PATH = eventPath;
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      workflow_run: {
+        event: options.event ?? "pull_request",
+        conclusion: options.conclusion ?? "success",
+        pull_requests: options.pullRequestNumber
+          ? [{ number: options.pullRequestNumber }]
+          : [],
+      },
+    }),
+  );
 }
 
 function createTestContext(packages: WorkspacePackage[], cwd?: string): TegamiContext {

@@ -186,7 +186,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Post preview comment
-        run: pnpm tegami pr comment tegami-pr-preview.md --run ${{ github.event.workflow_run.id }}
+        run: pnpm tegami pr comment tegami-pr-preview.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
 ```

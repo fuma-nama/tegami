@@ -50,10 +50,6 @@ interface PrPreviewCommandOptions {
   number?: number;
 }
 
-interface PrCommentCommandOptions {
-  run?: number;
-}
-
 class CancelledError extends Error {
   constructor() {
     super("Cancelled.");
@@ -136,16 +132,9 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
       "(should be used with 'pr preview') post the pull request release preview as a comment",
     )
     .argument("<artifact>", "the file path of GitHub artifact")
-    .option("--run <id>", "preview workflow run id", (value) => {
-      const runId = Number(value);
-      if (!Number.isInteger(runId) || runId <= 0) {
-        throw new InvalidArgumentError("--run must be a positive integer.");
-      }
-      return runId;
-    })
-    .action(async (artifact: string, commandOptions: PrCommentCommandOptions) => {
+    .action(async (artifact: string) => {
       try {
-        await postPrComment(await readFile(artifact, "utf8"), commandOptions.run);
+        await postPrComment(await readFile(artifact, "utf8"));
         outro("Pull request comment updated.");
       } catch (error) {
         note(error instanceof Error ? error.message : String(error), "Error");

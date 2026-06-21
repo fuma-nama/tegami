@@ -131,54 +131,17 @@ export async function buildPrPreview(
   return lines.join("\n");
 }
 
-export async function postPrComment(body: string, workflowRunId?: number): Promise<void> {
+export async function postPrComment(body: string): Promise<void> {
   const repo = process.env.GITHUB_REPOSITORY;
   if (!repo) {
     throw new Error("GITHUB_REPOSITORY is required.");
   }
 
-  const runId = workflowRunId ?? (await readWorkflowRunIdFromEvent());
-  if (runId === undefined) {
-    throw new Error("A workflow run id or --run is required.");
-  }
-
-  if (!Number.isInteger(runId) || runId <= 0) {
-    throw new Error("--run must be a positive integer.");
-  }
-
-  const runResult = await x("gh", [
-    "api",
-    `repos/${repo}/actions/runs/${runId}`,
-    "--jq",
-    "{ event: .event, conclusion: .conclusion, number: .pull_requests[0].number }",
-  ]);
-
-  if (runResult.exitCode !== 0) {
-    throw new Error(runResult.stderr || `Failed to resolve workflow run ${runId}.`);
-  }
-
-  const run = JSON.parse(runResult.stdout) as {
-    event: string;
-    conclusion: string;
-    number?: number;
-  };
-
-  if (run.event !== "pull_request") {
-    throw new Error(`Workflow run ${runId} was not triggered by a pull request.`);
-  }
-
-  if (run.conclusion !== "success") {
-    throw new Error(`Workflow run ${runId} did not complete successfully.`);
-  }
-
-  if (!run.number) {
-    throw new Error(`Workflow run ${runId} is not associated with a pull request.`);
-  }
-
+  const number = await readPullRequestNumberFromWorkflowRunEvent();
   const markedBody = `${COMMENT_MARKER}\n${body}`;
   const listResult = await x("gh", [
     "api",
-    `repos/${repo}/issues/${run.number}/comments`,
+    `repos/${repo}/issues/${number}/comments`,
     "--paginate",
     "--jq",
     `[.[] | select(.body | startswith("${COMMENT_MARKER}")) | .id][0] // empty`,
@@ -218,7 +181,7 @@ export async function postPrComment(body: string, workflowRunId?: number): Promi
   const createResult = await x("gh", [
     "pr",
     "comment",
-    String(run.number),
+    String(number),
     "--body",
     markedBody,
     "--repo",
@@ -228,6 +191,47 @@ export async function postPrComment(body: string, workflowRunId?: number): Promi
   if (createResult.exitCode !== 0) {
     throw new Error(createResult.stderr || "Failed to create pull request comment.");
   }
+}
+
+async function readPullRequestNumberFromWorkflowRunEvent(): Promise<number> {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    throw new Error("GITHUB_EVENT_PATH is required.");
+  }
+
+  let event: {
+    workflow_run?: {
+      event: string;
+      conclusion: string;
+      pull_requests?: { number: number }[];
+    };
+  };
+
+  try {
+    event = JSON.parse(await readFile(eventPath, "utf8"));
+  } catch {
+    throw new Error("Failed to read workflow_run event.");
+  }
+
+  const workflowRun = event.workflow_run;
+  if (!workflowRun) {
+    throw new Error("A workflow_run event is required.");
+  }
+
+  if (workflowRun.event !== "pull_request") {
+    throw new Error("The preview workflow was not triggered by a pull request.");
+  }
+
+  if (workflowRun.conclusion !== "success") {
+    throw new Error("The preview workflow did not complete successfully.");
+  }
+
+  const number = workflowRun.pull_requests?.[0]?.number;
+  if (!Number.isInteger(number) || !number || number <= 0) {
+    throw new Error("The preview workflow is not associated with a pull request.");
+  }
+
+  return number;
 }
 
 async function resolvePullRequest(
@@ -320,24 +324,6 @@ async function readPullRequestEvent() {
     baseSha: pullRequest.base.sha,
     headSha: pullRequest.head.sha,
   };
-}
-
-async function readWorkflowRunIdFromEvent(): Promise<number | undefined> {
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) return;
-
-  let event: { workflow_run?: { id: number } };
-
-  try {
-    event = JSON.parse(await readFile(eventPath, "utf8"));
-  } catch {
-    return;
-  }
-
-  const id = event.workflow_run?.id;
-  if (!Number.isInteger(id) || !id || id <= 0) return;
-
-  return id;
 }
 
 async function listPullRequestChangelogFiles(

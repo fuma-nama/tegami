@@ -65,7 +65,7 @@ Tegami discovers npm and Cargo workspace packages automatically. Use the `packag
 | `tegami publish`    | Publish packages from the applied plan                                       |
 | `tegami ci`         | Version if changelogs are pending, otherwise publish                         |
 | `tegami pr preview` | Build a pull request release preview (for CI)                                |
-| `tegami pr comment` | Post a release preview artifact as a pull request comment (requires `--run`) |
+| `tegami pr comment` | Post a release preview artifact as a pull request comment (requires a `workflow_run` event) |
 | `tegami cleanup`    | Optionally remove a finished publish plan file from `.tegami/`               |
 | `tegami init-agent` | Append AGENTS.md instructions for AI agents writing changelogs               |
 
