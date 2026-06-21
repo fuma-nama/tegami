@@ -2,20 +2,23 @@ name: Tegami PR Comment
 
 on:
   workflow_run:
-    workflows: [Tegami PR]
+    workflows: ["Tegami PR"]
     types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
 
 jobs:
   comment:
     name: Post preview comment
     if: >
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.event == 'pull_request'
+
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      pull-requests: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
