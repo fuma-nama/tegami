@@ -1,7 +1,7 @@
 import type { TegamiContext } from "./context";
 import type { DraftPlan, PackagePlan } from "./plans/draft";
 import type { ChangelogEntry } from "./changelog/parse";
-import type { PublishOptions, PublishResult } from "./publish";
+import type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
 import type { PlanStore, PackagePlanStore } from "./plans/store";
@@ -99,14 +99,20 @@ export interface TegamiPlugin {
     },
   ): Awaitable<PublishPlanStatus>;
 
-  /** Called before a package will be published. */
+  /** Called before a package will be published, return `false` to prevent from publishing. */
   willPublish?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage },
-  ): Awaitable<PublishResult | void | undefined>;
+  ): Awaitable<PackagePublishResult | false | void | undefined>;
+
+  /** Called after a package is published. */
+  afterPublish?(
+    this: TegamiContext,
+    opts: { pkg: WorkspacePackage; result: PackagePublishResult },
+  ): Awaitable<PackagePublishResult | void | undefined>;
 
   /** Called after publishing finishes. */
-  afterPublish?(
+  afterPublishAll?(
     this: TegamiContext & { publishOptions: PublishOptions },
     result: PublishResult,
   ): Awaitable<PublishResult | void | undefined>;

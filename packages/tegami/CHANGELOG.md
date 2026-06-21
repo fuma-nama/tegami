@@ -2,8 +2,6 @@
 
 ### Improve conventional commit parsing
 
-
-
 ### Support init-agent command
 
 Consumer can run `tegami init-agent` command to generate configs for agents.

@@ -84,10 +84,10 @@ export function tegami<const Groups extends string = string>(
 
       const publishCtx = { ...context, publishOptions };
       for (const plugin of context.plugins) {
-        const next = await handlePluginError(plugin, "afterPublish", () =>
-          plugin.afterPublish?.call(publishCtx, result),
+        const next = await handlePluginError(plugin, "afterPublishAll", () =>
+          plugin.afterPublishAll?.call(publishCtx, result),
         );
-        result = next ?? result;
+        if (next) result = next;
       }
 
       return result;

@@ -66,6 +66,7 @@ export async function publishFromPlan(
     const pkg = context.graph.get(id);
     if (!pkg) continue;
 
+    const registryClient = context.getRegistryClient(pkg);
     const changelogs: ChangelogEntry[] = [];
     for (const id of plan.changelogIds ?? []) {
       const entry = store.changelogs[id];
@@ -78,7 +79,6 @@ export async function publishFromPlan(
     }
 
     if (!dryRun) {
-      const registryClient = context.getRegistryClient(pkg);
       const published = await registryClient.isPackagePublished(pkg);
 
       if (published) {
@@ -92,19 +92,7 @@ export async function publishFromPlan(
         });
         continue;
       }
-    }
-
-    try {
-      if (!dryRun) {
-        for (const plugin of context.plugins) {
-          await handlePluginError(plugin, "willPublish", () =>
-            plugin.willPublish?.call(context, { pkg }),
-          );
-        }
-
-        await context.getRegistryClient(pkg).publish(pkg, { packageStore: plan, store });
-      }
-
+    } else {
       packages.push({
         id: pkg.id,
         name: pkg.name,
@@ -113,6 +101,49 @@ export async function publishFromPlan(
         state: "success",
         changelogs,
       });
+      continue;
+    }
+
+    try {
+      let result: PackagePublishResult | false | undefined;
+
+      for (const plugin of context.plugins) {
+        const next = await handlePluginError(plugin, "willPublish", () =>
+          plugin.willPublish?.call(context, { pkg }),
+        );
+
+        if (next !== undefined) {
+          result = next;
+          break;
+        }
+      }
+
+      if (result === undefined) {
+        await registryClient.publish(pkg, { packageStore: plan, store });
+        result = {
+          id: pkg.id,
+          name: pkg.name,
+          version: pkg.version,
+          npm: plan.npm,
+          state: "success",
+          changelogs,
+        };
+      }
+
+      if (result === false) continue;
+
+      for (const plugin of context.plugins) {
+        const next = await handlePluginError(plugin, "afterPublish", () =>
+          plugin.afterPublish?.call(context, {
+            pkg,
+            result: result as PackagePublishResult,
+          }),
+        );
+
+        if (next) result = next;
+      }
+
+      packages.push(result);
     } catch (error) {
       packages.push({
         id: pkg.id,

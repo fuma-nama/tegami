@@ -31,7 +31,7 @@ describe("github release plugin", () => {
       },
     });
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
         packages: [
@@ -72,7 +72,7 @@ describe("github release plugin", () => {
   test("does not create releases when any package failed", async () => {
     const plugin = githubPlugin();
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
         state: "failed",
@@ -92,7 +92,7 @@ describe("github release plugin", () => {
   test("uses changelog entries for default notes", async () => {
     const plugin = githubPlugin();
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
         packages: [
@@ -141,7 +141,7 @@ describe("github release plugin", () => {
 
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       {
         ...publishContext(),
         github: { repo: "acme/repo" },
@@ -178,7 +178,7 @@ describe("github release plugin", () => {
   test("marks semver prerelease versions as GitHub prerelease by default", async () => {
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
         packages: [packageResult({ version: "1.0.1-beta.0", gitTag: "@acme/core@1.0.1-beta.0" })],
@@ -202,7 +202,7 @@ describe("github release plugin", () => {
   test("summarizes all packages sharing a git tag in release notes", async () => {
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
         packages: [
@@ -262,7 +262,7 @@ describe("github release plugin", () => {
       },
     });
 
-    await plugin.afterPublish?.call(
+    await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
         packages: [

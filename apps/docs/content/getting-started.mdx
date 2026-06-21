@@ -58,16 +58,16 @@ Tegami discovers npm and Cargo workspace packages automatically. Use the `packag
 
 `createCli` wraps the programmatic API. Pass the same `tegami()` instance you use in scripts.
 
-| Command             | Description                                                                  |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `tegami`            | Create changelog files interactively or from conventional commits            |
-| `tegami version`    | Draft and apply a publish plan                                               |
-| `tegami publish`    | Publish packages from the applied plan                                       |
-| `tegami ci`         | Version if changelogs are pending, otherwise publish                         |
-| `tegami pr preview` | Build a pull request release preview (for CI)                                |
+| Command             | Description                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `tegami`            | Create changelog files interactively or from conventional commits                           |
+| `tegami version`    | Draft and apply a publish plan                                                              |
+| `tegami publish`    | Publish packages from the applied plan                                                      |
+| `tegami ci`         | Version if changelogs are pending, otherwise publish                                        |
+| `tegami pr preview` | Build a pull request release preview (for CI)                                               |
 | `tegami pr comment` | Post a release preview artifact as a pull request comment (requires a `workflow_run` event) |
-| `tegami cleanup`    | Optionally remove a finished publish plan file from `.tegami/`               |
-| `tegami init-agent` | Append AGENTS.md instructions for AI agents writing changelogs               |
+| `tegami cleanup`    | Optionally remove a finished publish plan file from `.tegami/`                              |
+| `tegami init-agent` | Append AGENTS.md instructions for AI agents writing changelogs                              |
 
 Locally, `tegami` and `tegami version` use interactive prompts. In CI (`CI=true`), prompts are skipped and commands run non-interactively.
 

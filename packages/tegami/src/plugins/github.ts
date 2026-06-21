@@ -310,7 +310,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           }
         },
       },
-      async afterPublish(result) {
+      async afterPublishAll(result) {
         if (result.state !== "created") return;
 
         for (const packages of groupPackagesByGitTag(result.packages).values()) {

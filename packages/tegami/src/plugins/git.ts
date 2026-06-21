@@ -54,7 +54,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
         }
       },
     },
-    async afterPublish(result) {
+    async afterPublishAll(result) {
       const {
         cwd,
         publishOptions: { dryRun = false },

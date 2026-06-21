@@ -112,7 +112,7 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const next = await plugin.afterPublish?.call(pluginContext(), result);
+    const next = await plugin.afterPublishAll?.call(pluginContext(), result);
     expect(next).toBe(result);
     expect(result.packages.map((pkg) => pkg.gitTag)).toEqual([
       "@acme/core@1.0.1",
@@ -165,9 +165,9 @@ describe("git utils", () => {
   });
 
   test("skips plugin tags on dry runs, disabled tags, and failed publishes", async () => {
-    await git().afterPublish?.call(pluginContext({ dryRun: true }), publishResult());
-    await git({ createTags: false }).afterPublish?.call(pluginContext(), publishResult());
-    await git().afterPublish?.call(
+    await git().afterPublishAll?.call(pluginContext({ dryRun: true }), publishResult());
+    await git({ createTags: false }).afterPublishAll?.call(pluginContext(), publishResult());
+    await git().afterPublishAll?.call(
       pluginContext(),
       publishResult({
         state: "failed",
@@ -197,7 +197,7 @@ describe("git utils", () => {
         throw new Error(`Unexpected command: ${args.join(" ")}`);
       });
 
-      await plugin.afterPublish?.call(pluginContext(), publishResult());
+      await plugin.afterPublishAll?.call(pluginContext(), publishResult());
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
@@ -255,7 +255,7 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const result = await plugin.afterPublish?.call(pluginContext(), publishResult());
+    const result = await plugin.afterPublishAll?.call(pluginContext(), publishResult());
 
     expect(result).toMatchObject({
       state: "failed",

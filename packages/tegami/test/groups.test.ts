@@ -173,7 +173,7 @@ Breaking note.
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    await plugin.afterPublish?.call(context, result);
+    await plugin.afterPublishAll?.call(context, result);
 
     if (result.state !== "created") throw new Error("must be created");
 

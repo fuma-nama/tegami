@@ -52,7 +52,7 @@ function plugin(name: string, calls: string[], enforce?: TegamiPlugin["enforce"]
     initPlan() {
       calls.push(`initPlan:${name}`);
     },
-    afterPublish() {
+    afterPublishAll() {
       calls.push(`afterPublish:${name}`);
     },
   };

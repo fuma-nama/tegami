@@ -527,9 +527,7 @@ async function setWorkflowRunEvent(options: {
       workflow_run: {
         event: options.event ?? "pull_request",
         conclusion: options.conclusion ?? "success",
-        pull_requests: options.pullRequestNumber
-          ? [{ number: options.pullRequestNumber }]
-          : [],
+        pull_requests: options.pullRequestNumber ? [{ number: options.pullRequestNumber }] : [],
       },
     }),
   );
