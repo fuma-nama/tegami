@@ -26,4 +26,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Release preview
-        run: pnpm tegami ci-pr --print >> "$GITHUB_STEP_SUMMARY"
+        run: pnpm tegami pr preview --artifact tegami-pr-preview.md
+
+      - name: Upload preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: tegami-pr-preview
+          path: tegami-pr-preview.md

@@ -180,34 +180,7 @@ The Changesets GitHub app can comment on pull requests with a release summary, o
 
 ### In Tegami
 
-Run `tegami ci-pr` on pull requests. It writes a release preview to the GitHub Actions job summary, with a link to create a changelog file and contributor guidance. See [CI Setup — Pull request preview](/ci#pull-request-preview) for the workflow example.
-
-```yaml title=".github/workflows/tegami-pr.yml"
-name: Tegami PR
-
-on:
-  pull_request:
-
-jobs:
-  preview:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Release preview
-        run: pnpm tegami ci-pr --print >> "$GITHUB_STEP_SUMMARY"
-```
+Run `tegami pr preview` and `tegami pr comment` on pull requests. They post a release preview comment with a link to create a changelog file and contributor guidance. See [CI Setup — Pull request preview](/ci#pull-request-preview) for the workflow example.
 
 ## Package groups
 
@@ -362,7 +335,7 @@ Features Changesets does not cover out of the box:
 1. Install `tegami` and create `scripts/tegami.mts`.
 2. Convert pending `.changeset/*.md` files to `.tegami/*.md`.
 3. Map `config.json` options to `tegami()` config.
-4. Update CI to run `tegami ci` on main and `tegami ci-pr` on pull requests.
+4. Update CI to run `tegami ci` on main and `tegami pr preview` / `tegami pr comment` on pull requests.
 5. Remove `@changesets/cli`, `@changesets/action`, and `.changeset/`.
 6. Run `tegami init-agent` if you use AI coding agents.
 7. Run a test release on a branch and verify Version Packages PR contents before merging.

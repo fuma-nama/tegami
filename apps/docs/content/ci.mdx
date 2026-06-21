@@ -105,15 +105,15 @@ Because the publish plan lives in git, failed publish jobs can be retried safely
 
 ## Pull request preview
 
-Use `tegami ci-pr` on pull requests to show a release preview in CI. It renders markdown that:
+Use `tegami pr preview` and `tegami pr comment` on pull requests to post a release preview comment. The preview renders markdown that:
 
 1. Introduces Tegami and tells contributors to add changelog files.
 2. Links to create a new changelog file on GitHub.
 3. Shows pending package bumps and changelogs added in the PR.
 
-Write the preview to the GitHub Actions job summary. It renders as markdown on the workflow run page.
+Split this into two workflows for a better security model.
 
-```yaml title=".github/workflows/tegami-pr.yml"
+```yaml title=".github/workflows/tegami-pr.yml" tab="Generate Comment"
 name: Tegami PR
 
 on:
@@ -137,10 +137,57 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Release preview
-        run: pnpm tegami ci-pr --print >> "$GITHUB_STEP_SUMMARY"
+        run: pnpm tegami pr preview --artifact tegami-pr-preview.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tegami-pr-preview
+          path: tegami-pr-preview.md
 ```
 
-`tegami ci-pr` reads pull request metadata from `GITHUB_EVENT_PATH` when run in GitHub Actions. Pass `--print` to write raw markdown (for example to `$GITHUB_STEP_SUMMARY`). Without `--print`, the preview is shown in the terminal with formatted output.
+```yaml title=".github/workflows/tegami-pr-comment.yml" tab="Post Comment"
+name: Tegami PR Comment
+
+on:
+  workflow_run:
+    workflows: [Tegami PR]
+    types: [completed]
+
+jobs:
+  comment:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tegami-pr-preview
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Post preview comment
+        run: pnpm tegami pr comment tegami-pr-preview.md --run ${{ github.event.workflow_run.id }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+```
+
+The "Generate Comment" step **must** use `pull_request` over `pull_request_target`, it will run untrusted code.
 
 ## Custom CLI hooks
 

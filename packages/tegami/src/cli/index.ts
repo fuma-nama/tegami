@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 import {
   autocompleteMultiselect,
   confirm,
@@ -11,7 +11,7 @@ import {
   select,
   spinner,
 } from "@clack/prompts";
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import type { Awaitable } from "../types";
 import { bumpDepth, type BumpType } from "../utils/semver";
 import { changelogFilename } from "../utils/changelog";
@@ -24,7 +24,7 @@ import type { PackageGroup, WorkspacePackage } from "../graph";
 import type { DraftPlan } from "../plans/draft";
 import type { PublishResult } from "../publish";
 import { initAgent } from "./init-agent";
-import { runCiPr } from "./ci-pr";
+import { buildPrPreview, postPrComment } from "./pr";
 import { getChangedPackages } from "../utils/git-changes";
 
 export interface TegamiCLIOptions {
@@ -45,10 +45,13 @@ interface InitAgentCommandOptions {
   output?: string;
 }
 
-interface CiPrCommandOptions {
-  repo?: string;
-  branch?: string;
-  print?: boolean;
+interface PrPreviewCommandOptions {
+  artifact?: string;
+  number?: number;
+}
+
+interface PrCommentCommandOptions {
+  run?: number;
 }
 
 class CancelledError extends Error {
@@ -87,15 +90,69 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
       }),
     );
 
-  program
-    .command("ci-pr")
-    .description("show a pull request release preview and changelog guidance")
-    .option("--repo <repo>", "GitHub repository (owner/name)")
-    .option("--branch <branch>", "PR head branch for the create-changelog link")
-    .option("--print", "print the preview markdown to stdout")
-    .action((commandOptions: CiPrCommandOptions) =>
-      runAction(tegami, () => runCiPrCommand(tegami, commandOptions)),
+  const programPr = program.command("pr");
+
+  programPr
+    .command("preview")
+    .description(
+      "(should be executed in a GitHub action) show a pull request release preview and changelog guidance",
+    )
+    .option("--artifact <path>", "write preview markdown to a file")
+    .option("--number <number>", "pull request number", (value) => {
+      const number = Number(value);
+      if (!Number.isInteger(number) || number <= 0) {
+        throw new InvalidArgumentError("--number must be a positive integer.");
+      }
+      return number;
+    })
+    .action((commandOptions: PrPreviewCommandOptions) =>
+      runAction(tegami, async () => {
+        const context = await tegami._internal.context();
+        const body = await buildPrPreview(context, await tegami.draft(), commandOptions);
+
+        if (commandOptions.artifact) {
+          const artifactPath = resolve(context.cwd, commandOptions.artifact);
+          await writeFile(artifactPath, body);
+          if (!isCI()) {
+            note(relative(context.cwd, artifactPath) || commandOptions.artifact, "Release preview");
+            outro("Release preview ready.");
+          }
+          return;
+        }
+
+        if (isCI()) {
+          process.stdout.write(`${body}\n`);
+          return;
+        }
+
+        note(body, "Release preview");
+        outro("Release preview ready.");
+      }),
     );
+
+  programPr
+    .command("comment")
+    .description(
+      "(should be used with 'pr preview') post the pull request release preview as a comment",
+    )
+    .argument("<artifact>", "the file path of GitHub artifact")
+    .option("--run <id>", "preview workflow run id", (value) => {
+      const runId = Number(value);
+      if (!Number.isInteger(runId) || runId <= 0) {
+        throw new InvalidArgumentError("--run must be a positive integer.");
+      }
+      return runId;
+    })
+    .action(async (artifact: string, commandOptions: PrCommentCommandOptions) => {
+      try {
+        await postPrComment(await readFile(artifact, "utf8"), commandOptions.run);
+        outro("Pull request comment updated.");
+      } catch (error) {
+        note(error instanceof Error ? error.message : String(error), "Error");
+        outro("Command failed.");
+        process.exit(1);
+      }
+    });
 
   program
     .command("publish")
@@ -360,23 +417,6 @@ async function publishPackages(
 
   outro(dryRun ? "Publish plan is valid." : "Packages published.");
   return true;
-}
-
-async function runCiPrCommand(tegami: Tegami, options: CiPrCommandOptions): Promise<void> {
-  const context = await tegami._internal.context();
-  const draft = await tegami.draft();
-  const body = await runCiPr(context, draft, options);
-
-  if (options.print) {
-    process.stdout.write(`${body}\n`);
-    if (!isCI()) {
-      outro("Release preview ready.");
-    }
-    return;
-  }
-
-  note(body, "Release preview");
-  outro("Release preview ready.");
 }
 
 async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): Promise<void> {
