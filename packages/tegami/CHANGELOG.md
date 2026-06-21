@@ -1,3 +1,13 @@
+## tegami@0.1.0-beta.4
+
+### Replace `ci-pr` command with `pr`
+
+This will break previous usages, please migrate to the `pr` command (see docs).
+
+### Rename `afterPublish` to `afterPublishAll`, and add package-level `afterPublish` hook
+
+`willPublish` & `afterPublish` can now override/control the publishing process.
+
 ## tegami@0.1.0-beta.3
 
 ### Improve conventional commit parsing
