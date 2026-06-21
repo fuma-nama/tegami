@@ -118,6 +118,10 @@ name: Tegami PR
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
 
 jobs:
   preview:
@@ -150,7 +154,7 @@ name: Tegami PR Comment
 
 on:
   workflow_run:
-    workflows: [Tegami PR]
+    workflows: ["Tegami PR"]
     types: [completed]
 
 jobs:
