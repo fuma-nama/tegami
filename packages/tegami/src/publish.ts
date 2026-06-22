@@ -3,6 +3,54 @@ import type { ChangelogEntry } from "./changelog/parse";
 import type { PlanStore } from "./plans/store";
 import { publishPlanStatus } from "./plans/checks";
 import { handlePluginError } from "./utils/error";
+import type { Awaitable, PublishPreflight } from "./types";
+
+async function resolvePublishTargets(context: TegamiContext, store: PlanStore): Promise<string[]> {
+  const targets: string[] = [];
+  const preflightPromises: Awaitable<PublishPreflight | undefined | void>[] = [];
+
+  for (const [id, plan] of Object.entries(store.packages)) {
+    if (!plan.publish) continue;
+    const pkg = context.graph.get(id);
+    if (!pkg) continue;
+    targets.push(pkg.id);
+    preflightPromises.push(
+      context.getRegistryClient(pkg).publishPreflight?.(pkg, {
+        store,
+        packageStore: plan,
+      }),
+    );
+  }
+
+  const preflights = await Promise.all(preflightPromises);
+  const children = new Map<string, string[] | undefined>();
+
+  for (let i = 0; i < targets.length; i++) {
+    const id = targets[i]!;
+    children.set(id, preflights[i]?.wait);
+  }
+
+  const ordered: string[] = [];
+  function scan(id: string, stack = new Set<string>()) {
+    if (stack.has(id)) {
+      throw new Error(`circular reference of deps: ${[...stack, id].join(" -> ")}`);
+    }
+
+    if (ordered.includes(id)) return;
+
+    const deps = children.get(id);
+    if (deps) {
+      stack.add(id);
+      for (const dep of deps) scan(dep, stack);
+      stack.delete(id);
+    }
+
+    ordered.push(id);
+  }
+
+  for (const id of targets) scan(id);
+  return ordered;
+}
 
 export interface PublishOptions {
   /** Validate the publish plan without publishing packages, creating tags, or running release plugins. */
@@ -60,11 +108,11 @@ export async function publishFromPlan(
     return { state: "skipped" };
   }
 
-  for (const [id, plan] of Object.entries(store.packages)) {
-    if (!plan.publish) continue;
+  const orderedIds = await resolvePublishTargets(context, store);
 
-    const pkg = context.graph.get(id);
-    if (!pkg) continue;
+  for (const id of orderedIds) {
+    const plan = store.packages[id]!;
+    const pkg = context.graph.get(id)!;
 
     const registryClient = context.getRegistryClient(pkg);
     const changelogs: ChangelogEntry[] = [];

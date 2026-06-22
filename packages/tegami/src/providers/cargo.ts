@@ -6,7 +6,8 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { PlanPolicy } from "../plans/draft";
-import type { Awaitable, TegamiPlugin, RegistryClient } from "../types";
+import type { Awaitable, PublishPreflight, TegamiPlugin, RegistryClient } from "../types";
+import type { PlanStore, PackagePlanStore } from "../plans/store";
 import { execFailure, isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
@@ -73,7 +74,7 @@ export class CargoRegistryClient implements RegistryClient {
 
   #versionMap = new Map<string, Promise<boolean>>();
 
-  constructor(_graph: PackageGraph) {}
+  constructor(private readonly graph: PackageGraph) {}
 
   supports(pkg: WorkspacePackage): boolean {
     return pkg instanceof CargoPackage;
@@ -99,7 +100,31 @@ export class CargoRegistryClient implements RegistryClient {
     return info;
   }
 
-  async publish(pkg: CargoPackage): Promise<void> {
+  publishPreflight(pkg: CargoPackage, { store }: { store: PlanStore }): PublishPreflight {
+    const wait: string[] = [];
+
+    for (const { table } of dependencyTables(pkg.manifest, "")) {
+      for (const [rawName, rawSpec] of Object.entries(table)) {
+        if (!isTableValue(rawSpec) || typeof rawSpec.path !== "string") continue;
+
+        const packageName = stringValue(rawSpec.package) ?? rawName;
+        const id = `cargo:${packageName}`;
+        if (!store.packages[id]?.publish) continue;
+
+        const linked = this.graph.get(id);
+        if (!linked || !(linked instanceof CargoPackage)) continue;
+
+        wait.push(id);
+      }
+    }
+
+    return { wait };
+  }
+
+  async publish(
+    pkg: CargoPackage,
+    _env: { store: PlanStore; packageStore: PackagePlanStore },
+  ): Promise<void> {
     const result = await x("cargo", ["publish"], {
       nodeOptions: {
         cwd: pkg.path,

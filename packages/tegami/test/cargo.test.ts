@@ -193,16 +193,35 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
       {
         command: "cargo",
         args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "crates/binding")),
+        cwd: normalizeDirPath(join(cwd, "crates/core")),
       },
       {
         command: "cargo",
         args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "crates/core")),
+        cwd: normalizeDirPath(join(cwd, "crates/binding")),
       },
     ]);
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_core/1.1.0");
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_binding/1.0.1");
+  });
+
+  test("throws on circular cargo workspace dependencies", async () => {
+    const cwd = await createCircularCargoWorkspace();
+    tempDirs.push(cwd);
+    await tegami({ cwd })
+      .draft()
+      .then((draft) => draft.applyPlan());
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        status: 404,
+        text: async () => "not found",
+      })),
+    );
+    exec.mockImplementation(() => commandResult());
+
+    await expect(tegami({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
   });
 });
 
@@ -250,6 +269,53 @@ packages: ["@acme/js", "acme_core"]
 ## Mixed release
 
 Ship JS bindings and the Rust crate together.
+`,
+  );
+
+  return cwd;
+}
+
+async function createCircularCargoWorkspace(): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-cycle-"));
+  await mkdir(join(cwd, "crates/a"), { recursive: true });
+  await mkdir(join(cwd, "crates/b"), { recursive: true });
+  await mkdir(join(cwd, ".tegami"), { recursive: true });
+
+  await writeFile(
+    join(cwd, "Cargo.toml"),
+    `[workspace]
+members = ["crates/*"]
+`,
+  );
+  await writeFile(
+    join(cwd, "crates/a/Cargo.toml"),
+    `[package]
+name = "crate_a"
+version = "1.0.0"
+
+[dependencies]
+crate_b = { path = "../b", version = "1.0.0" }
+`,
+  );
+  await writeFile(
+    join(cwd, "crates/b/Cargo.toml"),
+    `[package]
+name = "crate_b"
+version = "1.0.0"
+
+[dependencies]
+crate_a = { path = "../a", version = "1.0.0" }
+`,
+  );
+  await writeFile(
+    join(cwd, ".tegami/change.md"),
+    `---
+packages: ["crate_a", "crate_b"]
+---
+
+## Circular release
+
+Both crates depend on each other.
 `,
   );
 

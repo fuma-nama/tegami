@@ -18,7 +18,7 @@ export interface LogGenerator {
       changelogs: ChangelogEntry[];
 
       plan: PackagePlan;
-      _draft: DraftPlan;
+      unstable_draft: DraftPlan;
     },
   ): string | Promise<string>;
 }
@@ -136,10 +136,19 @@ export interface PublishPlanStatus {
   state: "pending" | "success" | "missing";
 }
 
+export interface PublishPreflight {
+  /** Package ids that must be published before this one, this will automatically disallow circular dependency. */
+  wait: string[];
+}
+
 export interface RegistryClient {
   id: string;
   supports(pkg: WorkspacePackage): boolean;
   isPackagePublished(pkg: WorkspacePackage): Promise<boolean>;
+  publishPreflight?(
+    pkg: WorkspacePackage,
+    env: { store: PlanStore; packageStore: PackagePlanStore },
+  ): Awaitable<PublishPreflight | void | undefined>;
   publish(
     pkg: WorkspacePackage,
     env: { store: PlanStore; packageStore: PackagePlanStore },
