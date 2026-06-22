@@ -92,7 +92,7 @@ packages:
 
     expect(body).toContain("### Tegami");
     expect(body).toContain(
-      "[**Create a changelog →**](https://github.com/acme/repo/new/feature/release/.tegami/",
+      "[**Create a changelog →**](https://github.com/acme/repo/new/feature/release?filename=.tegami%2F",
     );
     expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` (no publish) |");
     expect(body).toContain("| `@acme/ui` | patch | `2.0.0` → `2.0.1` (no publish) |");
@@ -129,7 +129,7 @@ packages:
     const body = await buildPrPreview(context, draft);
 
     expect(body).toContain(
-      "[**Create a changelog →**](https://github.com/fork-user/repo/new/feature/fork/.tegami/",
+      "[**Create a changelog →**](https://github.com/fork-user/repo/new/feature/fork?filename=.tegami%2F",
     );
   });
 
@@ -165,7 +165,7 @@ packages:
     const body = await buildPrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
-      "[**Create a changelog →**](https://github.com/fork-user/repo/new/feature/test/.tegami/",
+      "[**Create a changelog →**](https://github.com/fork-user/repo/new/feature/test?filename=.tegami%2F",
     );
     expect(exec).toHaveBeenCalledWith("gh", [
       "pr",
@@ -227,7 +227,7 @@ packages:
     const body = await buildPrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
-      "[**Create a changelog →**](https://github.com/acme/repo/new/from-gh/.tegami/",
+      "[**Create a changelog →**](https://github.com/acme/repo/new/from-gh?filename=.tegami%2F",
     );
     expect(exec).toHaveBeenCalledWith("gh", [
       "pr",

@@ -41,11 +41,10 @@ export async function buildPrPreview(
     pullRequest.headSha,
   );
 
-  const changelogDir = relative(context.cwd, context.changelogDir) || ".tegami";
   const createLink = createChangelogUrl(
+    context,
     pullRequest.headRepo,
     pullRequest.headRef,
-    changelogDir,
     changelogFilename(),
   );
 
@@ -362,14 +361,17 @@ async function listPullRequestChangelogFiles(
 }
 
 function createChangelogUrl(
+  context: TegamiContext,
   repo: string,
   branch: string,
-  changelogDir: string,
   filename: string,
 ): string {
-  const segments = [...changelogDir.split("/").filter(Boolean), filename].map((part) =>
-    encodeURIComponent(part),
+  const filePath = join(relative(context.cwd, context.changelogDir), filename).replaceAll(
+    "\\",
+    "/",
   );
+  const branchPath = branch.split("/").map(encodeURIComponent).join("/");
+  const params = new URLSearchParams({ filename: filePath });
 
-  return `https://github.com/${repo}/new/${branch.split("/").map(encodeURIComponent).join("/")}/${segments.join("/")}`;
+  return `https://github.com/${repo}/new/${branchPath}?${params}`;
 }

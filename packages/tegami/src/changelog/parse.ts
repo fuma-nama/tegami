@@ -71,7 +71,7 @@ export function parseChangelogFile(file: string, content: string): ChangelogEntr
 
     sections.push({
       depth: section.heading.depth,
-      title: headingText(section.heading),
+      title: sectionToMarkdown(section.heading.children),
       content: sectionToMarkdown(section.children),
     });
   }
@@ -120,25 +120,6 @@ function getHeadingSections(tree: Root): HeadingSection[] {
   return sections;
 }
 
-function headingText(heading: Heading): string {
-  return heading.children
-    .map((child) => nodeText(child))
-    .join("")
-    .trim();
-}
-
-function nodeText(node: Heading["children"][number]): string {
-  if ("value" in node && typeof node.value === "string") {
-    return node.value;
-  }
-
-  if ("children" in node && Array.isArray(node.children)) {
-    return node.children.map((child) => nodeText(child)).join("");
-  }
-
-  return "";
-}
-
 function sectionToMarkdown(children: RootContent[]): string {
   if (children.length === 0) return "";
 
@@ -155,8 +136,12 @@ function sectionToMarkdown(children: RootContent[]): string {
 }
 
 function headingToBump(depth: number): BumpType | undefined {
-  if (depth === 1) return "major";
-  if (depth === 2) return "minor";
-  if (depth === 3) return "patch";
-  return undefined;
+  switch (depth) {
+    case 1:
+      return "major";
+    case 2:
+      return "minor";
+    case 3:
+      return "patch";
+  }
 }

@@ -1,3 +1,27 @@
+## tegami@0.1.0
+
+### Fix generated link
+
+The create file link in PR was wrong for `pr preview` command.
+
+### Preserve Cargo.toml formatting
+
+Cargo manifest edits now use `@rainbowatcher/toml-edit-js` instead of re-stringifying the whole file, so comments and formatting are kept when bumping versions or dependency ranges.
+
+### Allow specifying bump type per-package
+
+The `tegami` command can now specify bump type per-package instead of for all.
+
+## tegami@0.1.0-beta.4
+
+### Replace `ci-pr` command with `pr`
+
+This will break previous usages, please migrate to the `pr` command (see docs).
+
+### Rename `afterPublish` to `afterPublishAll`, and add package-level `afterPublish` hook
+
+`willPublish` & `afterPublish` can now override/control the publishing process.
+
 ## tegami@0.1.0-beta.3
 
 ### Improve conventional commit parsing

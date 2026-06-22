@@ -13,7 +13,7 @@ import {
 } from "@clack/prompts";
 import { Command, InvalidArgumentError } from "commander";
 import type { Awaitable } from "../types";
-import { bumpDepth, type BumpType } from "../utils/semver";
+import type { BumpType } from "../utils/semver";
 import { changelogFilename } from "../utils/changelog";
 import { isCI } from "../utils/constants";
 import { handlePluginError } from "../utils/error";
@@ -206,7 +206,7 @@ async function createChangelogs(
     for (const [group, changed] of groups) {
       const members = group.packages.map(getPackageLabel).join(", ");
       selectOptions.push({
-        label: `Group ${group.name}`,
+        label: `(Group) ${group.name}`,
         value: `group:${group.name}`,
         hint: changed ? `changed · ${members}` : members,
       });
@@ -269,15 +269,36 @@ async function createChangelogs(
     return;
   }
 
-  const type = await select({
+  const packageBumpMap: Record<string, BumpType> = {};
+  const bumpType = await select({
     message: "Select release type",
     options: [
       { value: "patch", label: "patch" },
       { value: "minor", label: "minor" },
       { value: "major", label: "major" },
+      { value: "per-package", label: "choose per-package" },
     ],
   });
-  if (isCancel(type)) throw new CancelledError();
+  if (isCancel(bumpType)) throw new CancelledError();
+  if (bumpType === "per-package") {
+    for (const pkg of selectedPackages) {
+      const bumpType = await select({
+        message: `Select release type for "${pkg}"`,
+        options: [
+          { value: "patch", label: "patch" },
+          { value: "minor", label: "minor" },
+          { value: "major", label: "major" },
+        ],
+      });
+
+      if (isCancel(bumpType)) throw new CancelledError();
+      packageBumpMap[pkg] = bumpType;
+    }
+  } else {
+    for (const pkg of selectedPackages) {
+      packageBumpMap[pkg] = bumpType;
+    }
+  }
 
   const message = await multiline({
     message: "Describe change (Markdown supported, press tab then enter to exit)",
@@ -296,11 +317,16 @@ async function createChangelogs(
   await mkdir(context.changelogDir, { recursive: true });
   await writeFile(
     join(context.changelogDir, filename),
-    renderManualChangelog(selectedPackages, type, message.trim()),
+    renderManualChangelog(packageBumpMap, message.trim()),
   );
   s.stop("Created changelog file");
 
-  note(`${filename}\n${selectedPackages.join(", ")}: ${type}`, "Created changelog");
+  const notes: string[] = [filename];
+  for (const pkg of selectedPackages) {
+    notes.push(`${pkg}: ${packageBumpMap[pkg]}`);
+  }
+
+  note(notes.join("\n"), "Created changelog");
   outro("Changelog ready.");
 }
 
@@ -443,22 +469,15 @@ async function runCleanup(tegami: Tegami): Promise<void> {
   outro(`Publish plan at ${planPath} is still pending. Publish it before cleanup.`);
 }
 
-function renderManualChangelog(packages: string[], type: BumpType, message: string): string {
-  const prefix = "#".repeat(bumpDepth(type));
-  const packageMap: Record<string, BumpType> = {};
-
-  for (const name of packages) {
-    packageMap[name] = type;
-  }
-
+function renderManualChangelog(packageBumpMap: Record<string, BumpType>, message: string): string {
   return [
     "---",
     dump({
-      packages: packageMap,
+      packages: packageBumpMap,
     }).trim(),
     "---",
     "",
-    `${prefix} ${message}`,
+    `## ${message}`,
     "",
   ].join("\n");
 }

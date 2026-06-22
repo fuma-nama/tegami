@@ -1,13 +1,18 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
-import { parse, type TomlTable, type TomlValue } from "smol-toml";
+import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { createTegamiContext } from "../src/context";
 import { parsePlanStore } from "../src/plans/store";
 import { getPendingPackageIds } from "./helpers/draft";
+
+initSync();
+
+type TomlTable = Record<string, unknown>;
+type TomlValue = unknown;
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -103,6 +108,30 @@ describe("cargo packages", () => {
     expect(npmPackage.version).toBe("1.1.0");
     expect(table(crate.package)?.version).toBe("1.1.0");
     expect(Object.keys(plan.packages)).toEqual(["npm:pkg-a", "cargo:pkg-a"]);
+  });
+
+  test("preserves Cargo.toml formatting and comments when applying a plan", async () => {
+    const cwd = await createMixedWorkspace();
+    tempDirs.push(cwd);
+
+    const bindingManifest = `[package]
+name = "acme_binding"
+version = "1.0.0" # keep this comment
+
+[dependencies]
+acme_core = { path = "../core", version = "1.0.0" } # linked crate
+`;
+    await writeFile(join(cwd, "crates/binding/Cargo.toml"), bindingManifest);
+
+    await tegami({ cwd })
+      .draft()
+      .then((draft) => draft.applyPlan());
+
+    const written = await readFile(join(cwd, "crates/binding/Cargo.toml"), "utf8");
+    expect(written).toContain("# keep this comment");
+    expect(written).toContain("# linked crate");
+    expect(written).toContain('version = "1.0.1"');
+    expect(written).toContain('version = "1.1.0"');
   });
 
   test("routes npm and cargo publishes through their registry clients", async () => {
@@ -267,7 +296,7 @@ Release the npm package and crate together.
 }
 
 async function readCargo(path: string): Promise<TomlTable> {
-  return parse(await readFile(join(path, "Cargo.toml"), "utf8"));
+  return parse(await readFile(join(path, "Cargo.toml"), "utf8")) as TomlTable;
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
