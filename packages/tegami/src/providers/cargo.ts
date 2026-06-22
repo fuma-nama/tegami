@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
+import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import * as semver from "semver";
-import { parse, stringify, type TomlTable, type TomlValue } from "smol-toml";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
@@ -11,6 +11,11 @@ import { isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 
+interface TomlTable {
+  [key: string]: TomlValue;
+}
+type TomlValue = string | number | boolean | TomlTable | TomlValue[];
+
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
 export class CargoPackage extends WorkspacePackage {
@@ -19,6 +24,7 @@ export class CargoPackage extends WorkspacePackage {
   constructor(
     readonly path: string,
     readonly manifest: TomlTable,
+    private content: string,
     private readonly workspaceManifest?: TomlTable,
   ) {
     super();
@@ -38,8 +44,17 @@ export class CargoPackage extends WorkspacePackage {
     return defaults;
   }
 
+  setVersion(version: string): void {
+    this.packageInfo.version = version;
+    this.patch("package.version", version);
+  }
+
   async write(): Promise<void> {
-    await writeFile(join(this.path, "Cargo.toml"), stringify(this.manifest));
+    await writeFile(join(this.path, "Cargo.toml"), this.content);
+  }
+
+  patch(path: string, value: unknown): void {
+    this.content = edit(this.content, path, value);
   }
 
   get packageInfo(): TomlTable {
@@ -129,7 +144,7 @@ export function cargo({
         for (const other of graph.getPackages()) {
           if (!(other instanceof CargoPackage)) continue;
 
-          for (const { table, kind } of dependencyTables(other.manifest)) {
+          for (const { table, kind } of dependencyTables(other.manifest, "")) {
             for (const [rawName, rawSpec] of Object.entries(table)) {
               const spec = parseSpec(rawSpec);
               if (!spec) continue;
@@ -154,6 +169,9 @@ export function cargo({
   return {
     name: "cargo",
     enforce: "pre",
+    async init() {
+      await initToml();
+    },
     async resolve() {
       await discoverCargoPackages(this.cwd, (pkg) => this.graph.add(pkg));
     },
@@ -172,14 +190,14 @@ export function cargo({
 
         const plan = draft.getPackagePlan(pkg.id);
         if (plan) {
-          pkg.packageInfo.version = plan.bumpVersion(pkg);
+          pkg.setVersion(plan.bumpVersion(pkg));
         }
       }
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof CargoPackage)) continue;
 
-        for (const { table } of dependencyTables(pkg.manifest)) {
+        for (const { table, path: tablePath } of dependencyTables(pkg.manifest, "")) {
           for (const [rawName, rawSpec] of Object.entries(table)) {
             const spec = parseSpec(rawSpec);
             if (!spec) continue;
@@ -192,6 +210,12 @@ export function cargo({
             if (result === false) continue;
 
             table[rawName] = spec.setVersion(result);
+            pkg.patch(
+              typeof rawSpec === "string"
+                ? `${tablePath}.${rawName}`
+                : `${tablePath}.${rawName}.version`,
+              result,
+            );
           }
         }
 
@@ -210,9 +234,9 @@ async function discoverCargoPackages(cwd: string, add: (pkg: CargoPackage) => vo
   });
   if (!root) return;
 
-  addCargoPackage(cwd, root, root, add);
+  addCargoPackage(cwd, root.manifest, root.content, root.manifest, add);
 
-  const workspace = tableValue(root.workspace);
+  const workspace = tableValue(root.manifest.workspace);
   const members = workspace?.members;
   if (!workspace || !Array.isArray(members)) return;
   const exclude = Array.isArray(workspace.exclude)
@@ -233,13 +257,21 @@ async function discoverCargoPackages(cwd: string, add: (pkg: CargoPackage) => vo
   );
 
   for (const entry of manifests) {
-    if (entry) addCargoPackage(entry.path, entry.manifest, root, add);
+    if (entry)
+      addCargoPackage(
+        entry.path,
+        entry.manifest.manifest,
+        entry.manifest.content,
+        root.manifest,
+        add,
+      );
   }
 }
 
 function addCargoPackage(
   path: string,
   manifest: TomlTable,
+  content: string,
   workspaceManifest: TomlTable,
   add: (pkg: CargoPackage) => void,
 ): void {
@@ -248,7 +280,7 @@ function addCargoPackage(
   if (!packageInfo?.name) return;
   if (!packageInfo.version && !tableValue(workspacePackage)?.version) return;
 
-  add(new CargoPackage(path, manifest, workspaceManifest));
+  add(new CargoPackage(path, manifest, content, workspaceManifest));
 }
 
 async function expandWorkspaceMembers(
@@ -274,23 +306,27 @@ async function expandWorkspaceMembers(
   return paths.map(normalize);
 }
 
-function dependencyTables(manifest: TomlTable) {
-  const tables: { kind: (typeof DEP_FIELDS)[number]; table: TomlTable }[] = [];
+function dependencyTables(manifest: TomlTable, prefix: string) {
+  const tables: { kind: (typeof DEP_FIELDS)[number]; table: TomlTable; path: string }[] = [];
 
   for (const field of DEP_FIELDS) {
     const table = tableValue(manifest[field]);
-    if (table) tables.push({ kind: field, table });
+    if (table) {
+      const path = prefix ? `${prefix}.${field}` : field;
+      tables.push({ kind: field, table, path });
+    }
   }
 
   const target = tableValue(manifest.target);
   if (target) {
-    for (const targetConfig of Object.values(target)) {
+    for (const [targetKey, targetConfig] of Object.entries(target)) {
       const targetTable = tableValue(targetConfig);
       if (!targetTable) continue;
 
+      const targetPath = prefix ? `${prefix}.target.${targetKey}` : `target.${targetKey}`;
       for (const field of DEP_FIELDS) {
         const table = tableValue(targetTable[field]);
-        if (table) tables.push({ kind: field, table });
+        if (table) tables.push({ kind: field, table, path: `${targetPath}.${field}` });
       }
     }
   }
@@ -319,8 +355,9 @@ function parseSpec(v: TomlValue) {
   }
 }
 
-async function readCargoManifest(path: string): Promise<TomlTable> {
-  return parse(await readFile(join(path, "Cargo.toml"), "utf8"));
+async function readCargoManifest(path: string): Promise<{ manifest: TomlTable; content: string }> {
+  const content = await readFile(join(path, "Cargo.toml"), "utf8");
+  return { manifest: parse(content) as TomlTable, content };
 }
 
 function isTableValue(value: TomlValue): value is TomlTable {
