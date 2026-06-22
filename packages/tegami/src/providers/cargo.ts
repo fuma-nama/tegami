@@ -112,6 +112,13 @@ export class CargoRegistryClient implements RegistryClient {
 }
 
 export interface CargoPluginOptions {
+  /**
+   * Update lock file after versioning.
+   *
+   * @default false
+   */
+  updateLockFile?: boolean;
+
   bumpDep?: (opts: {
     kind: (typeof DEP_FIELDS)[number];
     name: string;
@@ -120,6 +127,7 @@ export interface CargoPluginOptions {
 }
 
 export function cargo({
+  updateLockFile = false,
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -225,6 +233,18 @@ export function cargo({
       }
 
       await Promise.all(writes);
+    },
+    cli: {
+      async publishPlanApplied() {
+        if (!updateLockFile) return;
+        const result = await x("cargo", ["update", "--workspace"], {
+          nodeOptions: { cwd: this.cwd },
+        });
+
+        if (result.exitCode !== 0) {
+          throw execFailure("Failed to update Cargo lock file", result);
+        }
+      },
     },
   };
 }
