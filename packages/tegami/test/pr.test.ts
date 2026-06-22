@@ -335,7 +335,7 @@ packages: ["@acme/core"]
     const draft = await createDraftPlan([], context);
 
     await expect(buildPrPreview(context, draft)).rejects.toThrow(
-      "Failed to list pull request changelog files: fatal: bad revision",
+      "Failed to list pull request changelog files.",
     );
   });
 

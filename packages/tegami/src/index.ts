@@ -17,6 +17,7 @@ export type {
   LogGenerator,
   TegamiOptions,
   TegamiPlugin,
+  PublishPreflight,
   RegistryClient,
   GroupOptions,
   PackageOptions,

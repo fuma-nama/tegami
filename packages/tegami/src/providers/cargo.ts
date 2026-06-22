@@ -6,8 +6,9 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { PlanPolicy } from "../plans/draft";
-import type { Awaitable, TegamiPlugin, RegistryClient } from "../types";
-import { isNodeError } from "../utils/error";
+import type { Awaitable, PublishPreflight, TegamiPlugin, RegistryClient } from "../types";
+import type { PlanStore, PackagePlanStore } from "../plans/store";
+import { execFailure, isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 
@@ -73,7 +74,7 @@ export class CargoRegistryClient implements RegistryClient {
 
   #versionMap = new Map<string, Promise<boolean>>();
 
-  constructor(_graph: PackageGraph) {}
+  constructor(private readonly graph: PackageGraph) {}
 
   supports(pkg: WorkspacePackage): boolean {
     return pkg instanceof CargoPackage;
@@ -99,17 +100,50 @@ export class CargoRegistryClient implements RegistryClient {
     return info;
   }
 
-  async publish(pkg: CargoPackage): Promise<void> {
-    await x("cargo", ["publish"], {
+  publishPreflight(pkg: CargoPackage, { store }: { store: PlanStore }): PublishPreflight {
+    const wait: string[] = [];
+
+    for (const { table } of dependencyTables(pkg.manifest, "")) {
+      for (const [rawName, rawSpec] of Object.entries(table)) {
+        if (!isTableValue(rawSpec) || typeof rawSpec.path !== "string") continue;
+
+        const packageName = stringValue(rawSpec.package) ?? rawName;
+        const id = `cargo:${packageName}`;
+        if (!store.packages[id]?.publish) continue;
+
+        const linked = this.graph.get(id);
+        if (!linked || !(linked instanceof CargoPackage)) continue;
+
+        wait.push(id);
+      }
+    }
+
+    return { wait };
+  }
+
+  async publish(
+    pkg: CargoPackage,
+    _env: { store: PlanStore; packageStore: PackagePlanStore },
+  ): Promise<void> {
+    const result = await x("cargo", ["publish"], {
       nodeOptions: {
         cwd: pkg.path,
       },
-      throwOnError: true,
     });
+    if (result.exitCode !== 0) {
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
+    }
   }
 }
 
 export interface CargoPluginOptions {
+  /**
+   * Update lock file after versioning.
+   *
+   * @default false
+   */
+  updateLockFile?: boolean;
+
   bumpDep?: (opts: {
     kind: (typeof DEP_FIELDS)[number];
     name: string;
@@ -118,6 +152,7 @@ export interface CargoPluginOptions {
 }
 
 export function cargo({
+  updateLockFile = false,
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -223,6 +258,18 @@ export function cargo({
       }
 
       await Promise.all(writes);
+    },
+    cli: {
+      async publishPlanApplied() {
+        if (!updateLockFile) return;
+        const result = await x("cargo", ["update", "--workspace"], {
+          nodeOptions: { cwd: this.cwd },
+        });
+
+        if (result.exitCode !== 0) {
+          throw execFailure("Failed to update Cargo lock file", result);
+        }
+      },
     },
   };
 }

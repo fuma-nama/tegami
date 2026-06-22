@@ -1,3 +1,17 @@
+## tegami@0.1.1
+
+### Fix error handling
+
+Report command errors correctly with more details.
+
+### Support update lock file for Cargo
+
+The Cargo plugin can now update lock file after applying publish plan.
+
+### Support publish preflights
+
+Publish preflights allow registry clients to wait for other packages before publishing, this is required for package managers like Cargo where the order matters.
+
 ## tegami@0.1.0
 
 ### Fix generated link
