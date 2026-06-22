@@ -7,7 +7,7 @@ import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { PlanPolicy } from "../plans/draft";
 import type { Awaitable, TegamiPlugin, RegistryClient } from "../types";
-import { isNodeError } from "../utils/error";
+import { execFailure, isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 
@@ -100,12 +100,14 @@ export class CargoRegistryClient implements RegistryClient {
   }
 
   async publish(pkg: CargoPackage): Promise<void> {
-    await x("cargo", ["publish"], {
+    const result = await x("cargo", ["publish"], {
       nodeOptions: {
         cwd: pkg.path,
       },
-      throwOnError: true,
     });
+    if (result.exitCode !== 0) {
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
+    }
   }
 }
 

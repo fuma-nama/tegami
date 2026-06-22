@@ -96,8 +96,9 @@ export class NpmRegistryClient implements RegistryClient {
         const output = commandOutput(result);
         if (isMissingRegistryEntry(output)) return false;
 
-        throw new Error(
-          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}: ${output.trim() || `command exited with code ${result.exitCode}`}`,
+        throw execFailure(
+          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+          result,
         );
       };
 

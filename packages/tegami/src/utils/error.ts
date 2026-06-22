@@ -1,19 +1,15 @@
-import type { x } from "tinyexec";
+import type { Result } from "tinyexec";
 import type { Awaitable, TegamiPlugin } from "../types";
-
-function commandOutput(result: { stdout?: string; stderr?: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-}
-
-type ExecResult = Awaited<ReturnType<typeof x>>;
 
 export function execFailure(
   context: string,
-  result: Pick<ExecResult, "exitCode" | "stdout" | "stderr">,
+  result: Pick<Awaited<Result>, "exitCode" | "stdout" | "stderr">,
 ): Error {
   const lines = [context, `(exit ${result.exitCode})`];
-  const output = commandOutput(result);
-  if (output) lines.push(output);
+  const out = result.stdout.trim();
+  const err = result.stderr.trim();
+  if (out) lines.push(out);
+  if (err) lines.push(err);
   return new Error(lines.join("\n"));
 }
 

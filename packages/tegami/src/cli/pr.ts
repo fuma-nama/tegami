@@ -5,6 +5,7 @@ import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPlan } from "../plans/draft";
 import { changelogFilename } from "../utils/changelog";
+import { execFailure } from "../utils/error";
 import { formatRunScriptCommand } from "../utils/package-manager";
 import { formatNpmDistTag } from "../utils/semver";
 
@@ -147,7 +148,7 @@ export async function postPrComment(body: string): Promise<void> {
   ]);
 
   if (listResult.exitCode !== 0) {
-    throw new Error(listResult.stderr || "Failed to list pull request comments.");
+    throw execFailure("Failed to list pull request comments.", listResult);
   }
 
   const existingId = listResult.stdout.trim();
@@ -168,7 +169,7 @@ export async function postPrComment(body: string): Promise<void> {
       ]);
 
       if (updateResult.exitCode !== 0) {
-        throw new Error(updateResult.stderr || "Failed to update pull request comment.");
+        throw execFailure("Failed to update pull request comment.", updateResult);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -188,7 +189,7 @@ export async function postPrComment(body: string): Promise<void> {
   ]);
 
   if (createResult.exitCode !== 0) {
-    throw new Error(createResult.stderr || "Failed to create pull request comment.");
+    throw execFailure("Failed to create pull request comment.", createResult);
   }
 }
 
@@ -269,7 +270,7 @@ async function readPullRequestFromGh(repo: string, number: number): Promise<Pull
   ]);
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr || `Failed to resolve pull request #${number}.`);
+    throw execFailure(`Failed to resolve pull request #${number}.`, result);
   }
 
   const data = JSON.parse(result.stdout) as {
@@ -340,12 +341,7 @@ async function listPullRequestChangelogFiles(
   );
 
   if (result.exitCode !== 0) {
-    const detail = result.stderr.trim();
-    throw new Error(
-      detail
-        ? `Failed to list pull request changelog files: ${detail}`
-        : "Failed to list pull request changelog files.",
-    );
+    throw execFailure("Failed to list pull request changelog files.", result);
   }
 
   const files = new Set<string>();
