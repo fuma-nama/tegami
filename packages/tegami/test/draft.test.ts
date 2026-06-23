@@ -168,7 +168,7 @@ describe("draft publish plans", () => {
     `);
   });
 
-  test("omits packages without pending changelogs from the draft", async () => {
+  test("omits packages without pending version changes from the draft", async () => {
     const cwd = await createWorkspace({
       changelog: false,
     });

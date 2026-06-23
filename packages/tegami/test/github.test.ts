@@ -164,6 +164,8 @@ describe("github release plugin", () => {
       "@acme/core@1.0.1",
       "--notes",
       "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
+      "--repo",
+      "acme/repo",
     ]);
   });
 

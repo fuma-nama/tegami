@@ -165,7 +165,7 @@ async function versionPackages(
   }
 
   if (!draft.hasPending()) {
-    note("No pending changelog entries matched workspace packages.", "Nothing to version");
+    note("No pending version changes matched workspace packages.", "Nothing to version");
     outro("No versions changed.");
     return false;
   }

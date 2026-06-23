@@ -74,3 +74,38 @@ Values in `packages` can be:
 | Group        | `"group:acme"`   | Every package in the `acme` group    |
 
 Use package IDs when the same name appears in multiple registries (for example npm and Cargo). Use `group:` to target every member of a [package group](/package-groups).
+
+## Replay
+
+By default, a changelog file is applied once and then removed from `.tegami/`. Use `replay` to keep it and include its notes again when a package reaches a specific version.
+
+Add `replay` on a package in frontmatter:
+
+```md title=".tegami/beta-notes.md"
+---
+packages:
+  npm:tegami:
+    type: patch
+    replay: [tegami@1.1.0]
+---
+
+## Fix button hover state
+
+The hover color now matches the design system.
+```
+
+1. On the first release, Tegami applies the bump and writes the notes to `CHANGELOG.md`. The file stays in `.tegami/` with the `type` removed and the replay condition kept.
+2. When `tegami` later releases `tegami@1.1.0`, the same notes are appended again and the file is removed.
+
+You can also omit `type` and keep only replay conditions. The file then contributes notes only when a replay condition matches, not on the initial draft.
+
+### Replay conditions
+
+Each item in `replay` is a condition string:
+
+| Condition               | Example                            | Matches when                                                                |
+| ----------------------- | ---------------------------------- | --------------------------------------------------------------------------- |
+| `name@version`          | `tegami@1.1.0`, `@acme/core@2.0.0` | A package with that name reaches that exact version                         |
+| `exit prerelease: name` | `exit prerelease: tegami`          | A package exits its prerelease line (for example `1.1.0-alpha.2` → `1.1.0`) |
+
+A package can list multiple conditions. Tegami removes each condition as it matches. The file is deleted once every condition has been consumed.

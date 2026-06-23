@@ -269,25 +269,40 @@ Some description.
     );
   });
 
-  test("skips publish when pending changelog entries exist", async () => {
+  test("still publishes when only replay changelog files remain", async () => {
     const { cwd, planPath } = await createPublishFixture();
 
     await writeFile(
-      join(cwd, ".tegami/change.md"),
+      join(cwd, ".tegami/replay.md"),
       `---
-packages: ["@acme/core"]
+packages:
+  "@acme/core":
+    replay: ["@acme/core@2.0.0"]
 ---
 
-## Pending change
+## Replay notes
 
-Not versioned yet.
+Included again on 2.0.0.
 `,
     );
 
-    await expect(tegami({ cwd, planPath }).publish()).resolves.toEqual({
-      state: "skipped",
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "view") {
+        return commandResult({
+          exitCode: 1,
+          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
+        });
+      }
+
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
-    expect(exec).not.toHaveBeenCalled();
+
+    const result = await tegami({ cwd, planPath }).publish();
+    expect(result.state).toBe("created");
   });
 
   test("skips publish when no publish plan exists", async () => {
