@@ -71,6 +71,58 @@ describe("registry client", () => {
 
     await expect(client.isPackagePublished(pkg)).resolves.toBe(false);
   });
+
+  test("publishes with yarn publish", async () => {
+    const packageGraph = graph();
+    const client = new NpmRegistryClient("/repo", "yarn", packageGraph);
+    const pkg = packageGraph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+
+    exec.mockResolvedValue(execResult());
+
+    await client.publish(pkg, {
+      store: storedPlan(),
+      packageStore: { type: "patch", changelogIds: [], publish: true, npm: { distTag: "next" } },
+    });
+
+    expect(exec).toHaveBeenCalledWith("yarn", ["publish", "--tag", "next"], {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+    });
+  });
+
+  test("packs with bun then publishes tarball with npm", async () => {
+    const packageGraph = graph();
+    const client = new NpmRegistryClient("/repo", "bun", packageGraph);
+    const pkg = packageGraph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+
+    exec
+      .mockResolvedValueOnce(execResult({ stdout: "acme-core-1.0.1.tgz\n" }))
+      .mockResolvedValueOnce(execResult());
+
+    await client.publish(pkg, {
+      store: storedPlan(),
+      packageStore: { type: "patch", changelogIds: [], publish: true, npm: { distTag: "latest" } },
+    });
+
+    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--quiet"], {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+    });
+    expect(exec).toHaveBeenNthCalledWith(
+      2,
+      "npm",
+      ["publish", "acme-core-1.0.1.tgz", "--tag", "latest"],
+      {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      },
+    );
+  });
 });
 
 describe("publish plan status", () => {

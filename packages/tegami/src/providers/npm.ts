@@ -85,16 +85,15 @@ export class NpmRegistryClient implements RegistryClient {
         const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
         if (registry) args.push("--registry", registry);
 
-        const client = this.client === "pnpm" ? "pnpm" : "npm";
-        const result = await x(client, args, {
+        const result = await x(this.client === "pnpm" ? "pnpm" : "npm", args, {
           nodeOptions: {
             cwd: this.cwd,
           },
         });
         if (result.exitCode === 0) return true;
 
-        const output = commandOutput(result);
-        if (isMissingRegistryEntry(output)) return false;
+        if (isMissingRegistryEntry(result.stderr) || isMissingRegistryEntry(result.stdout))
+          return false;
 
         throw execFailure(
           `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
@@ -113,12 +112,57 @@ export class NpmRegistryClient implements RegistryClient {
     pkg: NpmPackage,
     { packageStore }: { store: PlanStore; packageStore: PackagePlanStore },
   ) {
-    const args = ["publish"];
     const distTag = packageStore.npm?.distTag;
-    if (distTag) args.push("--tag", distTag);
-    const client = this.client === "pnpm" ? "pnpm" : "npm";
 
-    if (client === "pnpm") args.push("--no-git-checks");
+    // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
+    if (this.client === "bun") {
+      const packResult = await x("bun", ["pm", "pack", "--quiet"], {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+      if (packResult.exitCode !== 0) {
+        throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
+      }
+
+      const tarball = packResult.stdout.trim().split("\n").at(-1)?.trim();
+      if (!tarball) {
+        throw execFailure(
+          `Failed to determine tarball name after packing ${pkg.name}@${pkg.version}.`,
+          packResult,
+        );
+      }
+
+      const publishArgs = ["publish", tarball];
+      if (distTag) publishArgs.push("--tag", distTag);
+
+      const publishResult = await x("npm", publishArgs, {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+      if (publishResult.exitCode !== 0) {
+        throw execFailure(
+          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+          publishResult,
+        );
+      }
+      return;
+    }
+
+    const args = ["publish"];
+    if (distTag) args.push("--tag", distTag);
+
+    let client: AgentName;
+    if (this.client === "pnpm") {
+      client = "pnpm";
+      args.push("--no-git-checks");
+    } else if (this.client === "yarn") {
+      client = "yarn";
+    } else {
+      client = "npm";
+    }
+
     const result = await x(client, args, {
       nodeOptions: {
         cwd: pkg.path,
@@ -131,10 +175,6 @@ export class NpmRegistryClient implements RegistryClient {
       );
     }
   }
-}
-
-function commandOutput(result: Awaited<ReturnType<typeof x>>): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function isMissingRegistryEntry(output: string): boolean {
@@ -354,8 +394,21 @@ export function npm({
       const result = await detect({
         cwd: this.cwd,
       });
-      if (result?.name === "pnpm") client = "pnpm";
-      else client = "npm";
+
+      switch (result?.name) {
+        case "pnpm":
+          client = "pnpm";
+          break;
+        case "yarn":
+          client = "yarn";
+          break;
+        case "bun":
+          client = "bun";
+          break;
+        default:
+          client = "npm";
+          break;
+      }
     },
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));
@@ -430,6 +483,8 @@ export function npm({
           args = ["ci"];
         } else if (client === "yarn") {
           args = ["install", "--immutable"];
+        } else if (client === "bun") {
+          args = ["install", "--frozen-lockfile"];
         } else {
           args = ["install", "--frozen-lockfile"];
         }
