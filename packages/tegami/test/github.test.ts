@@ -1,6 +1,7 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { PackagePublishResult, PublishResult } from "../src/publish";
+import type { ChangelogEntry } from "../src/changelog/parse";
 import { DraftPlan } from "../src/plans/draft";
 import { github } from "../src/plugins/github";
 import type { TegamiPlugin } from "../src/types";
@@ -97,12 +98,10 @@ describe("github release plugin", () => {
         packages: [
           packageResult({
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["@acme/core", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["@acme/core", { type: "minor" }]]),
                 sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
-              },
+              }),
             ],
           }),
         ],
@@ -149,12 +148,10 @@ describe("github release plugin", () => {
         packages: [
           packageResult({
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["@acme/core", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["@acme/core", { type: "minor" }]]),
                 sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
-              },
+              }),
             ],
           }),
         ],
@@ -209,24 +206,20 @@ describe("github release plugin", () => {
             name: "@acme/core",
             gitTag: "acme@1.0.1",
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["group:acme", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["group:acme", { type: "minor" }]]),
                 sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
-              },
+              }),
             ],
           }),
           packageResult({
             name: "@acme/ui",
             gitTag: "acme@1.0.1",
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["group:acme", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["group:acme", { type: "minor" }]]),
                 sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
-              },
+              }),
             ],
           }),
         ],
@@ -694,12 +687,12 @@ class TestPackage extends WorkspacePackage {
 
 function versionDraft(context = publishContext()): DraftPlan {
   const draft = new DraftPlan(context);
-  draft.addChangelog({
-    id: "change-1",
-    filename: "change.md",
-    packages: new Map([["@acme/core", "minor"]]),
-    sections: [{ title: "Add feature", content: "Description.", depth: 2 }],
-  });
+  draft.addChangelog(
+    testChangelogEntry({
+      packages: new Map([["@acme/core", { type: "minor" }]]),
+      sections: [{ title: "Add feature", content: "Description.", depth: 2 }],
+    }),
+  );
   return draft;
 }
 
@@ -738,6 +731,17 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
     },
     state: "created",
     packages: [],
+    ...overrides,
+  };
+}
+
+function testChangelogEntry(overrides: Partial<ChangelogEntry> = {}): ChangelogEntry {
+  return {
+    id: "change-1",
+    filename: "change.md",
+    packages: new Map(),
+    sections: [],
+    getRawContent: () => "",
     ...overrides,
   };
 }

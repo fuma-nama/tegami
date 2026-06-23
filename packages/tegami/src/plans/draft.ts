@@ -4,7 +4,12 @@ import type { TegamiContext } from "../context";
 import { simpleGenerator } from "../generators/simple";
 import { BumpType, maxBump } from "../utils/semver";
 import type { WorkspacePackage } from "../graph";
-import type { ChangelogEntry } from "../changelog/parse";
+import {
+  ChnagelogPackageConfig,
+  parseReplayCondition,
+  type ParsedReplayCondition,
+  type ChangelogEntry,
+} from "../changelog/parse";
 import { createPlanStore, readPlanStore } from "./store";
 import type { Awaitable } from "../types";
 import { handlePluginError } from "../utils/error";
@@ -123,14 +128,14 @@ export class DraftPlan {
     const { graph } = this.context;
     const groupPackages = new Map<WorkspacePackage, BumpType>();
 
-    for (const [name, bumpType] of entry.packages) {
-      for (const pkg of graph.getByName(name)) groupPackages.set(pkg, bumpType);
+    for (const [name, config] of entry.packages) {
+      if (!config.type) continue;
+      for (const pkg of graph.getByName(name)) groupPackages.set(pkg, config.type);
     }
 
     for (const [pkg, bumpType] of groupPackages) {
       const plan = this.bumpPackage(pkg, { type: bumpType });
-      plan.changelogs ??= [];
-      plan.changelogs.push(entry);
+      attachChangelog(plan, entry);
     }
   }
 
@@ -152,6 +157,7 @@ export class DraftPlan {
       );
     }
 
+    const updatedChangelogs = this.applyReplays();
     const { graph } = this.context;
     const writes: Awaitable<void>[] = [];
 
@@ -162,7 +168,12 @@ export class DraftPlan {
     }
 
     for (const entry of this.changelogs.values()) {
-      writes.push(rm(path.join(this.context.changelogDir, entry.filename), { force: true }));
+      const updated = updatedChangelogs.get(entry.id);
+      const filePath = path.join(this.context.changelogDir, entry.filename);
+
+      writes.push(
+        updated ? writeFile(filePath, updated.getRawContent()) : rm(filePath, { force: true }),
+      );
     }
 
     await Promise.all(writes);
@@ -181,6 +192,59 @@ export class DraftPlan {
 
   canApply() {
     return !this.#applied;
+  }
+
+  /** Attach replaying changelog entries to packages, and return the updated changelog entries. */
+  private applyReplays(): Map<string, ChangelogEntry> {
+    const updated = new Map<string, ChangelogEntry>();
+    const { graph } = this.context;
+
+    const isMatch = (condition: ParsedReplayCondition) => {
+      return graph
+        .getByName(condition.name)
+        .some(
+          (pkg) =>
+            pkg.version === condition.version ||
+            this.getOrInitPackage(pkg).bumpVersion(pkg) === condition.version,
+        );
+    };
+
+    for (const entry of this.changelogs.values()) {
+      const updatedPackages = new Map<string, ChnagelogPackageConfig>();
+      const matchedNames = new Set<string>();
+
+      for (const [name, config] of entry.packages) {
+        if (!config.replay || config.replay.length === 0) continue;
+
+        const replay = config.replay.filter((item) => {
+          const condition = parseReplayCondition(item);
+          if (condition && isMatch(condition)) {
+            matchedNames.add(name);
+            return false;
+          }
+
+          return true;
+        });
+
+        if (replay.length === 0) continue;
+        const _ = { ...config, replay };
+        delete _.type;
+        updatedPackages.set(name, _);
+      }
+
+      if (updatedPackages.size > 0) {
+        updated.set(entry.id, {
+          ...entry,
+          packages: updatedPackages,
+        });
+      }
+
+      for (const name of matchedNames) {
+        for (const pkg of graph.getByName(name)) attachChangelog(this.getOrInitPackage(pkg), entry);
+      }
+    }
+
+    return updated;
   }
 
   private async appendChangelog(pkg: WorkspacePackage, plan: PackagePlan): Promise<void> {
@@ -259,4 +323,11 @@ export async function createDraftPlan(
   }
 
   return draft;
+}
+
+function attachChangelog(plan: PackagePlan, entry: ChangelogEntry) {
+  if (plan.changelogs?.some((item) => item.id === entry.id)) return;
+
+  plan.changelogs ??= [];
+  plan.changelogs.push(entry);
 }

@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import type { Heading, Root, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
+import { dump } from "js-yaml";
 import { maxBump, type BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
 import type { TegamiContext } from "../context";
@@ -14,19 +15,31 @@ export interface ChangelogEntry {
   /** file name like `my-change.md` */
   filename: string;
   subject?: string;
-  packages: Map<string, BumpType>;
+  packages: Map<string, ChnagelogPackageConfig>;
   /** will not be empty */
   sections: {
     depth: number;
     title: string;
     content: string;
   }[];
+
+  getRawContent: () => string;
 }
+
+export type ChnagelogPackageConfig = z.output<typeof changelogPackageConfigSchema>;
+
+const changelogPackageConfigSchema = z.object({
+  type: bumpTypeSchema.optional(),
+  replay: z.array(z.string().min(1)).optional(),
+});
 
 const changelogFrontmatterSchema = z.object({
   subject: z.string().optional(),
   packages: z
-    .union([z.array(z.string()), z.record(z.string(), bumpTypeSchema.or(z.null()))])
+    .union([
+      z.array(z.string()),
+      z.record(z.string(), z.union([bumpTypeSchema, z.null(), changelogPackageConfigSchema])),
+    ])
     .optional(),
 });
 
@@ -44,7 +57,7 @@ export async function readChangelogEntries(context: TegamiContext): Promise<Chan
     files.map(async (file) => {
       const filePath = join(dir, file);
       const content = await readFile(filePath, "utf8");
-      return parseChangelogFile(filePath, content);
+      return parseChangelogFile(basename(filePath), content);
     }),
   );
 
@@ -52,21 +65,20 @@ export async function readChangelogEntries(context: TegamiContext): Promise<Chan
 }
 
 /** Parse one changelog markdown file into release entries. */
-export function parseChangelogFile(file: string, content: string): ChangelogEntry | undefined {
+export function parseChangelogFile(filename: string, content: string): ChangelogEntry | undefined {
   const parsed = frontmatter(content);
-  const data = changelogFrontmatterSchema.parse(parsed.data);
-  if (!data.packages) return;
+  const { success, data } = changelogFrontmatterSchema.safeParse(parsed.data);
+  if (!success || !data.packages) return;
 
   const tree = fromMarkdown(parsed.content);
-  let bumpType: BumpType | undefined;
-  const packages = new Map<string, BumpType>();
+  let headingBump: BumpType | undefined;
+  const packages = new Map<string, ChnagelogPackageConfig>();
   const sections: ChangelogEntry["sections"] = [];
-  const filename = basename(file);
 
   for (const section of getHeadingSections(tree)) {
     const sectionBumpType = headingToBump(section.heading.depth);
     if (sectionBumpType) {
-      bumpType = bumpType ? maxBump(bumpType, sectionBumpType) : sectionBumpType;
+      headingBump = headingBump ? maxBump(headingBump, sectionBumpType) : sectionBumpType;
     }
 
     sections.push({
@@ -76,25 +88,63 @@ export function parseChangelogFile(file: string, content: string): ChangelogEntr
     });
   }
 
-  // no sections & no bumps
-  if (!bumpType) return;
+  if (sections.length === 0) return;
 
   if (Array.isArray(data.packages)) {
+    if (!headingBump) return;
     for (const pkg of data.packages) {
-      packages.set(pkg, bumpType);
+      packages.set(pkg, { type: headingBump });
     }
   } else {
     for (const [k, v] of Object.entries(data.packages)) {
-      packages.set(k, v ?? bumpType);
+      let config: z.output<typeof changelogPackageConfigSchema>;
+      if (typeof v === "string") config = { type: v };
+      else if (v === null) config = { type: headingBump };
+      else config = v;
+
+      if (config.type || config.replay?.length) {
+        packages.set(k, config);
+      }
     }
   }
 
-  return {
+  if (packages.size === 0) return;
+  const entry: ChangelogEntry & {
+    _raw_body: string;
+  } = {
     id: filename,
     filename,
     subject: data.subject,
     packages,
     sections,
+    _raw_body: parsed.content,
+    getRawContent() {
+      const frontmatterData: z.input<typeof changelogFrontmatterSchema> = {
+        subject: this.subject,
+        packages: Object.fromEntries(this.packages.entries()),
+      };
+      return ["---", dump(frontmatterData).trim(), "---", "", entry._raw_body.trim(), ""].join(
+        "\n",
+      );
+    },
+  };
+
+  return entry;
+}
+
+export interface ParsedReplayCondition {
+  name: string;
+  version: string;
+}
+
+/** Parse `name@version` replay conditions. Scoped names use the last `@`. */
+export function parseReplayCondition(condition: string): ParsedReplayCondition | null {
+  const idx = condition.lastIndexOf("@");
+  if (idx <= 0) return null;
+
+  return {
+    name: condition.slice(0, idx),
+    version: condition.slice(idx + 1),
   };
 }
 
