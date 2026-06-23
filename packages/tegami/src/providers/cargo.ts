@@ -39,8 +39,8 @@ export class CargoPackage extends WorkspacePackage {
     return stringValue(this.packageInfo.version) ?? this.workspaceVersion ?? "0.0.0";
   }
 
-  onPlan(context: TegamiContext) {
-    const defaults = super.onPlan(context);
+  initPlan() {
+    const defaults = super.initPlan();
     defaults.publish ??= this.packageInfo.publish !== false;
     return defaults;
   }

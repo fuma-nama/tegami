@@ -56,7 +56,6 @@ describe("draft publish plans", () => {
           "npm": {
             "distTag": "alpha",
           },
-          "prerelease": undefined,
           "publish": true,
           "type": "minor",
         },
@@ -73,8 +72,6 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md",
           ],
-          "npm": undefined,
-          "prerelease": undefined,
           "publish": true,
           "type": "major",
         },

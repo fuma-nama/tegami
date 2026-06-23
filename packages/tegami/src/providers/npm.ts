@@ -47,8 +47,8 @@ export class NpmPackage extends WorkspacePackage {
     );
   }
 
-  onPlan(context: TegamiContext) {
-    const defaults = super.onPlan(context);
+  initPlan() {
+    const defaults = super.initPlan();
     defaults.publish ??= this.manifest.private !== true;
 
     if (this.manifest.publishConfig?.tag) {

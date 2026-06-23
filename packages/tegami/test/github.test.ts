@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { DraftPlan } from "../src/plans/draft";
 import { github } from "../src/plugins/github";
-import type { TegamiContext } from "../src/context";
 import type { TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 
@@ -684,11 +683,10 @@ class TestPackage extends WorkspacePackage {
     this.#version = version;
   }
 
-  onPlan(context: TegamiContext) {
-    return {
-      ...super.onPlan(context),
-      publish: true,
-    };
+  initPlan() {
+    const defaults = super.initPlan();
+    defaults.publish = true;
+    return defaults;
   }
 
   async write(): Promise<void> {}

@@ -48,25 +48,60 @@ export class DraftPlan {
     return this.packages.get(id);
   }
 
-  bumpPackage(pkg: WorkspacePackage, { type, reason }: { type: BumpType; reason?: string }) {
+  bumpPackage(
+    pkg: WorkspacePackage,
+    { type, prerelease, reason }: { type?: BumpType; prerelease?: string; reason?: string },
+  ) {
+    return this.dispatchPackage(pkg, (plan) => {
+      if (type) {
+        plan.type = plan.type ? maxBump(plan.type, type) : type;
+      }
+      if (prerelease) {
+        plan.prerelease = prerelease;
+      }
+      if (reason) {
+        plan.bumpReasons ??= new Set();
+        plan.bumpReasons.add(reason);
+      }
+    });
+  }
+
+  dispatchPackage(
+    pkg: WorkspacePackage,
+    dispatch: (plan: PackagePlan) => void,
+    onUpdate?: (plan: PackagePlan) => void,
+  ) {
     let plan = this.packages.get(pkg.id);
     if (!plan) {
-      plan = this.initPackagePlan(pkg);
+      plan = pkg.initPlan();
       this.packages.set(pkg.id, plan);
-    }
-    const prevVersion = plan.bumpVersion(pkg);
-    plan.type = plan.type ? maxBump(plan.type, type) : type;
-    if (reason) {
-      plan.bumpReasons ??= new Set();
-      plan.bumpReasons.add(reason);
+      // assign script-level configs
+      this.dispatchPackage(
+        pkg,
+        (plan1) => {
+          const group = this.context.graph.getPackageGroup(pkg.id);
+          if (group?.options.prerelease) {
+            plan1.prerelease = group.options.prerelease;
+          }
+
+          pkg.configurePlan(plan1);
+        },
+        (plan1) => {
+          const reasons = (plan1.bumpReasons ??= new Set());
+          reasons.add("align with script-level configs");
+        },
+      );
     }
 
+    const prevVersion = plan.bumpVersion(pkg);
+    dispatch(plan);
     if (prevVersion !== plan.bumpVersion(pkg)) {
+      onUpdate?.(plan);
+
       for (const policy of this.policies) {
         policy.onUpdate?.call(this, { plan, pkg });
       }
     }
-
     return plan;
   }
 
@@ -105,17 +140,6 @@ export class DraftPlan {
 
   deleteChangelog(id: string): boolean {
     return this.changelogs.delete(id);
-  }
-
-  private initPackagePlan(pkg: WorkspacePackage) {
-    const context = this.context;
-    const plan = pkg.onPlan(context);
-
-    const group = context.graph.getPackageGroup(pkg.id);
-    // apply group configs
-    if (group) plan.prerelease ??= group.options.prerelease;
-
-    return plan;
   }
 
   /** Apply the publish plan: update package versions, write the plan file, and consume changelog files. */
@@ -171,10 +195,9 @@ export class DraftPlan {
       packageId: pkg.id,
       packageName: pkg.name,
       version: pkg.version,
-      npm: plan.npm,
       plan,
       changelogs: plan.changelogs,
-      _draft: this,
+      unstable_draft: this,
     });
 
     const path = join(pkg.path, "CHANGELOG.md");
