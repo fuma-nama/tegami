@@ -4,12 +4,18 @@ import type { TegamiContext } from "../context";
 import { simpleGenerator } from "../generators/simple";
 import { BumpType, maxBump } from "../utils/semver";
 import type { WorkspacePackage } from "../graph";
-import type { ChangelogEntry } from "../changelog/parse";
+import {
+  parseReplayCondition,
+  type ParsedReplayCondition,
+  type ChangelogEntry,
+} from "../changelog/parse";
 import { createPlanStore, readPlanStore } from "./store";
 import type { Awaitable } from "../types";
 import { handlePluginError } from "../utils/error";
 import { groupPolicy } from "./policy";
 import { publishPlanStatus, assertPublishPlanFinished } from "./checks";
+import type { ChangelogPackageConfig } from "../changelog/shared";
+import * as semver from "semver";
 
 export interface PackagePlan {
   type?: BumpType;
@@ -49,25 +55,56 @@ export class DraftPlan {
   }
 
   bumpPackage(pkg: WorkspacePackage, { type, reason }: { type: BumpType; reason?: string }) {
-    let plan = this.packages.get(pkg.id);
-    if (!plan) {
-      plan = this.initPackagePlan(pkg);
-      this.packages.set(pkg.id, plan);
-    }
-    const prevVersion = plan.bumpVersion(pkg);
-    plan.type = plan.type ? maxBump(plan.type, type) : type;
-    if (reason) {
-      plan.bumpReasons ??= new Set();
-      plan.bumpReasons.add(reason);
-    }
+    return this.dispatchPackage(pkg, (plan) => {
+      plan.type = plan.type ? maxBump(plan.type, type) : type;
 
+      if (reason) {
+        plan.bumpReasons ??= new Set();
+        plan.bumpReasons.add(reason);
+      }
+    });
+  }
+
+  dispatchPackage(
+    pkg: WorkspacePackage,
+    dispatch: (plan: PackagePlan) => void,
+    onUpdate?: (plan: PackagePlan) => void,
+  ): PackagePlan {
+    const plan = this.getOrInitPackage(pkg);
+    const prevVersion = plan.bumpVersion(pkg);
+    dispatch(plan);
     if (prevVersion !== plan.bumpVersion(pkg)) {
+      onUpdate?.(plan);
+
       for (const policy of this.policies) {
         policy.onUpdate?.call(this, { plan, pkg });
       }
     }
-
     return plan;
+  }
+
+  private getOrInitPackage(pkg: WorkspacePackage): PackagePlan {
+    const existing = this.packages.get(pkg.id);
+    if (existing) return existing;
+
+    this.packages.set(pkg.id, pkg.initPlan());
+
+    // assign script-level configs
+    return this.dispatchPackage(
+      pkg,
+      (plan) => {
+        const group = this.context.graph.getPackageGroup(pkg.id);
+        if (group?.options.prerelease) {
+          plan.prerelease = group.options.prerelease;
+        }
+
+        pkg.configurePlan(plan);
+      },
+      (plan) => {
+        const reasons = (plan.bumpReasons ??= new Set());
+        reasons.add("align with script-level configs");
+      },
+    );
   }
 
   hasPending() {
@@ -92,30 +129,19 @@ export class DraftPlan {
     const { graph } = this.context;
     const groupPackages = new Map<WorkspacePackage, BumpType>();
 
-    for (const [name, bumpType] of entry.packages) {
-      for (const pkg of graph.getByName(name)) groupPackages.set(pkg, bumpType);
+    for (const [name, config] of entry.packages) {
+      if (!config.type) continue;
+      for (const pkg of graph.getByName(name)) groupPackages.set(pkg, config.type);
     }
 
     for (const [pkg, bumpType] of groupPackages) {
       const plan = this.bumpPackage(pkg, { type: bumpType });
-      plan.changelogs ??= [];
-      plan.changelogs.push(entry);
+      attachChangelog(plan, entry);
     }
   }
 
   deleteChangelog(id: string): boolean {
     return this.changelogs.delete(id);
-  }
-
-  private initPackagePlan(pkg: WorkspacePackage) {
-    const context = this.context;
-    const plan = pkg.onPlan(context);
-
-    const group = context.graph.getPackageGroup(pkg.id);
-    // apply group configs
-    if (group) plan.prerelease ??= group.options.prerelease;
-
-    return plan;
   }
 
   /** Apply the publish plan: update package versions, write the plan file, and consume changelog files. */
@@ -124,7 +150,13 @@ export class DraftPlan {
       throw new Error("This draft has already applied a publish plan.");
     }
     await assertPublishPlanFinished(this.context);
+    const { graph } = this.context;
     this.#applied = true;
+
+    const snapshots = new Map<string, { version: string }>();
+    for (const pkg of graph.getPackages()) {
+      snapshots.set(pkg.id, { version: pkg.version });
+    }
 
     for (const plugin of this.context.plugins) {
       await handlePluginError(plugin, "applyPlan", () =>
@@ -132,7 +164,7 @@ export class DraftPlan {
       );
     }
 
-    const { graph } = this.context;
+    const updatedChangelogs = this.applyReplays(snapshots);
     const writes: Awaitable<void>[] = [];
 
     for (const [id, packagePlan] of this.packages) {
@@ -142,7 +174,12 @@ export class DraftPlan {
     }
 
     for (const entry of this.changelogs.values()) {
-      writes.push(rm(path.join(this.context.changelogDir, entry.filename), { force: true }));
+      const updated = updatedChangelogs.get(entry.id);
+      const filePath = path.join(this.context.changelogDir, entry.filename);
+
+      writes.push(
+        updated ? writeFile(filePath, updated.getRawContent()) : rm(filePath, { force: true }),
+      );
     }
 
     await Promise.all(writes);
@@ -163,6 +200,62 @@ export class DraftPlan {
     return !this.#applied;
   }
 
+  /** Attach replaying changelog entries to packages (already bumped), and return the updated changelog entries. */
+  private applyReplays(snapshots: Map<string, { version: string }>): Map<string, ChangelogEntry> {
+    const updated = new Map<string, ChangelogEntry>();
+    const { graph } = this.context;
+
+    const isMatch = (condition: ParsedReplayCondition) => {
+      if (condition.type === "on-exit-prerelease") {
+        return graph.getByName(condition.name).some((pkg) => {
+          const previous = snapshots.get(pkg.id);
+          if (!previous) return false;
+
+          return semver.inc(previous.version, "release") === pkg.version;
+        });
+      }
+
+      return graph.getByName(condition.name).some((pkg) => pkg.version === condition.version);
+    };
+
+    for (const entry of this.changelogs.values()) {
+      const updatedPackages = new Map<string, ChangelogPackageConfig>();
+      const matchedNames = new Set<string>();
+
+      for (const [name, config] of entry.packages) {
+        if (!config.replay || config.replay.length === 0) continue;
+
+        const replay = config.replay.filter((item) => {
+          const condition = parseReplayCondition(item);
+          if (condition && isMatch(condition)) {
+            matchedNames.add(name);
+            return false;
+          }
+
+          return true;
+        });
+
+        if (replay.length === 0) continue;
+        const updatedConfig = { ...config, replay };
+        delete updatedConfig.type;
+        updatedPackages.set(name, updatedConfig);
+      }
+
+      if (updatedPackages.size > 0) {
+        updated.set(entry.id, {
+          ...entry,
+          packages: updatedPackages,
+        });
+      }
+
+      for (const name of matchedNames) {
+        for (const pkg of graph.getByName(name)) attachChangelog(this.getOrInitPackage(pkg), entry);
+      }
+    }
+
+    return updated;
+  }
+
   private async appendChangelog(pkg: WorkspacePackage, plan: PackagePlan): Promise<void> {
     if (!plan.changelogs || plan.changelogs.length === 0) return;
     const { generator = simpleGenerator() } = this.context.options;
@@ -171,10 +264,9 @@ export class DraftPlan {
       packageId: pkg.id,
       packageName: pkg.name,
       version: pkg.version,
-      npm: plan.npm,
       plan,
       changelogs: plan.changelogs,
-      _draft: this,
+      unstable_draft: this,
     });
 
     const path = join(pkg.path, "CHANGELOG.md");
@@ -230,9 +322,21 @@ export async function createDraftPlan(
     if (result) draft = result;
   }
 
+  for (const pkg of context.graph.getPackages()) {
+    // @ts-expect-error -- detect config changes
+    draft.getOrInitPackage(pkg);
+  }
+
   for (const entry of changelogs) {
     draft.addChangelog(entry);
   }
 
   return draft;
+}
+
+function attachChangelog(plan: PackagePlan, entry: ChangelogEntry) {
+  if (plan.changelogs?.some((item) => item.id === entry.id)) return;
+
+  plan.changelogs ??= [];
+  plan.changelogs.push(entry);
 }

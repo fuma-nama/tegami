@@ -4,7 +4,10 @@ import type { DraftPlan, PackagePlan } from "../../src/plans/draft";
 export function getPendingPackageIds(draft: DraftPlan, graph: PackageGraph): string[] {
   return graph
     .getPackages()
-    .filter((pkg) => draft.getPackagePlan(pkg.id)?.type)
+    .filter((pkg) => {
+      const plan = draft.getPackagePlan(pkg.id);
+      return plan && plan.bumpVersion(pkg) !== pkg.version;
+    })
     .map((pkg) => pkg.id);
 }
 

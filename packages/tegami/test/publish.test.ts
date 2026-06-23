@@ -113,14 +113,7 @@ describe("publish plans", () => {
   test("derives package changelogs from top-level plan changelogs", async () => {
     const { cwd, planPath } = await createPublishFixture();
     const plan = await readJson<{
-      changelogs: Record<
-        string,
-        {
-          filename: string;
-          packages: Record<string, "major" | "minor" | "patch">;
-          sections: { depth: number; title: string; content: string }[];
-        }
-      >;
+      changelogs: Record<string, { filename: string; content: string }>;
       packages: Record<
         string,
         {
@@ -131,8 +124,15 @@ describe("publish plans", () => {
     plan.changelogs = {
       "change-1": {
         filename: "change.md",
-        packages: { "@acme/core": "minor" },
-        sections: [{ depth: 2, title: "Add proxy server", content: "Some description." }],
+        content: `---
+packages:
+  "@acme/core": minor
+---
+
+## Add proxy server
+
+Some description.
+`,
       },
     };
     plan.packages["npm:@acme/core"]!.changelogIds = ["change-1"];
@@ -153,9 +153,11 @@ describe("publish plans", () => {
       [
         {
           "filename": "change.md",
-          "id": "change-1",
+          "id": "change.md",
           "packages": {
-            "@acme/core": "minor",
+            "@acme/core": {
+              "type": "minor",
+            },
           },
           "sections": [
             {
@@ -267,25 +269,40 @@ describe("publish plans", () => {
     );
   });
 
-  test("skips publish when pending changelog entries exist", async () => {
+  test("still publishes when only replay changelog files remain", async () => {
     const { cwd, planPath } = await createPublishFixture();
 
     await writeFile(
-      join(cwd, ".tegami/change.md"),
+      join(cwd, ".tegami/replay.md"),
       `---
-packages: ["@acme/core"]
+packages:
+  "@acme/core":
+    replay: ["@acme/core@2.0.0"]
 ---
 
-## Pending change
+## Replay notes
 
-Not versioned yet.
+Included again on 2.0.0.
 `,
     );
 
-    await expect(tegami({ cwd, planPath }).publish()).resolves.toEqual({
-      state: "skipped",
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "view") {
+        return commandResult({
+          exitCode: 1,
+          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
+        });
+      }
+
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
-    expect(exec).not.toHaveBeenCalled();
+
+    const result = await tegami({ cwd, planPath }).publish();
+    expect(result.state).toBe("created");
   });
 
   test("skips publish when no publish plan exists", async () => {
@@ -534,9 +551,25 @@ function createdResult(result: PublishResult) {
 }
 
 function normalizeChangelog(changelog: PackagePublishResult["changelogs"][number]) {
+  const { getRawContent: _, ...rest } = changelog as typeof changelog & {
+    _raw_body?: string;
+    getRawContent?: () => string;
+  };
+  delete (rest as Record<string, unknown>)._raw_body;
+
   return {
-    ...changelog,
-    packages: Object.fromEntries(changelog.packages),
+    id: rest.id,
+    filename: rest.filename,
+    ...(rest.subject ? { subject: rest.subject } : {}),
+    packages: Object.fromEntries(
+      [...rest.packages.entries()].map(([key, config]) => {
+        const value: Record<string, unknown> = {};
+        if (config.type) value.type = config.type;
+        if (config.replay?.length) value.replay = config.replay;
+        return [key, value];
+      }),
+    ),
+    sections: rest.sections,
   };
 }
 

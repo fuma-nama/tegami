@@ -1,3 +1,29 @@
+## tegami@0.1.3
+
+### Hotfix error in GitHub plugin
+
+## tegami@0.1.2
+
+### Fix missing bump for changed prerelease option
+
+Now, all changes to script-level package options (such as `prerelease`) will result in an update event, which ensures dependents are bumped correctly.
+
+### Use preferred package manager for publishing
+
+This ensures the pm-specific protocols like `workspace:` are respected.
+
+### Support `replay` in changelog files
+
+This allows changelog files to be replayed when a certain version released, this is useful if you want to replay changelogs when the first stable version lands, collecting changelogs from previous beta releases.
+
+### Generate `replay` automatically
+
+When creating changelogs via `tegami` command, it will generate `replay` attribute automatically for packages in prerelease.
+
+### Support creating GitHub release eagerly
+
+Without waiting for other packages, published packages will create a GitHub release.
+
 ## tegami@0.1.1
 
 ### Fix error handling

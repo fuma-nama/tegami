@@ -1,9 +1,9 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { PackagePublishResult, PublishResult } from "../src/publish";
+import type { ChangelogEntry } from "../src/changelog/parse";
 import { DraftPlan } from "../src/plans/draft";
 import { github } from "../src/plugins/github";
-import type { TegamiContext } from "../src/context";
 import type { TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 
@@ -60,8 +60,6 @@ describe("github release plugin", () => {
             "Release 1.0.1",
             "--notes",
             "Notes for @acme/core",
-            "--repo",
-            "acme/repo",
             "--prerelease",
           ],
         ],
@@ -98,12 +96,10 @@ describe("github release plugin", () => {
         packages: [
           packageResult({
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["@acme/core", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["@acme/core", { type: "minor" }]]),
                 sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
-              },
+              }),
             ],
           }),
         ],
@@ -150,12 +146,10 @@ describe("github release plugin", () => {
         packages: [
           packageResult({
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["@acme/core", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["@acme/core", { type: "minor" }]]),
                 sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
-              },
+              }),
             ],
           }),
         ],
@@ -193,8 +187,6 @@ describe("github release plugin", () => {
       "@acme/core@1.0.1-beta.0",
       "--notes",
       "Published @acme/core@1.0.1-beta.0.",
-      "--repo",
-      "acme/repo",
       "--prerelease",
     ]);
   });
@@ -210,24 +202,20 @@ describe("github release plugin", () => {
             name: "@acme/core",
             gitTag: "acme@1.0.1",
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["group:acme", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["group:acme", { type: "minor" }]]),
                 sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
-              },
+              }),
             ],
           }),
           packageResult({
             name: "@acme/ui",
             gitTag: "acme@1.0.1",
             changelogs: [
-              {
-                id: "change-1",
-                filename: "change.md",
-                packages: new Map([["group:acme", "minor"]]),
+              testChangelogEntry({
+                packages: new Map([["group:acme", { type: "minor" }]]),
                 sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
-              },
+              }),
             ],
           }),
         ],
@@ -243,8 +231,6 @@ describe("github release plugin", () => {
       "acme@1.0.1",
       "--notes",
       "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
-      "--repo",
-      "acme/repo",
     ]);
   });
 
@@ -280,8 +266,6 @@ describe("github release plugin", () => {
       "Group release acme@1.0.1",
       "--notes",
       "@acme/core, @acme/ui",
-      "--repo",
-      "acme/repo",
     ]);
   });
 });
@@ -413,8 +397,6 @@ describe("github version pull request", () => {
               "open",
               "--json",
               "number",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -441,8 +423,6 @@ describe("github version pull request", () => {
 
         Description.
         ",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -549,8 +529,6 @@ describe("github version pull request", () => {
               "open",
               "--json",
               "number",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -580,8 +558,6 @@ describe("github version pull request", () => {
               "tegami/version-packages",
               "--base",
               "main",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -684,11 +660,10 @@ class TestPackage extends WorkspacePackage {
     this.#version = version;
   }
 
-  onPlan(context: TegamiContext) {
-    return {
-      ...super.onPlan(context),
-      publish: true,
-    };
+  initPlan() {
+    const defaults = super.initPlan();
+    defaults.publish = true;
+    return defaults;
   }
 
   async write(): Promise<void> {}
@@ -696,12 +671,12 @@ class TestPackage extends WorkspacePackage {
 
 function versionDraft(context = publishContext()): DraftPlan {
   const draft = new DraftPlan(context);
-  draft.addChangelog({
-    id: "change-1",
-    filename: "change.md",
-    packages: new Map([["@acme/core", "minor"]]),
-    sections: [{ title: "Add feature", content: "Description.", depth: 2 }],
-  });
+  draft.addChangelog(
+    testChangelogEntry({
+      packages: new Map([["@acme/core", { type: "minor" }]]),
+      sections: [{ title: "Add feature", content: "Description.", depth: 2 }],
+    }),
+  );
   return draft;
 }
 
@@ -740,6 +715,17 @@ function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
     },
     state: "created",
     packages: [],
+    ...overrides,
+  };
+}
+
+function testChangelogEntry(overrides: Partial<ChangelogEntry> = {}): ChangelogEntry {
+  return {
+    id: "change-1",
+    filename: "change.md",
+    packages: new Map(),
+    sections: [],
+    getRawContent: () => "",
     ...overrides,
   };
 }

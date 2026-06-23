@@ -24,9 +24,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
   function resolveGitTag(context: TegamiContext, result: PackagePublishResult): string {
     const { graph } = context;
     const pkg = graph.get(result.id);
-    if (!pkg) return `${result.name}@${result.version}`;
-
-    const group = graph.getPackageGroup(pkg.id);
+    const group = pkg && graph.getPackageGroup(pkg.id);
     if (group?.options.syncGitTag) {
       return `${group.name}@${result.version}`;
     }
@@ -59,11 +57,12 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
         cwd,
         publishOptions: { dryRun = false },
       } = this;
-      if (dryRun || !createTags || result.state !== "created") return result;
+      if (dryRun || !createTags || result.state === "skipped") return result;
 
       const pendingTags = new Set<string>();
 
       for (const pkg of result.packages) {
+        if (pkg.state !== "success") continue;
         pkg.gitTag = resolveGitTag(this, pkg);
         pendingTags.add(pkg.gitTag);
       }

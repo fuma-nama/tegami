@@ -1,5 +1,5 @@
 import type { TegamiContext } from "./context";
-import type { ChangelogEntry } from "./changelog/parse";
+import { parseChangelogFile, type ChangelogEntry } from "./changelog/parse";
 import type { PlanStore } from "./plans/store";
 import { publishPlanStatus } from "./plans/checks";
 import { handlePluginError } from "./utils/error";
@@ -109,6 +109,13 @@ export async function publishFromPlan(
   }
 
   const orderedIds = await resolvePublishTargets(context, store);
+  const parsedChangelogs = new Map<string, ChangelogEntry>();
+
+  for (const [id, entry] of Object.entries(store.changelogs)) {
+    const parsed = parseChangelogFile(entry.filename, entry.content);
+    if (!parsed) continue;
+    parsedChangelogs.set(id, parsed);
+  }
 
   for (const id of orderedIds) {
     const plan = store.packages[id]!;
@@ -117,13 +124,8 @@ export async function publishFromPlan(
     const registryClient = context.getRegistryClient(pkg);
     const changelogs: ChangelogEntry[] = [];
     for (const id of plan.changelogIds ?? []) {
-      const entry = store.changelogs[id];
-      if (entry)
-        changelogs.push({
-          ...entry,
-          packages: new Map(Object.entries(entry.packages)),
-          id,
-        });
+      const entry = parsedChangelogs.get(id);
+      if (entry) changelogs.push(entry);
     }
 
     if (!dryRun) {

@@ -47,8 +47,8 @@ export class NpmPackage extends WorkspacePackage {
     );
   }
 
-  onPlan(context: TegamiContext) {
-    const defaults = super.onPlan(context);
+  initPlan() {
+    const defaults = super.initPlan();
     defaults.publish ??= this.manifest.private !== true;
 
     if (this.manifest.publishConfig?.tag) {
@@ -85,16 +85,15 @@ export class NpmRegistryClient implements RegistryClient {
         const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
         if (registry) args.push("--registry", registry);
 
-        const client = this.client === "pnpm" ? "pnpm" : "npm";
-        const result = await x(client, args, {
+        const result = await x(this.client === "pnpm" ? "pnpm" : "npm", args, {
           nodeOptions: {
             cwd: this.cwd,
           },
         });
         if (result.exitCode === 0) return true;
 
-        const output = commandOutput(result);
-        if (isMissingRegistryEntry(output)) return false;
+        if (isMissingRegistryEntry(result.stderr) || isMissingRegistryEntry(result.stdout))
+          return false;
 
         throw execFailure(
           `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
@@ -113,12 +112,50 @@ export class NpmRegistryClient implements RegistryClient {
     pkg: NpmPackage,
     { packageStore }: { store: PlanStore; packageStore: PackagePlanStore },
   ) {
-    const args = ["publish"];
     const distTag = packageStore.npm?.distTag;
-    if (distTag) args.push("--tag", distTag);
-    const client = this.client === "pnpm" ? "pnpm" : "npm";
 
-    if (client === "pnpm") args.push("--no-git-checks");
+    // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
+    if (this.client === "bun") {
+      const tarball = "pkg.tgz";
+      const packResult = await x("bun", ["pm", "pack", "--filename", tarball], {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+      if (packResult.exitCode !== 0) {
+        throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
+      }
+
+      const publishArgs = ["publish", tarball];
+      if (distTag) publishArgs.push("--tag", distTag);
+
+      const publishResult = await x("npm", publishArgs, {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+      if (publishResult.exitCode !== 0) {
+        throw execFailure(
+          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+          publishResult,
+        );
+      }
+      return;
+    }
+
+    const args = ["publish"];
+    if (distTag) args.push("--tag", distTag);
+
+    let client: AgentName;
+    if (this.client === "pnpm") {
+      client = "pnpm";
+      args.push("--no-git-checks");
+    } else if (this.client === "yarn") {
+      client = "yarn";
+    } else {
+      client = "npm";
+    }
+
     const result = await x(client, args, {
       nodeOptions: {
         cwd: pkg.path,
@@ -131,10 +168,6 @@ export class NpmRegistryClient implements RegistryClient {
       );
     }
   }
-}
-
-function commandOutput(result: Awaited<ReturnType<typeof x>>): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
 }
 
 function isMissingRegistryEntry(output: string): boolean {
@@ -354,8 +387,8 @@ export function npm({
       const result = await detect({
         cwd: this.cwd,
       });
-      if (result?.name === "pnpm") client = "pnpm";
-      else client = "npm";
+
+      client = result?.name ?? "npm";
     },
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));
@@ -430,6 +463,8 @@ export function npm({
           args = ["ci"];
         } else if (client === "yarn") {
           args = ["install", "--immutable"];
+        } else if (client === "bun") {
+          args = ["install", "--frozen-lockfile"];
         } else {
           args = ["install", "--frozen-lockfile"];
         }
@@ -472,12 +507,12 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
     ),
   );
 
-  if (rootManifest) {
+  if (rootManifest?.version) {
     add(new NpmPackage(cwd, rootManifest));
   }
 
   for (const entry of manifests) {
-    if (!entry?.manifest) continue;
+    if (!entry?.manifest.version) continue;
     add(new NpmPackage(entry.path, entry.manifest));
   }
 }

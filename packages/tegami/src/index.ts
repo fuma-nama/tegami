@@ -73,11 +73,6 @@ export function tegami<const Groups extends string = string>(
     },
     async publish(publishOptions = {}) {
       const context = await $context;
-      const changelogs = await getChangelogFiles(context);
-
-      // it implies a new versioning cycle has started
-      if (changelogs.length > 0) return { state: "skipped" };
-
       const parsed = await readPlanStore(context);
       if (!parsed) return { state: "skipped" };
 

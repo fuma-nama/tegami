@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { rm } from "node:fs/promises";
-import { parseChangelogFile } from "../src/changelog/parse";
+import { parseChangelogFile, parseReplayCondition } from "../src/changelog/parse";
 
 const tempDirs: string[] = [];
 
@@ -11,7 +11,7 @@ afterEach(async () => {
 describe("markdown changelog parsing", () => {
   test("parses yaml frontmatter and release headings", () => {
     const entry = parseChangelogFile(
-      "/repo/.tegami/change.md",
+      "change.md",
       `---
 subject: OpenAPI v11
 packages: ["core", "ui"]
@@ -42,8 +42,12 @@ Ignored for release planning.
         "filename": "change.md",
         "id": "change.md",
         "packages": {
-          "core": "major",
-          "ui": "major",
+          "core": {
+            "type": "major",
+          },
+          "ui": {
+            "type": "major",
+          },
         },
         "sections": [
           {
@@ -74,10 +78,10 @@ Ignored for release planning.
     `);
   });
 
-  test("throws when frontmatter has invalid package data", () => {
-    expect(() =>
+  test("returns undefined when frontmatter has invalid package data", () => {
+    expect(
       parseChangelogFile(
-        "/repo/.tegami/change.md",
+        "change.md",
         `---
 packages: core
 ---
@@ -85,21 +89,120 @@ packages: core
 ### Invalid
 `,
       ),
-    ).toThrow();
+    ).toBeUndefined();
   });
 
   test("returns undefined when frontmatter has no packages", () => {
     expect(
-      parseChangelogFile("/repo/.tegami/change.md", "---\r\n---\r\n\r\n### Patch release\r\n"),
+      parseChangelogFile("change.md", "---\r\n---\r\n\r\n### Patch release\r\n"),
     ).toBeUndefined();
+  });
+
+  test("parses replay-only package config without bump headings", () => {
+    const entry = parseChangelogFile(
+      "replay.md",
+      `---
+packages:
+  npm:tegami:
+    replay: [tegami@1.1.0]
+---
+
+## Use preferred package manager
+
+This ensures the pm-specific protocols like \`workspace:\` are respected.
+`,
+    );
+
+    expect(normalizeEntry(entry)).toMatchInlineSnapshot(`
+      {
+        "filename": "replay.md",
+        "id": "replay.md",
+        "packages": {
+          "npm:tegami": {
+            "replay": [
+              "tegami@1.1.0",
+            ],
+          },
+        },
+        "sections": [
+          {
+            "content": "This ensures the pm-specific protocols like \`workspace:\` are respected.",
+            "depth": 2,
+            "title": "Use preferred package manager",
+          },
+        ],
+      }
+    `);
+  });
+
+  test("parses explicit type and replay on the same package", () => {
+    const entry = parseChangelogFile(
+      "replay.md",
+      `---
+packages:
+  npm:tegami:
+    type: patch
+    replay: [tegami@1.1.0]
+---
+
+## Use preferred package manager
+
+Notes.
+`,
+    );
+
+    expect(normalizeEntry(entry)?.packages).toEqual({
+      "npm:tegami": {
+        type: "patch",
+        replay: ["tegami@1.1.0"],
+      },
+    });
+  });
+});
+
+describe("parseReplayCondition", () => {
+  test("parses package@version replay conditions", () => {
+    expect(parseReplayCondition("tegami@1.1.0")).toEqual({
+      type: "on-version",
+      name: "tegami",
+      version: "1.1.0",
+    });
+    expect(parseReplayCondition("@acme/core@2.0.0")).toEqual({
+      type: "on-version",
+      name: "@acme/core",
+      version: "2.0.0",
+    });
+  });
+
+  test("parses exit prerelease replay conditions", () => {
+    expect(parseReplayCondition("exit prerelease: tegami")).toEqual({
+      type: "on-exit-prerelease",
+      name: "tegami",
+    });
+  });
+
+  test("rejects malformed replay conditions", () => {
+    expect(parseReplayCondition("tegami")).toBeNull();
+    expect(parseReplayCondition("@1.0.0")).toBeNull();
   });
 });
 
 function normalizeEntry(entry: ReturnType<typeof parseChangelogFile>) {
   if (!entry) return entry;
 
-  return {
-    ...entry,
-    packages: Object.fromEntries(entry.packages),
+  const normalized: Record<string, unknown> = {
+    id: entry.id,
+    filename: entry.filename,
+    packages: Object.fromEntries(
+      [...entry.packages.entries()].map(([key, config]) => {
+        const value: Record<string, unknown> = {};
+        if (config.type) value.type = config.type;
+        if (config.replay?.length) value.replay = config.replay;
+        return [key, value];
+      }),
+    ),
+    sections: entry.sections,
   };
+  if (entry.subject) normalized.subject = entry.subject;
+  return normalized;
 }

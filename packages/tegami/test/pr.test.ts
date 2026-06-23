@@ -9,6 +9,7 @@ import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { createDraftPlan } from "../src/plans/draft";
 import { parseChangelogFile } from "../src/changelog/parse";
 import type { TegamiContext } from "../src/context";
+import type { PackageOptions } from "../src/types";
 import { buildPrPreview, postPrComment } from "../src/cli/pr";
 import { formatRunScriptCommand } from "../src/utils/package-manager";
 
@@ -99,6 +100,40 @@ packages:
     expect(body).toContain("#### Changelogs in this PR");
     expect(body).toContain("- `2026-06-19-core.md` — Support auto changelogs");
     expect(body).not.toContain("2026-06-19-ui.md");
+  });
+
+  test("includes prerelease-only version changes in release preview", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pr-prerelease-"));
+    tempDirs.push(cwd);
+    process.env.GITHUB_REPOSITORY = "acme/repo";
+    process.env.GITHUB_EVENT_PATH = join(cwd, "event.json");
+    await writeFile(
+      process.env.GITHUB_EVENT_PATH,
+      JSON.stringify({
+        pull_request: {
+          number: 42,
+          head: {
+            ref: "main",
+            sha: "head-sha",
+            repo: { full_name: "acme/repo" },
+          },
+          base: { sha: "base-sha" },
+        },
+      }),
+    );
+
+    exec.mockReturnValueOnce(commandResult());
+
+    const context = createTestContext(
+      [testPackage("tegami", "1.1.0-alpha.2", { prerelease: "alpha" })],
+      cwd,
+    );
+    const draft = await createDraftPlan([], context);
+
+    expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
+    expect(await buildPrPreview(context, draft)).toContain(
+      "| `tegami` | — | `1.1.0-alpha.2` → `1.1.0-alpha.3` (no publish) |",
+    );
   });
 
   test("uses fork head repository for create changelog links", async () => {
@@ -549,8 +584,8 @@ function createTestContext(packages: WorkspacePackage[], cwd?: string): TegamiCo
   };
 }
 
-function testPackage(name: string, version: string): WorkspacePackage {
-  return new PrTestPackage(name, version);
+function testPackage(name: string, version: string, options?: PackageOptions): WorkspacePackage {
+  return new PrTestPackage(name, version, options);
 }
 
 class PrTestPackage extends WorkspacePackage {
@@ -559,8 +594,10 @@ class PrTestPackage extends WorkspacePackage {
   constructor(
     readonly name: string,
     readonly version: string,
+    options?: PackageOptions,
   ) {
     super();
+    if (options) this.setPackageOptions(options);
   }
 
   get path() {

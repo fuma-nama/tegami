@@ -50,15 +50,20 @@ export function bumpDepth(type: BumpType) {
 export function bumpVersion(version: string, type?: BumpType, prerelease?: string): string {
   let next: string | null = version;
 
-  if (prerelease) {
-    const parsed = parse(version);
-    if (parsed?.prerelease[0] === prerelease) {
-      next = inc(version, "prerelease", prerelease);
+  const parsed = parse(version);
+
+  if (!parsed) {
+    next = null;
+  } else if (prerelease) {
+    if (parsed.prerelease[0] === prerelease) {
+      next = inc(parsed, "prerelease", prerelease);
     } else if (type) {
-      next = inc(version, PRE[type], prerelease);
+      next = inc(parsed, PRE[type], prerelease);
     }
   } else if (type) {
-    next = inc(version, type);
+    next = inc(parsed, type);
+  } else if (parsed.prerelease.length > 0) {
+    next = inc(parsed, "release");
   }
 
   if (!next) {

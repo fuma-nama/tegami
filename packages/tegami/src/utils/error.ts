@@ -1,6 +1,12 @@
 import type { Result } from "tinyexec";
 import type { Awaitable, TegamiPlugin } from "../types";
 
+export class CancelledError extends Error {
+  constructor() {
+    super("Cancelled.");
+  }
+}
+
 export function execFailure(
   context: string,
   result: Pick<Awaited<Result>, "exitCode" | "stdout" | "stderr">,

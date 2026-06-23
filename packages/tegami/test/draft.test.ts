@@ -56,7 +56,6 @@ describe("draft publish plans", () => {
           "npm": {
             "distTag": "alpha",
           },
-          "prerelease": undefined,
           "publish": true,
           "type": "minor",
         },
@@ -73,8 +72,6 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md",
           ],
-          "npm": undefined,
-          "prerelease": undefined,
           "publish": true,
           "type": "major",
         },
@@ -128,18 +125,19 @@ describe("draft publish plans", () => {
       {
         "changelogs": {
           "change.md": {
+            "content": "---
+      packages:
+        '@acme/core':
+          type: minor
+        '@acme/ui':
+          type: minor
+      ---
+
+      ## Add shared API
+
+      Useful release note.
+      ",
             "filename": "change.md",
-            "packages": {
-              "@acme/core": "minor",
-              "@acme/ui": "minor",
-            },
-            "sections": [
-              {
-                "content": "Useful release note.",
-                "depth": 2,
-                "title": "Add shared API",
-              },
-            ],
           },
         },
         "packages": {
@@ -170,7 +168,7 @@ describe("draft publish plans", () => {
     `);
   });
 
-  test("omits packages without pending changelogs from the draft", async () => {
+  test("omits packages without pending version changes from the draft", async () => {
     const cwd = await createWorkspace({
       changelog: false,
     });
@@ -181,6 +179,53 @@ describe("draft publish plans", () => {
 
     expect(draft.hasPending()).toBe(false);
     expect(getPendingPackageIds(draft, (await paper._internal.context()).graph)).toEqual([]);
+  });
+
+  test("versions packages when script-level prerelease config changes without a bump type", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-prerelease-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/tegami"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/tegami/package.json"), {
+      name: "tegami",
+      version: "1.1.0-alpha.2",
+    });
+
+    const paper = tegami({
+      cwd,
+      packages: {
+        tegami: { prerelease: "alpha" },
+      },
+    });
+    const context = await paper._internal.context();
+    const draft = await paper.draft();
+    const pkg = context.graph.get("npm:tegami")!;
+
+    expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
+    expect(draft.hasPending()).toBe(true);
+    expect(getPendingPackageIds(draft, context.graph)).toEqual(["npm:tegami"]);
+    expect(draft.getPackagePlan("npm:tegami")?.bumpVersion(pkg)).toBe("1.1.0-alpha.3");
+
+    await draft.applyPlan();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.1.0-alpha.3",
+    });
+
+    const rawPlan = await readJson<{ packages: Record<string, { type?: string }> }>(
+      join(cwd, ".tegami/publish-plan"),
+    );
+
+    expect(Object.keys(rawPlan.packages)).toEqual(["npm:tegami"]);
+    expect(rawPlan.packages["npm:tegami"]?.type).toBeUndefined();
   });
 
   test("treats file: dependencies outside the workspace as external", async () => {
@@ -227,7 +272,7 @@ Core only.
     const draft = await tegami({ cwd }).draft();
 
     expect(draft.getPackagePlan("npm:@acme/core")?.type).toBe("minor");
-    expect(draft.getPackagePlan("npm:@acme/ui")).toBeUndefined();
+    expect(draft.getPackagePlan("npm:@acme/ui")?.type).toBeUndefined();
 
     await draft.applyPlan();
 
@@ -372,6 +417,94 @@ Core only.
     })._internal.graph();
 
     expect(graphByPattern.getPackages()).toEqual([]);
+  });
+
+  test("keeps replay changelog files until all replay conditions are consumed", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-replay-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/tegami"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/tegami/package.json"), {
+      name: "tegami",
+      version: "1.0.0",
+    });
+    await writeFile(
+      join(cwd, ".tegami/replay.md"),
+      `---
+packages:
+  npm:tegami:
+    type: patch
+    replay: [tegami@1.1.0]
+---
+
+## Use preferred package manager
+
+This ensures the pm-specific protocols are respected.
+`,
+    );
+
+    const paper = tegami({ cwd });
+    const draft = await paper.draft();
+
+    expect(draft.getPackagePlan("npm:tegami")?.type).toBe("patch");
+    await draft.applyPlan();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.0.1",
+    });
+    expect(await readFile(join(cwd, ".tegami/replay.md"), "utf8")).toMatchInlineSnapshot(`
+      "---
+      packages:
+        npm:tegami:
+          replay:
+            - tegami@1.1.0
+      ---
+
+      ## Use preferred package manager
+
+      This ensures the pm-specific protocols are respected.
+      "
+    `);
+    expect(await readFile(join(cwd, "packages/tegami/CHANGELOG.md"), "utf8")).toContain(
+      "## Use preferred package manager",
+    );
+
+    await writeFile(
+      join(cwd, ".tegami/minor.md"),
+      `---
+packages: ["tegami"]
+---
+
+## Minor release
+
+More features.
+`,
+    );
+    await rm(join(cwd, ".tegami/publish-plan"), { force: true });
+
+    const replayDraft = await paper.draft();
+    expect(replayDraft.getPackagePlan("npm:tegami")?.type).toBe("minor");
+    await replayDraft.applyPlan();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.1.0",
+    });
+    await expect(readFile(join(cwd, ".tegami/replay.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    const changelog = await readFile(join(cwd, "packages/tegami/CHANGELOG.md"), "utf8");
+    expect(changelog.match(/## Use preferred package manager/g)?.length).toBe(2);
+    expect(changelog).toContain("## Minor release");
   });
 
   test("discovers packages with nested workspace globs", async () => {

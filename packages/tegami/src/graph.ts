@@ -1,4 +1,3 @@
-import type { TegamiContext } from "./context";
 import type { PackagePlan } from "./plans/draft";
 import type { GroupOptions, PackageOptions } from "./types";
 import { bumpVersion } from "./utils/semver";
@@ -25,17 +24,25 @@ export abstract class WorkspacePackage {
     this.opts = options;
   }
 
-  /** create an empty draft plan. */
-  onPlan(_context: TegamiContext): PackagePlan {
-    const { publish, prerelease, npm } = this.opts;
+  /** create the initial draft plan. */
+  initPlan(): PackagePlan {
     return {
-      publish,
-      prerelease,
-      npm: npm ? { distTag: npm.distTag } : undefined,
       bumpVersion(pkg) {
         return bumpVersion(pkg.version, this.type, this.prerelease);
       },
     };
+  }
+
+  /** configure an initial draft plan to match script-level configs. */
+  configurePlan(plan: PackagePlan): void {
+    const { publish, prerelease, npm } = this.opts;
+
+    if (publish !== undefined) plan.publish = publish;
+    if (prerelease !== undefined) plan.prerelease = prerelease;
+    if (npm?.distTag) {
+      plan.npm ??= {};
+      plan.npm.distTag = npm.distTag;
+    }
   }
 }
 

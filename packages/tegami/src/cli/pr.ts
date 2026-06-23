@@ -69,11 +69,11 @@ export async function buildPrPreview(
 
   for (const pkg of context.graph.getPackages()) {
     const plan = draft.getPackagePlan(pkg.id);
-    if (!plan?.type) continue;
+    if (!plan || plan.bumpVersion(pkg) === pkg.version) continue;
 
     pendingPackages.push({
       name: pkg.name,
-      type: plan.type,
+      type: plan.type ?? "—",
       from: pkg.version,
       to: plan.bumpVersion(pkg),
       distTag: plan.npm?.distTag,
