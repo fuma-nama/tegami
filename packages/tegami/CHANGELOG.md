@@ -1,3 +1,7 @@
+## tegami@0.1.3
+
+### Hotfix error in GitHub plugin
+
 ## tegami@0.1.2
 
 ### Fix missing bump for changed prerelease option
