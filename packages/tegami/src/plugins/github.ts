@@ -131,7 +131,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       release.title ?? defaultTitle(pkg),
       release.notes ?? (await defaultNotes(context, pkg)),
       release.prerelease ?? getPrerelease(pkg.version) !== null,
-      context.github?.token,
+      context.github?.repo,
     );
   }
 
@@ -151,7 +151,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       release.title ?? defaultGroupedTitle(packages),
       release.notes ?? (await defaultGroupedNotes(context, packages)),
       release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
-      context.github?.token,
+      context.github?.repo,
     );
   }
 
@@ -229,10 +229,8 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       cli: {
         async init() {
           if (!isCI()) return;
-
-          const repository = this.github?.repo;
-          const token = this.github?.token;
-          if (!token || !repository) return;
+          const { repo, token } = this.github ?? {};
+          if (!token || !repo) return;
 
           const result = await x(
             "git",
@@ -240,7 +238,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
               "remote",
               "set-url",
               "origin",
-              `https://x-access-token:${token}@github.com/${repository}.git`,
+              `https://x-access-token:${token}@github.com/${repo}.git`,
             ],
             { nodeOptions: { cwd: this.cwd } },
           );
