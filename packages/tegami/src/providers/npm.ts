@@ -388,20 +388,7 @@ export function npm({
         cwd: this.cwd,
       });
 
-      switch (result?.name) {
-        case "pnpm":
-          client = "pnpm";
-          break;
-        case "yarn":
-          client = "yarn";
-          break;
-        case "bun":
-          client = "bun";
-          break;
-        default:
-          client = "npm";
-          break;
-      }
+      client = result?.name ?? "npm";
     },
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));

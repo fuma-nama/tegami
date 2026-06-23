@@ -171,6 +171,7 @@ describe("git utils", () => {
       pluginContext(),
       publishResult({
         state: "failed",
+        packages: [packageResult({ state: "failed" })],
       }),
     );
 

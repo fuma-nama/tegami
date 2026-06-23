@@ -181,6 +181,53 @@ describe("draft publish plans", () => {
     expect(getPendingPackageIds(draft, (await paper._internal.context()).graph)).toEqual([]);
   });
 
+  test("versions packages when script-level prerelease config changes without a bump type", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-prerelease-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/tegami"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/tegami/package.json"), {
+      name: "tegami",
+      version: "1.1.0-alpha.2",
+    });
+
+    const paper = tegami({
+      cwd,
+      packages: {
+        tegami: { prerelease: "alpha" },
+      },
+    });
+    const context = await paper._internal.context();
+    const draft = await paper.draft();
+    const pkg = context.graph.get("npm:tegami")!;
+
+    expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
+    expect(draft.hasPending()).toBe(true);
+    expect(getPendingPackageIds(draft, context.graph)).toEqual(["npm:tegami"]);
+    expect(draft.getPackagePlan("npm:tegami")?.bumpVersion(pkg)).toBe("1.1.0-alpha.3");
+
+    await draft.applyPlan();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.1.0-alpha.3",
+    });
+
+    const rawPlan = await readJson<{ packages: Record<string, { type?: string }> }>(
+      join(cwd, ".tegami/publish-plan"),
+    );
+
+    expect(Object.keys(rawPlan.packages)).toEqual(["npm:tegami"]);
+    expect(rawPlan.packages["npm:tegami"]?.type).toBeUndefined();
+  });
+
   test("treats file: dependencies outside the workspace as external", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-file-"));
     tempDirs.push(cwd);

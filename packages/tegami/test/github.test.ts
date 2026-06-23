@@ -60,8 +60,6 @@ describe("github release plugin", () => {
             "Release 1.0.1",
             "--notes",
             "Notes for @acme/core",
-            "--repo",
-            "acme/repo",
             "--prerelease",
           ],
         ],
@@ -166,8 +164,6 @@ describe("github release plugin", () => {
       "@acme/core@1.0.1",
       "--notes",
       "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
-      "--repo",
-      "acme/repo",
     ]);
   });
 
@@ -189,8 +185,6 @@ describe("github release plugin", () => {
       "@acme/core@1.0.1-beta.0",
       "--notes",
       "Published @acme/core@1.0.1-beta.0.",
-      "--repo",
-      "acme/repo",
       "--prerelease",
     ]);
   });
@@ -235,8 +229,6 @@ describe("github release plugin", () => {
       "acme@1.0.1",
       "--notes",
       "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
-      "--repo",
-      "acme/repo",
     ]);
   });
 
@@ -272,8 +264,6 @@ describe("github release plugin", () => {
       "Group release acme@1.0.1",
       "--notes",
       "@acme/core, @acme/ui",
-      "--repo",
-      "acme/repo",
     ]);
   });
 });
@@ -405,8 +395,6 @@ describe("github version pull request", () => {
               "open",
               "--json",
               "number",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -433,8 +421,6 @@ describe("github version pull request", () => {
 
         Description.
         ",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -541,8 +527,6 @@ describe("github version pull request", () => {
               "open",
               "--json",
               "number",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,
@@ -572,8 +556,6 @@ describe("github version pull request", () => {
               "tegami/version-packages",
               "--base",
               "main",
-              "--repo",
-              "acme/repo",
             ],
             "command": "gh",
             "cwd": undefined,

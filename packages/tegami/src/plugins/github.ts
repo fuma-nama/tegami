@@ -54,6 +54,12 @@ export interface GitHubPluginOptions extends GitPluginOptions {
   repo?: string;
   /** Optional GitHub token for Git & GitHub operations. */
   token?: string;
+  /**
+   * Create GitHub release immediately after successful publish, without waiting for others.
+   *
+   * @default false
+   */
+  eagerRelease?: boolean;
 
   /** Override release details for a single package, return `false` to skip. */
   onCreateRelease?: (
@@ -83,16 +89,25 @@ export interface GitHubPluginOptions extends GitPluginOptions {
 
 /** Create GitHub releases for successfully published packages after the whole plan succeeds. */
 export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
+  const {
+    eagerRelease = false,
+    onCreateGroupedRelease,
+    onCreateRelease,
+    onCreateVersionPullRequest,
+    cli: cliOptions = {},
+  } = options;
+
   async function runGithubRelease(
     gitTag: string,
     title: string,
     notes: string,
     prerelease: boolean,
+    repo: string | undefined,
   ): Promise<void> {
     const args: string[] = ["release", "create", gitTag, "--title", title, "--notes", notes];
 
-    if (options.repo) {
-      args.push("--repo", options.repo);
+    if (repo) {
+      args.push("--repo", repo);
     }
 
     if (prerelease) {
@@ -106,9 +121,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
   }
 
   async function createRelease(context: TegamiContext, pkg: PackagePublishResult): Promise<void> {
-    if (!pkg.gitTag) return;
+    if (!pkg.gitTag || pkg.state === "failed") return;
 
-    const release = (await options.onCreateRelease?.call(context, pkg)) ?? {};
+    const release = (await onCreateRelease?.call(context, pkg)) ?? {};
     if (release === false) return;
 
     await runGithubRelease(
@@ -116,6 +131,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       release.title ?? defaultTitle(pkg),
       release.notes ?? (await defaultNotes(context, pkg)),
       release.prerelease ?? getPrerelease(pkg.version) !== null,
+      context.github?.token,
     );
   }
 
@@ -125,8 +141,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
   ): Promise<void> {
     const primary = packages[0];
     if (!primary?.gitTag) return;
+    if (packages.some((member) => member.state === "failed")) return;
 
-    const release = (await options.onCreateGroupedRelease?.call(context, packages)) ?? {};
+    const release = (await onCreateGroupedRelease?.call(context, packages)) ?? {};
     if (release === false) return;
 
     await runGithubRelease(
@@ -134,11 +151,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       release.title ?? defaultGroupedTitle(packages),
       release.notes ?? (await defaultGroupedNotes(context, packages)),
       release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
+      context.github?.token,
     );
   }
 
   function resolvePROptions(): [false] | [true, VersionPullRequestOptions] {
-    const setting = options.cli?.versionPr ?? isCI();
+    const setting = cliOptions.versionPr ?? isCI();
 
     if (setting === false) {
       return [false];
@@ -203,11 +221,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     {
       name: "github",
       init() {
-        const repository = options.repo ?? process.env.GITHUB_REPOSITORY;
-        const token = options.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
         this.github = {
-          repo: repository,
-          token,
+          repo: options.repo ?? process.env.GITHUB_REPOSITORY,
+          token: options.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
         };
       },
       cli: {
@@ -240,11 +256,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         async publishPlanApplied(draft) {
           const { cwd } = this;
           const [enabled, config] = resolvePROptions();
+          const repo = this.github?.repo;
           if (!enabled || !(await hasGitChanges(cwd))) return;
 
           const { branch = "tegami/version-packages", base = "main" } = config;
 
-          const basePR = await options.onCreateVersionPullRequest?.call(this, draft);
+          const basePR = await onCreateVersionPullRequest?.call(this, draft);
           if (basePR === false) return;
           const pr: Required<VersionPullRequest> = {
             title: basePR?.title ?? "Version Packages",
@@ -277,11 +294,11 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             );
           }
 
-          const openPr = await findOpenPullRequest(branch, options.repo);
+          const openPr = await findOpenPullRequest(branch, repo);
 
           if (openPr !== undefined) {
             const editArgs = ["pr", "edit", String(openPr), "--title", pr.title, "--body", pr.body];
-            if (options.repo) editArgs.push("--repo", options.repo);
+            if (repo) editArgs.push("--repo", repo);
 
             const editResult = await x("gh", editArgs);
             if (editResult.exitCode !== 0) {
@@ -302,7 +319,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             "--base",
             base,
           ];
-          if (options.repo) args.push("--repo", options.repo);
+          if (repo) args.push("--repo", repo);
 
           const prResult = await x("gh", args);
           if (prResult.exitCode !== 0) {
@@ -311,7 +328,8 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         },
       },
       async afterPublishAll(result) {
-        if (result.state !== "created") return;
+        if (!eagerRelease && result.state === "failed") return;
+        if (result.state === "skipped") return;
 
         for (const packages of groupPackagesByGitTag(result.packages).values()) {
           if (packages.length > 1) {
