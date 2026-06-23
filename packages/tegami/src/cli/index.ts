@@ -173,9 +173,11 @@ async function versionPackages(
   const planEntries: string[] = [];
   for (const pkg of context.graph.getPackages()) {
     const plan = draft.getPackagePlan(pkg.id);
-    if (!plan?.type) continue;
+    if (!plan || plan.bumpVersion(pkg) === pkg.version) continue;
 
-    planEntries.push(`${pkg.id}: ${plan.type} (${plan.changelogs?.length ?? 0} changelogs)`);
+    planEntries.push(
+      `${pkg.id}: ${pkg.version} → ${plan.bumpVersion(pkg)} (${plan.changelogs?.length ?? 0} changelogs)`,
+    );
     if (plan.bumpReasons)
       for (const reason of plan.bumpReasons) {
         planEntries.push(`  - ${reason}`);
