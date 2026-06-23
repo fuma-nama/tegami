@@ -2,26 +2,35 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import type { BumpType } from "../utils/semver";
+import { bumpDepth, maxBump, type BumpType } from "../utils/semver";
 import { changelogFilename } from "../utils/changelog";
 import {
   conventionalCommitToBump,
   createConventionalCommitParser,
 } from "../utils/conventional-commit";
 import { execFailure } from "../utils/error";
+import { type ChangelogPackageConfig, renderChangelog } from "./shared";
+import type { PackageGraph } from "../graph";
+import * as semver from "semver";
 
 export interface CreateChangelogOptions {
   /** Start revision. Defaults to the latest reachable git tag, or all history if none exists. */
   from?: string;
   /** End revision. Defaults to HEAD. */
   to?: string;
+  /**
+   * Write changelog files to disk.
+   *
+   * @default true
+   */
+  write?: boolean;
 }
 
 export interface CreatedChangelog {
   filename: string;
-  path: string;
-  packages: string[];
-  changes: number;
+  content: string;
+  packages: Record<string, BumpType | ChangelogPackageConfig>;
+  changes: CommitChange[];
 }
 
 interface CommitChange {
@@ -37,6 +46,7 @@ export async function generateChangelog(
   context: TegamiContext,
   options: CreateChangelogOptions = {},
 ): Promise<CreatedChangelog[]> {
+  const write = options.write ?? true;
   const commits = await readConventionalCommits(context, options);
   const groups = new Map<string, CommitChange[]>();
 
@@ -47,22 +57,44 @@ export async function generateChangelog(
     else groups.set(key, [commit]);
   }
 
-  await mkdir(context.changelogDir, { recursive: true });
+  const changelogs = Array.from(groups, ([key, changes], index): CreatedChangelog => {
+    const packageNames = key ? key.split("\0") : [];
+    let bumpType: BumpType = "patch";
+    for (const change of changes) {
+      bumpType = maxBump(change.type, bumpType);
+    }
 
-  return Promise.all(
-    Array.from(groups, async ([key, changes], index) => {
-      const packages = key ? key.split("\0") : [];
-      const filename = changelogFilename(index);
-      const path = join(context.changelogDir, filename);
-      await writeFile(path, renderChangelog(packages, changes));
-      return {
-        filename,
-        path,
-        packages,
-        changes: changes.length,
-      };
-    }),
-  );
+    const packageBumpMap = Object.fromEntries(packageNames.map((name) => [name, bumpType]));
+    const packages = generateReplays(context.graph, packageBumpMap);
+    const content = renderChangelog(
+      { packages },
+      changes
+        .map((change) => {
+          const heading = "#".repeat(bumpDepth(change.type));
+          if (!change.body) return `${heading} ${change.title}`;
+          return `${heading} ${change.title}\n\n${change.body}`;
+        })
+        .join("\n\n"),
+    );
+
+    return {
+      filename: changelogFilename(index),
+      content,
+      packages,
+      changes,
+    };
+  });
+
+  if (write && changelogs.length > 0) {
+    await mkdir(context.changelogDir, { recursive: true });
+    await Promise.all(
+      changelogs.map((entry) =>
+        writeFile(join(context.changelogDir, entry.filename), entry.content),
+      ),
+    );
+  }
+
+  return changelogs;
 }
 
 async function readConventionalCommits(
@@ -105,7 +137,7 @@ async function readConventionalCommits(
       body: body.trim(),
       packages: parsed.packages,
       type: bump,
-      title: titleCase(parsed.title),
+      title: parsed.title.charAt(0).toUpperCase() + parsed.title.slice(1),
     });
   }
 
@@ -123,24 +155,34 @@ async function latestTag(cwd: string): Promise<string | undefined> {
   return result.stdout.trim() || undefined;
 }
 
-function renderChangelog(packages: string[], changes: CommitChange[]): string {
-  return [
-    "---",
-    `packages: ${JSON.stringify(packages)}`,
-    "---",
-    "",
-    changes.map(renderChange).join("\n\n"),
-    "",
-  ].join("\n");
-}
+export function generateReplays(graph: PackageGraph, base: Record<string, BumpType>) {
+  const packages: Record<string, ChangelogPackageConfig | BumpType> = {
+    ...base,
+  };
 
-function renderChange(change: CommitChange): string {
-  const heading = "#".repeat(change.type === "major" ? 1 : change.type === "minor" ? 2 : 3);
-  if (!change.body) return `${heading} ${change.title}`;
+  for (const [ref, type] of Object.entries(base)) {
+    const resolved = graph.getByName(ref);
 
-  return `${heading} ${change.title}\n\n${change.body}`;
-}
+    for (const pkg of resolved) {
+      const plan = pkg.initPlan();
+      pkg.configurePlan(plan);
 
-function titleCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+      const prerelease = semver.prerelease(pkg.version)?.[0];
+      const targetPrerelease = plan.prerelease ?? graph.getPackageGroup(pkg.id)?.options.prerelease;
+
+      if (
+        // entering prerelease
+        (targetPrerelease && !prerelease) ||
+        // during prerelease
+        (targetPrerelease && prerelease && targetPrerelease === prerelease)
+      ) {
+        packages[pkg.id] = {
+          type,
+          replay: [`exit prerelease: ${pkg.name}`],
+        };
+      }
+    }
+  }
+
+  return packages;
 }

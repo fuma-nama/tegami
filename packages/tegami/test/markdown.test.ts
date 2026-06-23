@@ -163,12 +163,21 @@ Notes.
 describe("parseReplayCondition", () => {
   test("parses package@version replay conditions", () => {
     expect(parseReplayCondition("tegami@1.1.0")).toEqual({
+      type: "on-version",
       name: "tegami",
       version: "1.1.0",
     });
     expect(parseReplayCondition("@acme/core@2.0.0")).toEqual({
+      type: "on-version",
       name: "@acme/core",
       version: "2.0.0",
+    });
+  });
+
+  test("parses exit prerelease replay conditions", () => {
+    expect(parseReplayCondition("exit prerelease: tegami")).toEqual({
+      type: "on-exit-prerelease",
+      name: "tegami",
     });
   });
 

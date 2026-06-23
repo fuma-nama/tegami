@@ -5,7 +5,6 @@ import { simpleGenerator } from "../generators/simple";
 import { BumpType, maxBump } from "../utils/semver";
 import type { WorkspacePackage } from "../graph";
 import {
-  ChnagelogPackageConfig,
   parseReplayCondition,
   type ParsedReplayCondition,
   type ChangelogEntry,
@@ -15,6 +14,8 @@ import type { Awaitable } from "../types";
 import { handlePluginError } from "../utils/error";
 import { groupPolicy } from "./policy";
 import { publishPlanStatus, assertPublishPlanFinished } from "./checks";
+import type { ChangelogPackageConfig } from "../changelog/shared";
+import * as semver from "semver";
 
 export interface PackagePlan {
   type?: BumpType;
@@ -200,6 +201,17 @@ export class DraftPlan {
     const { graph } = this.context;
 
     const isMatch = (condition: ParsedReplayCondition) => {
+      if (condition.type === "on-exit-prerelease") {
+        return graph.getByName(condition.name).some((pkg) => {
+          const prerelease = semver.prerelease(pkg.version);
+          const targetPrerelease = semver.prerelease(
+            this.getOrInitPackage(pkg).bumpVersion(pkg),
+          )?.[0];
+
+          return prerelease && !targetPrerelease;
+        });
+      }
+
       return graph
         .getByName(condition.name)
         .some(
@@ -210,7 +222,7 @@ export class DraftPlan {
     };
 
     for (const entry of this.changelogs.values()) {
-      const updatedPackages = new Map<string, ChnagelogPackageConfig>();
+      const updatedPackages = new Map<string, ChangelogPackageConfig>();
       const matchedNames = new Set<string>();
 
       for (const [name, config] of entry.packages) {

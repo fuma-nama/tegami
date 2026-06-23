@@ -8,14 +8,14 @@ import { maxBump, type BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
 import type { TegamiContext } from "../context";
 import z from "zod";
-import { bumpTypeSchema } from "../schemas";
+import { changelogFrontmatterSchema, type ChangelogPackageConfig } from "./shared";
 
 export interface ChangelogEntry {
   id: string;
   /** file name like `my-change.md` */
   filename: string;
   subject?: string;
-  packages: Map<string, ChnagelogPackageConfig>;
+  packages: Map<string, ChangelogPackageConfig>;
   /** will not be empty */
   sections: {
     depth: number;
@@ -25,23 +25,6 @@ export interface ChangelogEntry {
 
   getRawContent: () => string;
 }
-
-export type ChnagelogPackageConfig = z.output<typeof changelogPackageConfigSchema>;
-
-const changelogPackageConfigSchema = z.object({
-  type: bumpTypeSchema.optional(),
-  replay: z.array(z.string().min(1)).optional(),
-});
-
-const changelogFrontmatterSchema = z.object({
-  subject: z.string().optional(),
-  packages: z
-    .union([
-      z.array(z.string()),
-      z.record(z.string(), z.union([bumpTypeSchema, z.null(), changelogPackageConfigSchema])),
-    ])
-    .optional(),
-});
 
 export async function getChangelogFiles(context: TegamiContext): Promise<string[]> {
   const files = await readdir(context.changelogDir).catch(() => []);
@@ -72,7 +55,7 @@ export function parseChangelogFile(filename: string, content: string): Changelog
 
   const tree = fromMarkdown(parsed.content);
   let headingBump: BumpType | undefined;
-  const packages = new Map<string, ChnagelogPackageConfig>();
+  const packages = new Map<string, ChangelogPackageConfig>();
   const sections: ChangelogEntry["sections"] = [];
 
   for (const section of getHeadingSections(tree)) {
@@ -97,7 +80,7 @@ export function parseChangelogFile(filename: string, content: string): Changelog
     }
   } else {
     for (const [k, v] of Object.entries(data.packages)) {
-      let config: z.output<typeof changelogPackageConfigSchema>;
+      let config: ChangelogPackageConfig;
       if (typeof v === "string") config = { type: v };
       else if (v === null) config = { type: headingBump };
       else config = v;
@@ -132,17 +115,30 @@ export function parseChangelogFile(filename: string, content: string): Changelog
   return entry;
 }
 
-export interface ParsedReplayCondition {
-  name: string;
-  version: string;
-}
+export type ParsedReplayCondition =
+  | {
+      type: "on-version";
+      name: string;
+      version: string;
+    }
+  | {
+      type: "on-exit-prerelease";
+      name: string;
+    };
 
-/** Parse `name@version` replay conditions. Scoped names use the last `@`. */
 export function parseReplayCondition(condition: string): ParsedReplayCondition | null {
+  if (condition.startsWith("exit prerelease:")) {
+    return {
+      type: "on-exit-prerelease",
+      name: condition.slice("exit prerelease:".length).trimStart(),
+    };
+  }
+
   const idx = condition.lastIndexOf("@");
   if (idx <= 0) return null;
 
   return {
+    type: "on-version",
     name: condition.slice(0, idx),
     version: condition.slice(idx + 1),
   };

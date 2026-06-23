@@ -52,10 +52,13 @@ export function bumpVersion(version: string, type?: BumpType, prerelease?: strin
 
   if (prerelease) {
     const parsed = parse(version);
-    if (parsed?.prerelease[0] === prerelease) {
-      next = inc(version, "prerelease", prerelease);
+
+    if (!parsed) {
+      next = null;
+    } else if (parsed.prerelease[0] === prerelease) {
+      next = inc(parsed, "prerelease", prerelease);
     } else if (type) {
-      next = inc(version, PRE[type], prerelease);
+      next = inc(parsed, PRE[type], prerelease);
     }
   } else if (type) {
     next = inc(version, type);

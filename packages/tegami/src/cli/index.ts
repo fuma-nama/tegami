@@ -1,41 +1,22 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
-import {
-  autocompleteMultiselect,
-  confirm,
-  intro,
-  isCancel,
-  multiline,
-  note,
-  outro,
-  select,
-  spinner,
-} from "@clack/prompts";
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { intro, note, outro, spinner } from "@clack/prompts";
 import { Command, InvalidArgumentError } from "commander";
 import type { Awaitable } from "../types";
-import type { BumpType } from "../utils/semver";
-import { changelogFilename } from "../utils/changelog";
 import { isCI } from "../utils/constants";
-import { handlePluginError } from "../utils/error";
-import { assertPublishPlanFinished } from "../plans/checks";
-import { dump } from "js-yaml";
+import { CancelledError, handlePluginError } from "../utils/error";
 import type { Tegami } from "..";
-import type { PackageGroup, WorkspacePackage } from "../graph";
 import type { DraftPlan } from "../plans/draft";
 import type { PublishResult } from "../publish";
+import { runChangelogTui } from "./changelog";
 import { initAgent } from "./init-agent";
 import { buildPrPreview, postPrComment } from "./pr";
-import { getChangedPackages } from "../utils/git-changes";
 
 export interface TegamiCLIOptions {
   /** create a custom draft plan, it must not be applied */
   version?: () => Awaitable<DraftPlan>;
   publish?: () => Awaitable<PublishResult>;
 }
-
-interface ChangelogCommandOptions {}
-
-interface VersionCommandOptions {}
 
 interface PublishCommandOptions {
   dryRun?: boolean;
@@ -50,28 +31,20 @@ interface PrPreviewCommandOptions {
   number?: number;
 }
 
-class CancelledError extends Error {
-  constructor() {
-    super("Cancelled.");
-  }
-}
-
 export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
   const program = new Command();
 
   program
     .name("tegami")
     .description("create changelogs")
-    .action((commandOptions: ChangelogCommandOptions) =>
-      runAction(tegami, () => createChangelogs(tegami, { ...commandOptions, cli: options })),
-    );
+    .action(() => runAction(tegami, () => runChangelogTui(tegami)));
 
   program
     .command("version")
     .description("draft and apply a publish plan")
-    .action((commandOptions: VersionCommandOptions) =>
+    .action(() =>
       runAction(tegami, async () => {
-        await versionPackages(tegami, { ...commandOptions, cli: options });
+        await versionPackages(tegami, { cli: options });
       }),
     );
 
@@ -107,10 +80,13 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
         const body = await buildPrPreview(context, await tegami.draft(), commandOptions);
 
         if (commandOptions.artifact) {
-          const artifactPath = resolve(context.cwd, commandOptions.artifact);
+          const artifactPath = path.resolve(context.cwd, commandOptions.artifact);
           await writeFile(artifactPath, body);
           if (!isCI()) {
-            note(relative(context.cwd, artifactPath) || commandOptions.artifact, "Release preview");
+            note(
+              path.relative(context.cwd, artifactPath) || commandOptions.artifact,
+              "Release preview",
+            );
             outro("Release preview ready.");
           }
           return;
@@ -169,170 +145,9 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
   return program;
 }
 
-async function createChangelogs(
-  tegami: Tegami,
-  _options: ChangelogCommandOptions & { cli: TegamiCLIOptions },
-): Promise<void> {
-  const context = await tegami._internal.context();
-  await assertPublishPlanFinished(context);
-
-  intro("Create changelogs");
-  let selectedPackages: string[] = [];
-
-  if (!isCI()) {
-    const useShortname = new Map<string, boolean>();
-
-    for (const pkg of context.graph.getPackages()) {
-      if (useShortname.has(pkg.name)) useShortname.set(pkg.name, false);
-      else useShortname.set(pkg.name, true);
-    }
-
-    const getPackageLabel = (pkg: WorkspacePackage) => {
-      return useShortname.get(pkg.name) ? pkg.name : pkg.id;
-    };
-
-    const changedPackages = new Set(await getChangedPackages(context.graph, context.cwd));
-    const selectOptions: {
-      label: string;
-      value: string;
-      hint?: string;
-    }[] = [];
-    const groups: [PackageGroup, changed: boolean][] = [];
-    for (const group of context.graph.getGroups()) {
-      const changed = group.packages.some((pkg) => changedPackages.has(pkg));
-      groups.push([group, changed]);
-    }
-    groups.sort((a, b) => (a[1] ? 0 : 1) - (b[1] ? 0 : 1));
-    for (const [group, changed] of groups) {
-      const members = group.packages.map(getPackageLabel).join(", ");
-      selectOptions.push({
-        label: `(Group) ${group.name}`,
-        value: `group:${group.name}`,
-        hint: changed ? `changed · ${members}` : members,
-      });
-    }
-
-    const packages = context.graph
-      .getPackages()
-      .toSorted((a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1));
-    for (const pkg of packages) {
-      selectOptions.push({
-        label: getPackageLabel(pkg),
-        value: pkg.id,
-        hint: changedPackages.has(pkg) ? "changed" : undefined,
-      });
-    }
-
-    const selected = await autocompleteMultiselect({
-      message: "Select packages (leave empty to auto-generate from commits)",
-      required: false,
-      options: selectOptions,
-    });
-
-    if (isCancel(selected)) throw new CancelledError();
-    selectedPackages = selected;
-  }
-
-  if (selectedPackages.length === 0) {
-    if (!isCI()) {
-      const confirmed = await confirm({
-        message: "Auto-generate changelog files from commits?",
-        initialValue: true,
-      });
-      if (isCancel(confirmed)) throw new CancelledError();
-
-      if (!confirmed) {
-        outro("No changelogs created.");
-        return;
-      }
-    }
-
-    const s = spinner();
-    s.start("Reading commits and creating changelogs");
-    const created = await tegami.generateChangelog();
-    s.stop(
-      created.length === 1
-        ? "Created 1 changelog file"
-        : `Created ${created.length} changelog files`,
-    );
-
-    if (created.length === 0) {
-      note("No matching conventional commits were found.", "No changelogs created");
-    } else {
-      note(
-        created.map((entry) => `${entry.filename} (${entry.changes} changes)`).join("\n"),
-        "Created changelogs",
-      );
-    }
-
-    outro("Changelogs ready.");
-    return;
-  }
-
-  const packageBumpMap: Record<string, BumpType> = {};
-  const bumpType = await select({
-    message: "Select release type",
-    options: [
-      { value: "patch", label: "patch" },
-      { value: "minor", label: "minor" },
-      { value: "major", label: "major" },
-      { value: "per-package", label: "choose per-package" },
-    ],
-  });
-  if (isCancel(bumpType)) throw new CancelledError();
-  if (bumpType === "per-package") {
-    for (const pkg of selectedPackages) {
-      const bumpType = await select({
-        message: `Select release type for "${pkg}"`,
-        options: [
-          { value: "patch", label: "patch" },
-          { value: "minor", label: "minor" },
-          { value: "major", label: "major" },
-        ],
-      });
-
-      if (isCancel(bumpType)) throw new CancelledError();
-      packageBumpMap[pkg] = bumpType;
-    }
-  } else {
-    for (const pkg of selectedPackages) {
-      packageBumpMap[pkg] = bumpType;
-    }
-  }
-
-  const message = await multiline({
-    message: "Describe change (Markdown supported, press tab then enter to exit)",
-    placeholder: "The first line is heading\n\nAdditional description.",
-    showSubmit: true,
-    validate(value) {
-      if (!value?.trim()) return "Enter a message.";
-    },
-  });
-  if (isCancel(message)) throw new CancelledError();
-
-  const filename = changelogFilename();
-
-  const s = spinner();
-  s.start("Creating changelog");
-  await mkdir(context.changelogDir, { recursive: true });
-  await writeFile(
-    join(context.changelogDir, filename),
-    renderManualChangelog(packageBumpMap, message.trim()),
-  );
-  s.stop("Created changelog file");
-
-  const notes: string[] = [filename];
-  for (const pkg of selectedPackages) {
-    notes.push(`${pkg}: ${packageBumpMap[pkg]}`);
-  }
-
-  note(notes.join("\n"), "Created changelog");
-  outro("Changelog ready.");
-}
-
 async function versionPackages(
   tegami: Tegami,
-  options: VersionCommandOptions & { cli: TegamiCLIOptions },
+  options: { cli: TegamiCLIOptions },
 ): Promise<boolean> {
   intro("Version Packages");
 
@@ -443,7 +258,7 @@ async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): P
   const result = await initAgent(context, options);
   s.stop(result.created ? "Created AGENTS.md" : "Appended to AGENTS.md");
 
-  note(relative(context.cwd, result.path) || "AGENTS.md", "Agent instructions");
+  note(path.relative(context.cwd, result.path) || "AGENTS.md", "Agent instructions");
   outro("Agents can follow AGENTS.md to write changelogs.");
 }
 
@@ -467,19 +282,6 @@ async function runCleanup(tegami: Tegami): Promise<void> {
   }
 
   outro(`Publish plan at ${planPath} is still pending. Publish it before cleanup.`);
-}
-
-function renderManualChangelog(packageBumpMap: Record<string, BumpType>, message: string): string {
-  return [
-    "---",
-    dump({
-      packages: packageBumpMap,
-    }).trim(),
-    "---",
-    "",
-    `## ${message}`,
-    "",
-  ].join("\n");
 }
 
 async function runAction(tegami: Tegami, action: () => Awaitable<void>): Promise<void> {

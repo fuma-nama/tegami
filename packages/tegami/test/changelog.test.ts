@@ -9,6 +9,7 @@ import {
 } from "../src/utils/conventional-commit";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { tegami } from "../src";
+import type { CreatedChangelog } from "../src/changelog/generate";
 import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
@@ -131,39 +132,40 @@ describe("createChangelog", () => {
     ]);
     expect(created).toHaveLength(2);
 
-    const files = await Promise.all(
-      created.map(async (entry) => ({
-        ...entry,
-        content: await readFile(entry.path, "utf8"),
-      })),
-    );
+    const files = created.map((entry) => ({
+      packages: entry.packages,
+      changes: entry.changes,
+      content: entry.content,
+    }));
     expect(files.map(normalizeFile)).toMatchInlineSnapshot(`
       [
         {
           "changes": 1,
           "content": "---
-      packages: ["@acme/core"]
+      packages:
+        '@acme/core': minor
       ---
 
       ## Support auto changelogs
 
       Adds generated notes.
       ",
-          "packages": [
-            "@acme/core",
-          ],
+          "packages": {
+            "@acme/core": "minor",
+          },
         },
         {
           "changes": 1,
           "content": "---
-      packages: ["@acme/ui"]
+      packages:
+        '@acme/ui': patch
       ---
 
       ### Repair button state
       ",
-          "packages": [
-            "@acme/ui",
-          ],
+          "packages": {
+            "@acme/ui": "patch",
+          },
         },
       ]
     `);
@@ -224,10 +226,10 @@ function result(overrides: Partial<Awaited<ReturnType<typeof x>>>): Awaited<Retu
   } as Awaited<ReturnType<typeof x>>;
 }
 
-function normalizeFile(file: { packages: string[]; changes: number; content: string }) {
+function normalizeFile(file: Pick<CreatedChangelog, "packages" | "changes" | "content">) {
   return {
     packages: file.packages,
-    changes: file.changes,
+    changes: file.changes.length,
     content: file.content.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md/g, "<stamp>.md"),
   };
 }

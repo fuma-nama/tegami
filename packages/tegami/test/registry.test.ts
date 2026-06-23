@@ -98,30 +98,23 @@ describe("registry client", () => {
     const pkg = packageGraph.get("npm:@acme/core");
     if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
 
-    exec
-      .mockResolvedValueOnce(execResult({ stdout: "acme-core-1.0.1.tgz\n" }))
-      .mockResolvedValueOnce(execResult());
+    exec.mockResolvedValueOnce(execResult()).mockResolvedValueOnce(execResult());
 
     await client.publish(pkg, {
       store: storedPlan(),
       packageStore: { type: "patch", changelogIds: [], publish: true, npm: { distTag: "latest" } },
     });
 
-    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--quiet"], {
+    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--filename", "pkg.tgz"], {
       nodeOptions: {
         cwd: pkg.path,
       },
     });
-    expect(exec).toHaveBeenNthCalledWith(
-      2,
-      "npm",
-      ["publish", "acme-core-1.0.1.tgz", "--tag", "latest"],
-      {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
+    expect(exec).toHaveBeenNthCalledWith(2, "npm", ["publish", "pkg.tgz", "--tag", "latest"], {
+      nodeOptions: {
+        cwd: pkg.path,
       },
-    );
+    });
   });
 });
 
