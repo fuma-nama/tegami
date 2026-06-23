@@ -150,7 +150,13 @@ export class DraftPlan {
       throw new Error("This draft has already applied a publish plan.");
     }
     await assertPublishPlanFinished(this.context);
+    const { graph } = this.context;
     this.#applied = true;
+
+    const snapshots = new Map<string, { version: string }>();
+    for (const pkg of graph.getPackages()) {
+      snapshots.set(pkg.id, { version: pkg.version });
+    }
 
     for (const plugin of this.context.plugins) {
       await handlePluginError(plugin, "applyPlan", () =>
@@ -158,8 +164,7 @@ export class DraftPlan {
       );
     }
 
-    const updatedChangelogs = this.applyReplays();
-    const { graph } = this.context;
+    const updatedChangelogs = this.applyReplays(snapshots);
     const writes: Awaitable<void>[] = [];
 
     for (const [id, packagePlan] of this.packages) {
@@ -195,30 +200,22 @@ export class DraftPlan {
     return !this.#applied;
   }
 
-  /** Attach replaying changelog entries to packages, and return the updated changelog entries. */
-  private applyReplays(): Map<string, ChangelogEntry> {
+  /** Attach replaying changelog entries to packages (already bumped), and return the updated changelog entries. */
+  private applyReplays(snapshots: Map<string, { version: string }>): Map<string, ChangelogEntry> {
     const updated = new Map<string, ChangelogEntry>();
     const { graph } = this.context;
 
     const isMatch = (condition: ParsedReplayCondition) => {
       if (condition.type === "on-exit-prerelease") {
         return graph.getByName(condition.name).some((pkg) => {
-          const prerelease = semver.prerelease(pkg.version);
-          const targetPrerelease = semver.prerelease(
-            this.getOrInitPackage(pkg).bumpVersion(pkg),
-          )?.[0];
+          const previous = snapshots.get(pkg.id);
+          if (!previous) return false;
 
-          return prerelease && !targetPrerelease;
+          return semver.inc(previous.version, "release") === pkg.version;
         });
       }
 
-      return graph
-        .getByName(condition.name)
-        .some(
-          (pkg) =>
-            pkg.version === condition.version ||
-            this.getOrInitPackage(pkg).bumpVersion(pkg) === condition.version,
-        );
+      return graph.getByName(condition.name).some((pkg) => pkg.version === condition.version);
     };
 
     for (const entry of this.changelogs.values()) {
@@ -239,9 +236,9 @@ export class DraftPlan {
         });
 
         if (replay.length === 0) continue;
-        const _ = { ...config, replay };
-        delete _.type;
-        updatedPackages.set(name, _);
+        const updatedConfig = { ...config, replay };
+        delete updatedConfig.type;
+        updatedPackages.set(name, updatedConfig);
       }
 
       if (updatedPackages.size > 0) {
