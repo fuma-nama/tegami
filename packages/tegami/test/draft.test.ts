@@ -224,7 +224,7 @@ Core only.
     const draft = await tegami({ cwd }).draft();
 
     expect(draft.getPackagePlan("npm:@acme/core")?.type).toBe("minor");
-    expect(draft.getPackagePlan("npm:@acme/ui")).toBeUndefined();
+    expect(draft.getPackagePlan("npm:@acme/ui")?.type).toBeUndefined();
 
     await draft.applyPlan();
 

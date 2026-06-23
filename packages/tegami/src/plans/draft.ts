@@ -48,17 +48,10 @@ export class DraftPlan {
     return this.packages.get(id);
   }
 
-  bumpPackage(
-    pkg: WorkspacePackage,
-    { type, prerelease, reason }: { type?: BumpType; prerelease?: string; reason?: string },
-  ) {
+  bumpPackage(pkg: WorkspacePackage, { type, reason }: { type: BumpType; reason?: string }) {
     return this.dispatchPackage(pkg, (plan) => {
-      if (type) {
-        plan.type = plan.type ? maxBump(plan.type, type) : type;
-      }
-      if (prerelease) {
-        plan.prerelease = prerelease;
-      }
+      plan.type = plan.type ? maxBump(plan.type, type) : type;
+
       if (reason) {
         plan.bumpReasons ??= new Set();
         plan.bumpReasons.add(reason);
@@ -70,29 +63,8 @@ export class DraftPlan {
     pkg: WorkspacePackage,
     dispatch: (plan: PackagePlan) => void,
     onUpdate?: (plan: PackagePlan) => void,
-  ) {
-    let plan = this.packages.get(pkg.id);
-    if (!plan) {
-      plan = pkg.initPlan();
-      this.packages.set(pkg.id, plan);
-      // assign script-level configs
-      this.dispatchPackage(
-        pkg,
-        (plan1) => {
-          const group = this.context.graph.getPackageGroup(pkg.id);
-          if (group?.options.prerelease) {
-            plan1.prerelease = group.options.prerelease;
-          }
-
-          pkg.configurePlan(plan1);
-        },
-        (plan1) => {
-          const reasons = (plan1.bumpReasons ??= new Set());
-          reasons.add("align with script-level configs");
-        },
-      );
-    }
-
+  ): PackagePlan {
+    const plan = this.getOrInitPackage(pkg);
     const prevVersion = plan.bumpVersion(pkg);
     dispatch(plan);
     if (prevVersion !== plan.bumpVersion(pkg)) {
@@ -103,6 +75,30 @@ export class DraftPlan {
       }
     }
     return plan;
+  }
+
+  private getOrInitPackage(pkg: WorkspacePackage): PackagePlan {
+    const existing = this.packages.get(pkg.id);
+    if (existing) return existing;
+
+    this.packages.set(pkg.id, pkg.initPlan());
+
+    // assign script-level configs
+    return this.dispatchPackage(
+      pkg,
+      (plan) => {
+        const group = this.context.graph.getPackageGroup(pkg.id);
+        if (group?.options.prerelease) {
+          plan.prerelease = group.options.prerelease;
+        }
+
+        pkg.configurePlan(plan);
+      },
+      (plan) => {
+        const reasons = (plan.bumpReasons ??= new Set());
+        reasons.add("align with script-level configs");
+      },
+    );
   }
 
   hasPending() {
@@ -251,6 +247,11 @@ export async function createDraftPlan(
       plugin.initPlan?.call(context, draft),
     );
     if (result) draft = result;
+  }
+
+  for (const pkg of context.graph.getPackages()) {
+    // @ts-expect-error -- detect config changes
+    draft.getOrInitPackage(pkg);
   }
 
   for (const entry of changelogs) {

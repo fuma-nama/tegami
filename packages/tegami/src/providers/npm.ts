@@ -472,12 +472,12 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
     ),
   );
 
-  if (rootManifest) {
+  if (rootManifest?.version) {
     add(new NpmPackage(cwd, rootManifest));
   }
 
   for (const entry of manifests) {
-    if (!entry?.manifest) continue;
+    if (!entry?.manifest.version) continue;
     add(new NpmPackage(entry.path, entry.manifest));
   }
 }
