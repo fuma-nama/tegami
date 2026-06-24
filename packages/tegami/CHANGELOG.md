@@ -1,3 +1,11 @@
+## tegami@0.1.6
+
+### Check GitHub release before creating
+
+Prevent errors from conflicts.
+
+### `tegami pr comment` will ignore if there is no related PR
+
 ## tegami@0.1.5
 
 ### Use absolute path for `bun pm pack`
