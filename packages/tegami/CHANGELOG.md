@@ -1,3 +1,13 @@
+## tegami@0.1.4
+
+### Fix handling for `undefined` bump types
+
+No longer cause unnecessary bumps for packages in prerelease.
+
+### Support group-level `npm` config
+
+Groups can now define `npm` config for member packages.
+
 ## tegami@0.1.3
 
 ### Hotfix error in GitHub plugin
