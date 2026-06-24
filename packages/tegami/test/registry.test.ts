@@ -97,6 +97,7 @@ describe("registry client", () => {
     const client = new NpmRegistryClient("/repo", "bun", packageGraph);
     const pkg = packageGraph.get("npm:@acme/core");
     if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+    const tarballPath = join(pkg.path, "pkg.tgz");
 
     exec.mockResolvedValueOnce(execResult()).mockResolvedValueOnce(execResult());
 
@@ -105,12 +106,12 @@ describe("registry client", () => {
       packageStore: { type: "patch", changelogIds: [], publish: true, npm: { distTag: "latest" } },
     });
 
-    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--filename", "pkg.tgz"], {
+    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--filename", tarballPath], {
       nodeOptions: {
         cwd: pkg.path,
       },
     });
-    expect(exec).toHaveBeenNthCalledWith(2, "npm", ["publish", "pkg.tgz", "--tag", "latest"], {
+    expect(exec).toHaveBeenNthCalledWith(2, "npm", ["publish", tarballPath, "--tag", "latest"], {
       nodeOptions: {
         cwd: pkg.path,
       },

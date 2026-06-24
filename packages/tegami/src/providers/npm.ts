@@ -116,8 +116,8 @@ export class NpmRegistryClient implements RegistryClient {
 
     // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
     if (this.client === "bun") {
-      const tarball = "pkg.tgz";
-      const packResult = await x("bun", ["pm", "pack", "--filename", tarball], {
+      const tarballPath = path.resolve(pkg.path, "pkg.tgz");
+      const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
         nodeOptions: {
           cwd: pkg.path,
         },
@@ -126,7 +126,7 @@ export class NpmRegistryClient implements RegistryClient {
         throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
       }
 
-      const publishArgs = ["publish", tarball];
+      const publishArgs = ["publish", tarballPath];
       if (distTag) publishArgs.push("--tag", distTag);
 
       const publishResult = await x("npm", publishArgs, {
