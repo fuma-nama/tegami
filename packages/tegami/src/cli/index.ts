@@ -243,7 +243,8 @@ async function publishPackages(
 
   if (result.state === "failed") {
     process.exitCode = 1;
-    outro("Some packages failed to publish.");
+    if (result.error) note(result.error, "Error when publishing");
+    outro("Failed to publish.");
     return false;
   }
 
