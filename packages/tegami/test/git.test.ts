@@ -112,9 +112,8 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const next = await plugin.afterPublishAll?.call(pluginContext(), result);
-    expect(next).toBe(result);
-    expect(result.packages.map((pkg) => pkg.gitTag)).toEqual([
+    await plugin.afterPublishAll?.call(pluginContext(), result);
+    expect(result.packages.map((pkg) => pkg.git?.tag)).toEqual([
       "@acme/core@1.0.1",
       "@acme/ui@1.0.1",
     ]);
@@ -256,11 +255,18 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const result = await plugin.afterPublishAll?.call(pluginContext(), publishResult());
+    const result = publishResult();
+
+    await plugin.afterPublishAll?.call(pluginContext(), result);
 
     expect(result).toMatchObject({
       state: "failed",
-      error: expect.stringContaining("tag failed"),
+      packages: [
+        expect.objectContaining({
+          state: "failed",
+          error: expect.stringContaining("tag failed"),
+        }),
+      ],
     });
   });
 });

@@ -177,7 +177,7 @@ Breaking note.
 
     if (result.state !== "created") throw new Error("must be created");
 
-    expect(result.packages.map((pkg) => pkg.gitTag)).toEqual(["acme@1.0.1", "acme@1.0.1"]);
+    expect(result.packages.map((pkg) => pkg.git?.tag)).toEqual(["acme@1.0.1", "acme@1.0.1"]);
     expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "tag")).toHaveLength(1);
   });
 });

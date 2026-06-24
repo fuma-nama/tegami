@@ -4,7 +4,7 @@ import { prerelease as getPrerelease } from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
 import type { DraftPlan } from "../plans/draft";
-import type { PackagePublishResult } from "../publish";
+import { publishError, type PackagePublishResult } from "../publish";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatNpmDistTag, formatPackageVersion } from "../utils/semver";
@@ -19,6 +19,8 @@ interface GithubRelease {
   /** Whether to mark release as prerelease */
   prerelease?: boolean;
 }
+
+type ResolvedGithubRelease = Required<GithubRelease>;
 
 interface VersionPullRequest {
   /** Pull request title. */
@@ -97,62 +99,35 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     cli: cliOptions = {},
   } = options;
 
-  async function runGithubRelease(
-    gitTag: string,
-    title: string,
-    notes: string,
-    prerelease: boolean,
-    repo: string | undefined,
-  ): Promise<void> {
-    const args: string[] = ["release", "create", gitTag, "--title", title, "--notes", notes];
-
-    if (repo) {
-      args.push("--repo", repo);
-    }
-
-    if (prerelease) {
-      args.push("--prerelease");
-    }
-
-    const result = await x("gh", args);
-    if (result.exitCode !== 0) {
-      throw execFailure(`Failed to create GitHub release for ${gitTag}.`, result);
-    }
-  }
-
-  async function createRelease(context: TegamiContext, pkg: PackagePublishResult): Promise<void> {
-    if (!pkg.gitTag || pkg.state === "failed") return;
+  async function createRelease(
+    context: TegamiContext,
+    pkg: PackagePublishResult,
+  ): Promise<ResolvedGithubRelease | undefined> {
+    if (pkg.state === "failed") return;
 
     const release = (await onCreateRelease?.call(context, pkg)) ?? {};
     if (release === false) return;
 
-    await runGithubRelease(
-      pkg.gitTag,
-      release.title ?? defaultTitle(pkg),
-      release.notes ?? (await defaultNotes(context, pkg)),
-      release.prerelease ?? getPrerelease(pkg.version) !== null,
-      context.github?.repo,
-    );
+    return {
+      title: release.title ?? defaultTitle(pkg),
+      notes: release.notes ?? (await defaultNotes(context, pkg)),
+      prerelease: release.prerelease ?? getPrerelease(pkg.version) !== null,
+    };
   }
 
   async function createGroupedRelease(
     context: TegamiContext,
     packages: PackagePublishResult[],
-  ): Promise<void> {
-    const primary = packages[0];
-    if (!primary?.gitTag) return;
+  ): Promise<ResolvedGithubRelease | undefined> {
     if (packages.some((member) => member.state === "failed")) return;
 
     const release = (await onCreateGroupedRelease?.call(context, packages)) ?? {};
     if (release === false) return;
-
-    await runGithubRelease(
-      primary.gitTag,
-      release.title ?? defaultGroupedTitle(packages),
-      release.notes ?? (await defaultGroupedNotes(context, packages)),
-      release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
-      context.github?.repo,
-    );
+    return {
+      title: release.title ?? defaultGroupedTitle(packages),
+      notes: release.notes ?? (await defaultGroupedNotes(context, packages)),
+      prerelease: release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
+    };
   }
 
   function resolvePROptions(): [false] | [true, VersionPullRequestOptions] {
@@ -326,16 +301,52 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         },
       },
       async afterPublishAll(result) {
-        if (!eagerRelease && result.state === "failed") return;
         if (result.state === "skipped") return;
+        if (!eagerRelease && result.state === "failed") return;
 
-        for (const packages of groupPackagesByGitTag(result.packages).values()) {
-          if (packages.length > 1) {
-            await createGroupedRelease(this, packages);
-          } else {
-            await createRelease(this, packages[0]!);
-          }
-        }
+        const repo = this.github?.repo;
+
+        await Promise.all(
+          Array.from(groupPackagesByGitTag(result.packages), async ([tag, packages]) => {
+            const release =
+              packages.length > 1
+                ? await createGroupedRelease(this, packages)
+                : await createRelease(this, packages[0]!);
+            if (!release) return;
+
+            const viewArgs: string[] = ["release", "view", tag];
+            if (repo) viewArgs.push("--repo", repo);
+
+            const existing = await x("gh", viewArgs);
+            if (existing.exitCode === 0) return;
+
+            const args: string[] = [
+              "release",
+              "create",
+              tag,
+              "--title",
+              release.title,
+              "--notes",
+              release.notes,
+            ];
+
+            if (repo) {
+              args.push("--repo", repo);
+            }
+
+            if (release.prerelease) {
+              args.push("--prerelease");
+            }
+
+            const ghOut = await x("gh", args);
+            if (ghOut.exitCode !== 0) {
+              publishError(
+                result,
+                execFailure(`Failed to create GitHub release for ${tag}.`, ghOut).message,
+              );
+            }
+          }),
+        );
       },
     },
   ];
@@ -373,11 +384,11 @@ function groupPackagesByGitTag(
   const groups = new Map<string, PackagePublishResult[]>();
 
   for (const pkg of packages) {
-    if (!pkg.gitTag) continue;
+    if (!pkg.git?.tag) continue;
 
-    const group = groups.get(pkg.gitTag);
+    const group = groups.get(pkg.git.tag);
     if (group) group.push(pkg);
-    else groups.set(pkg.gitTag, [pkg]);
+    else groups.set(pkg.git.tag, [pkg]);
   }
 
   return groups;
@@ -393,11 +404,8 @@ function defaultGroupedTitle(packages: PackagePublishResult[]): string {
     ? primary.npm?.distTag
     : undefined;
 
-  return formatPackageVersion(
-    primary.gitTag!.slice(0, primary.gitTag!.lastIndexOf("@")),
-    primary.version,
-    distTag,
-  );
+  const tag = primary.git!.tag;
+  return formatPackageVersion(tag.slice(0, tag.lastIndexOf("@")), primary.version, distTag);
 }
 
 function formatCommitLink(commit: string, repo?: string): string {
@@ -476,7 +484,7 @@ async function defaultGroupedNotes(
 
     sections.push("", notes.join("\n\n"));
   } else {
-    sections.push("", `Published ${packages[0]!.gitTag}.`);
+    sections.push("", `Published ${packages[0]!.git!.tag}.`);
   }
 
   return sections.join("\n");

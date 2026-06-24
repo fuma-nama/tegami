@@ -91,8 +91,11 @@ export type PackagePublishResult = (
   npm?: {
     distTag?: string;
   };
-  /** added by the `git` plugin */
-  gitTag?: string;
+  git?: {
+    /** will be defined even if publishing fails */
+    tag: string;
+    tagState: "created" | "skipped" | "failed";
+  };
   changelogs: ChangelogEntry[];
 };
 
@@ -128,21 +131,19 @@ export async function publishFromPlan(
       if (entry) changelogs.push(entry);
     }
 
-    if (!dryRun) {
-      const published = await registryClient.isPackagePublished(pkg);
+    if (dryRun) {
+      packages.push({
+        id: pkg.id,
+        name: pkg.name,
+        version: pkg.version,
+        npm: plan.npm,
+        state: "success",
+        changelogs,
+      });
+      continue;
+    }
 
-      if (published) {
-        packages.push({
-          id: pkg.id,
-          name: pkg.name,
-          version: pkg.version,
-          npm: plan.npm,
-          state: "success",
-          changelogs,
-        });
-        continue;
-      }
-    } else {
+    if (await registryClient.isPackagePublished(pkg)) {
       packages.push({
         id: pkg.id,
         name: pkg.name,
@@ -214,4 +215,23 @@ export async function publishFromPlan(
     packages,
     _rawPlan: store,
   };
+}
+
+export function publishError(result: Exclude<PublishResult, { state: "skipped" }>, error?: string) {
+  result.state = "failed";
+  if (result.state === "failed" && error) {
+    result.error = result.error ? `${result.error}\n${error}` : error;
+  }
+}
+
+export function packagePublishError(
+  result: Exclude<PublishResult, { state: "skipped" }>,
+  packageResult: PackagePublishResult,
+  error?: string,
+) {
+  result.state = "failed";
+  packageResult.state = "failed";
+  if (packageResult.state === "failed" && error) {
+    packageResult.error = packageResult.error ? `${packageResult.error}\n${error}` : error;
+  }
 }

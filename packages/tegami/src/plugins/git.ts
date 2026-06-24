@@ -3,7 +3,7 @@ import type { TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { isCI } from "../utils/constants";
 import { TegamiContext } from "../context";
-import type { PackagePublishResult } from "../publish";
+import { packagePublishError, publishError, type PackagePublishResult } from "../publish";
 
 export interface GitPluginOptions {
   /** Set to false to skip creating git tags after all packages publish successfully. */
@@ -57,55 +57,63 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
         cwd,
         publishOptions: { dryRun = false },
       } = this;
-      if (dryRun || !createTags || result.state === "skipped") return result;
+      if (dryRun || !createTags || result.state === "skipped") return;
 
-      const pendingTags = new Set<string>();
+      const createdTags: string[] = [];
+      const pendingTags = new Map<string, true | Error | null>();
 
       for (const pkg of result.packages) {
-        if (pkg.state !== "success") continue;
-        pkg.gitTag = resolveGitTag(this, pkg);
-        pendingTags.add(pkg.gitTag);
+        const tag = resolveGitTag(this, pkg);
+        pkg.git = { tag, tagState: "skipped" };
+        if (pkg.state === "success") pendingTags.set(tag, null);
       }
 
-      try {
-        const createdTags: string[] = [];
+      await Promise.all(
+        Array.from(pendingTags.keys(), async (tag) => {
+          if (await gitTagExists(cwd, tag)) return;
 
-        await Promise.all(
-          Array.from(pendingTags).map(async (tag) => {
-            if (await gitTagExists(cwd, tag)) return;
-
-            const gitOut = await x("git", ["tag", tag], {
-              nodeOptions: { cwd },
-            });
-
-            if (gitOut.exitCode !== 0)
-              throw execFailure(`Failed to create Git tag "${tag}" for release`, gitOut);
-
-            createdTags.push(tag);
-          }),
-        );
-
-        if (pushTags && createdTags.length > 0) {
-          const gitOut = await x("git", ["push", "origin", ...createdTags], {
+          const gitOut = await x("git", ["tag", tag], {
             nodeOptions: { cwd },
           });
 
           if (gitOut.exitCode !== 0) {
-            throw execFailure(
-              `Failed to push Git tags to origin: ${createdTags.join(", ")}`,
-              gitOut,
+            pendingTags.set(
+              tag,
+              execFailure(`Failed to create Git tag "${tag}" for release`, gitOut),
             );
+            return;
           }
+
+          createdTags.push(tag);
+          pendingTags.set(tag, true);
+        }),
+      );
+
+      for (const pkg of result.packages) {
+        if (!pkg.git?.tag) continue;
+
+        const state = pendingTags.get(pkg.git.tag);
+        if (state === true) {
+          pkg.git.tagState = "created";
+        } else if (state instanceof Error) {
+          pkg.git.tagState = "failed";
+          packagePublishError(result, pkg, state.message);
         }
-      } catch (error) {
-        return {
-          ...result,
-          state: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        };
       }
 
-      return result;
+      if (pushTags && createdTags.length > 0) {
+        const gitOut = await x("git", ["push", "origin", ...createdTags], {
+          nodeOptions: { cwd },
+        });
+
+        if (gitOut.exitCode !== 0) {
+          publishError(
+            result,
+            execFailure(`Failed to push Git tags to origin: ${createdTags.join(", ")}`, gitOut)
+              .message,
+          );
+        }
+      }
     },
   };
 }

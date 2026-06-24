@@ -15,7 +15,13 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
-  exec.mockImplementation(() => commandResult());
+  exec.mockImplementation((command, args = []) => {
+    if (command === "gh" && args[0] === "release" && args[1] === "view") {
+      return commandResult({ exitCode: 1, stderr: "release not found\n" });
+    }
+
+    return commandResult();
+  });
 });
 
 describe("github release plugin", () => {
@@ -37,34 +43,59 @@ describe("github release plugin", () => {
         packages: [
           packageResult({
             npm: { distTag: "alpha" },
-            gitTag: "@acme/core@1.0.1",
           }),
           packageResult({
             name: "@acme/no-tag",
-            gitTag: undefined,
+            git: undefined,
           }),
         ],
       }),
     );
 
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(ghReleaseViewCall()?.[1]).toEqual(["release", "view", "@acme/core@1.0.1"]);
+    expect(ghReleaseCreateCall()?.[1]).toEqual([
+      "release",
+      "create",
+      "@acme/core@1.0.1",
+      "--title",
+      "Release 1.0.1",
+      "--notes",
+      "Notes for @acme/core",
+      "--prerelease",
+    ]);
+  });
+
+  test("skips GitHub release creation when the release already exists", async () => {
+    exec.mockImplementation((command, args = []) => {
+      if (command === "gh" && args[0] === "release" && args[1] === "view") {
+        return commandResult({ stdout: "title: Existing\n" });
+      }
+
+      return commandResult();
+    });
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+
+    await plugin.afterPublishAll?.call(
+      {
+        ...publishContext(),
+        github: { repo: "acme/repo" },
+      },
+      publishResult({
+        packages: [packageResult()],
+      }),
+    );
+
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec.mock.calls).toMatchInlineSnapshot(`
-      [
-        [
-          "gh",
-          [
-            "release",
-            "create",
-            "@acme/core@1.0.1",
-            "--title",
-            "Release 1.0.1",
-            "--notes",
-            "Notes for @acme/core",
-            "--prerelease",
-          ],
-        ],
-      ]
-    `);
+    expect(ghReleaseViewCall()?.[1]).toEqual([
+      "release",
+      "view",
+      "@acme/core@1.0.1",
+      "--repo",
+      "acme/repo",
+    ]);
+    expect(ghReleaseCreateCall()).toBeUndefined();
   });
 
   test("does not create releases when any package failed", async () => {
@@ -106,7 +137,7 @@ describe("github release plugin", () => {
       }),
     );
 
-    expect(ghReleaseCall()).toMatchInlineSnapshot(`
+    expect(ghReleaseCreateCall()).toMatchInlineSnapshot(`
       [
         "gh",
         [
@@ -130,6 +161,10 @@ describe("github release plugin", () => {
         return commandResult({
           stdout: "abc1234567890abcdef1234567890abcdef123456\n",
         });
+      }
+
+      if (command === "gh" && args[0] === "release" && args[1] === "view") {
+        return commandResult({ exitCode: 1, stderr: "release not found\n" });
       }
 
       return commandResult();
@@ -156,7 +191,7 @@ describe("github release plugin", () => {
       }),
     );
 
-    expect(ghReleaseCall()?.[1]).toEqual([
+    expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
       "create",
       "@acme/core@1.0.1",
@@ -175,11 +210,16 @@ describe("github release plugin", () => {
     await plugin.afterPublishAll?.call(
       publishContext(),
       publishResult({
-        packages: [packageResult({ version: "1.0.1-beta.0", gitTag: "@acme/core@1.0.1-beta.0" })],
+        packages: [
+          packageResult({
+            version: "1.0.1-beta.0",
+            git: { tag: "@acme/core@1.0.1-beta.0", tagState: "created" },
+          }),
+        ],
       }),
     );
 
-    expect(exec.mock.calls[0]?.[1]).toEqual([
+    expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
       "create",
       "@acme/core@1.0.1-beta.0",
@@ -200,7 +240,7 @@ describe("github release plugin", () => {
         packages: [
           packageResult({
             name: "@acme/core",
-            gitTag: "acme@1.0.1",
+            git: { tag: "acme@1.0.1", tagState: "created" },
             changelogs: [
               testChangelogEntry({
                 packages: new Map([["group:acme", { type: "minor" }]]),
@@ -210,7 +250,7 @@ describe("github release plugin", () => {
           }),
           packageResult({
             name: "@acme/ui",
-            gitTag: "acme@1.0.1",
+            git: { tag: "acme@1.0.1", tagState: "created" },
             changelogs: [
               testChangelogEntry({
                 packages: new Map([["group:acme", { type: "minor" }]]),
@@ -222,8 +262,8 @@ describe("github release plugin", () => {
       }),
     );
 
-    expect(exec).toHaveBeenCalledTimes(2);
-    expect(ghReleaseCall()?.[1]).toEqual([
+    expect(exec).toHaveBeenCalledTimes(3);
+    expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
       "create",
       "acme@1.0.1",
@@ -239,7 +279,7 @@ describe("github release plugin", () => {
       repo: "acme/repo",
       onCreateGroupedRelease(packages) {
         return {
-          title: `Group release ${packages[0]!.gitTag}`,
+          title: `Group release ${packages[0]!.git!.tag}`,
           notes: packages.map((pkg) => pkg.name).join(", "),
         };
       },
@@ -252,13 +292,13 @@ describe("github release plugin", () => {
       publishContext(),
       publishResult({
         packages: [
-          packageResult({ name: "@acme/core", gitTag: "acme@1.0.1" }),
-          packageResult({ name: "@acme/ui", gitTag: "acme@1.0.1" }),
+          packageResult({ name: "@acme/core", git: { tag: "acme@1.0.1", tagState: "created" } }),
+          packageResult({ name: "@acme/ui", git: { tag: "acme@1.0.1", tagState: "created" } }),
         ],
       }),
     );
 
-    expect(exec.mock.calls[0]?.[1]).toEqual([
+    expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
       "create",
       "acme@1.0.1",
@@ -732,20 +772,29 @@ function testChangelogEntry(overrides: Partial<ChangelogEntry> = {}): ChangelogE
 
 function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePublishResult {
   const name = overrides.name ?? "@acme/core";
+  const version = overrides.version ?? "1.0.1";
   return {
     id: `test:${name}`,
     name,
-    version: "1.0.1",
+    version,
     npm: { distTag: "latest" },
     changelogs: [],
-    gitTag: "@acme/core@1.0.1",
+    git: { tag: `${name}@${version}`, tagState: "created" },
     state: "success",
     ...overrides,
   };
 }
 
-function ghReleaseCall() {
-  return exec.mock.calls.find((call) => call[0] === "gh");
+function ghReleaseViewCall() {
+  return exec.mock.calls.find(
+    (call) => call[0] === "gh" && call[1]?.[0] === "release" && call[1]?.[1] === "view",
+  );
+}
+
+function ghReleaseCreateCall() {
+  return exec.mock.calls.find(
+    (call) => call[0] === "gh" && call[1]?.[0] === "release" && call[1]?.[1] === "create",
+  );
 }
 
 type ExecResult = Awaited<ReturnType<typeof x>>;
