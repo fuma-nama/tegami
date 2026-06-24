@@ -8,6 +8,8 @@ import { execFailure } from "../utils/error";
 import { formatNpmDistTag } from "../utils/semver";
 import { resolveCommand } from "package-manager-detector";
 import { changelogFilename } from "../changelog/generate";
+import { outro } from "@clack/prompts";
+import z from "zod";
 
 export const TEGAMI_DOCS_URL = "https://tegami.fuma-nama.dev";
 export const CHANGELOG_DOCS_URL = `${TEGAMI_DOCS_URL}/changelog`;
@@ -131,14 +133,20 @@ export async function buildPrPreview(
 export async function postPrComment(body: string): Promise<void> {
   const repo = process.env.GITHUB_REPOSITORY;
   if (!repo) {
-    throw new Error("GITHUB_REPOSITORY is required.");
+    outro("GITHUB_REPOSITORY is required.");
+    return;
   }
 
-  const number = await readPullRequestNumberFromWorkflowRunEvent();
+  const pr = await readPullRequestFromWorkflowRunEvent();
+  if (!pr.found) {
+    outro(pr.reason);
+    return;
+  }
+
   const markedBody = `${COMMENT_MARKER}\n${body}`;
   const listResult = await x("gh", [
     "api",
-    `repos/${repo}/issues/${number}/comments`,
+    `repos/${repo}/issues/${pr.number}/comments`,
     "--paginate",
     "--jq",
     `[.[] | select(.body | startswith("${COMMENT_MARKER}")) | .id][0] // empty`,
@@ -178,7 +186,7 @@ export async function postPrComment(body: string): Promise<void> {
   const createResult = await x("gh", [
     "pr",
     "comment",
-    String(number),
+    String(pr.number),
     "--body",
     markedBody,
     "--repo",
@@ -190,45 +198,55 @@ export async function postPrComment(body: string): Promise<void> {
   }
 }
 
-async function readPullRequestNumberFromWorkflowRunEvent(): Promise<number> {
+const eventSchema = z.looseObject({
+  workflow_run: z.looseObject(
+    {
+      event: z.literal("pull_request", {
+        error: "The preview workflow was not triggered by a pull request.",
+      }),
+      conclusion: z.literal("success", {
+        error: "The preview workflow did not complete successfully.",
+      }),
+      pull_requests: z
+        .array(z.looseObject({ number: z.int() }), {
+          error: "The preview workflow is not associated with a pull request.",
+        })
+        .min(1),
+    },
+    {
+      error: "A workflow_run event is required.",
+    },
+  ),
+});
+
+async function readPullRequestFromWorkflowRunEvent(): Promise<
+  | {
+      found: true;
+      number: number;
+    }
+  | {
+      found: false;
+      reason: string;
+    }
+> {
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventPath) {
-    throw new Error("GITHUB_EVENT_PATH is required.");
+    return { found: false, reason: "GITHUB_EVENT_PATH is required." };
   }
 
-  let event: {
-    workflow_run?: {
-      event: string;
-      conclusion: string;
-      pull_requests?: { number: number }[];
-    };
-  };
-
+  let raw: unknown;
   try {
-    event = JSON.parse(await readFile(eventPath, "utf8"));
+    raw = JSON.parse(await readFile(eventPath, "utf8"));
   } catch {
-    throw new Error("Failed to read workflow_run event.");
+    return { found: false, reason: "Failed to read workflow_run event." };
   }
 
-  const workflowRun = event.workflow_run;
-  if (!workflowRun) {
-    throw new Error("A workflow_run event is required.");
+  const { error, data } = eventSchema.safeParse(raw);
+  if (error) {
+    return { found: false, reason: z.prettifyError(error) };
   }
 
-  if (workflowRun.event !== "pull_request") {
-    throw new Error("The preview workflow was not triggered by a pull request.");
-  }
-
-  if (workflowRun.conclusion !== "success") {
-    throw new Error("The preview workflow did not complete successfully.");
-  }
-
-  const number = workflowRun.pull_requests?.[0]?.number;
-  if (!Number.isInteger(number) || !number || number <= 0) {
-    throw new Error("The preview workflow is not associated with a pull request.");
-  }
-
-  return number;
+  return { found: true, number: data.workflow_run.pull_requests[0]!.number };
 }
 
 async function resolvePullRequest(
