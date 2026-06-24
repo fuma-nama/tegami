@@ -1,3 +1,9 @@
+## tegami@0.1.5
+
+### Use absolute path for `bun pm pack`
+
+Somehow they're using project root and do not respect cwd at all.
+
 ## tegami@0.1.4
 
 ### Fix handling for `undefined` bump types
