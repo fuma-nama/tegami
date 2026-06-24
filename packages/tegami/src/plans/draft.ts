@@ -83,7 +83,7 @@ export class DraftPlan {
     return plan;
   }
 
-  private getOrInitPackage(pkg: WorkspacePackage): PackagePlan {
+  getOrInitPackage(pkg: WorkspacePackage): PackagePlan {
     const existing = this.packages.get(pkg.id);
     if (existing) return existing;
 
@@ -209,9 +209,7 @@ export class DraftPlan {
       if (condition.type === "on-exit-prerelease") {
         return graph.getByName(condition.name).some((pkg) => {
           const previous = snapshots.get(pkg.id);
-          if (!previous) return false;
-
-          return semver.inc(previous.version, "release") === pkg.version;
+          return previous && semver.inc(previous.version, "release") === pkg.version;
         });
       }
 
@@ -323,7 +321,6 @@ export async function createDraftPlan(
   }
 
   for (const pkg of context.graph.getPackages()) {
-    // @ts-expect-error -- detect config changes
     draft.getOrInitPackage(pkg);
   }
 

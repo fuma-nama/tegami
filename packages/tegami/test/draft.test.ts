@@ -181,7 +181,7 @@ describe("draft publish plans", () => {
     expect(getPendingPackageIds(draft, (await paper._internal.context()).graph)).toEqual([]);
   });
 
-  test("versions packages when script-level prerelease config changes without a bump type", async () => {
+  test("does not treat matching prerelease config as a pending version bump", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-prerelease-"));
     tempDirs.push(cwd);
 
@@ -209,23 +209,10 @@ describe("draft publish plans", () => {
     const pkg = context.graph.get("npm:tegami")!;
 
     expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
-    expect(draft.hasPending()).toBe(true);
-    expect(getPendingPackageIds(draft, context.graph)).toEqual(["npm:tegami"]);
-    expect(draft.getPackagePlan("npm:tegami")?.bumpVersion(pkg)).toBe("1.1.0-alpha.3");
-
-    await draft.applyPlan();
-
-    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
-      name: "tegami",
-      version: "1.1.0-alpha.3",
-    });
-
-    const rawPlan = await readJson<{ packages: Record<string, { type?: string }> }>(
-      join(cwd, ".tegami/publish-plan"),
-    );
-
-    expect(Object.keys(rawPlan.packages)).toEqual(["npm:tegami"]);
-    expect(rawPlan.packages["npm:tegami"]?.type).toBeUndefined();
+    expect(draft.getPackagePlan("npm:tegami")?.prerelease).toBe("alpha");
+    expect(draft.hasPending()).toBe(false);
+    expect(getPendingPackageIds(draft, context.graph)).toEqual([]);
+    expect(draft.getPackagePlan("npm:tegami")?.bumpVersion(pkg)).toBe("1.1.0-alpha.2");
   });
 
   test("treats file: dependencies outside the workspace as external", async () => {

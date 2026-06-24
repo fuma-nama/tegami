@@ -101,7 +101,7 @@ packages:
     expect(body).not.toContain("2026-06-19-ui.md");
   });
 
-  test("includes prerelease-only version changes in release preview", async () => {
+  test("omits release preview when prerelease config matches current version", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-pr-prerelease-"));
     tempDirs.push(cwd);
     process.env.GITHUB_REPOSITORY = "acme/repo";
@@ -128,11 +128,11 @@ packages:
       cwd,
     );
     const draft = await createDraftPlan([], context);
+    const body = await buildPrPreview(context, draft);
 
     expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
-    expect(await buildPrPreview(context, draft)).toContain(
-      "| `tegami` | — | `1.1.0-alpha.2` → `1.1.0-alpha.3` (no publish) |",
-    );
+    expect(body).not.toContain("#### Release preview");
+    expect(body).toContain("#### No changelogs yet");
   });
 
   test("uses fork head repository for create changelog links", async () => {
