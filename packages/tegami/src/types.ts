@@ -54,6 +54,12 @@ export interface GroupOptions {
 
   /** when multiple packages in the group are published, only one git tag will be created (as well as GitHub release) */
   syncGitTag?: boolean;
+
+  /** npm-specific options. */
+  npm?: {
+    /** npm dist-tag used when publishing. */
+    distTag?: string;
+  };
 }
 
 export interface PackageOptions<Group extends string = string> {

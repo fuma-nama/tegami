@@ -92,14 +92,7 @@ export class DraftPlan {
     // assign script-level configs
     return this.dispatchPackage(
       pkg,
-      (plan) => {
-        const group = this.context.graph.getPackageGroup(pkg.id);
-        if (group?.options.prerelease) {
-          plan.prerelease = group.options.prerelease;
-        }
-
-        pkg.configurePlan(plan);
-      },
+      (plan) => pkg.configurePlan(plan, this.context.graph.getPackageGroup(pkg.id)),
       (plan) => {
         const reasons = (plan.bumpReasons ??= new Set());
         reasons.add("align with script-level configs");

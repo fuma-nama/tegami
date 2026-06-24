@@ -164,10 +164,10 @@ export function generateReplays(graph: PackageGraph, base: Record<string, BumpTy
 
     for (const pkg of resolved) {
       const plan = pkg.initPlan();
-      pkg.configurePlan(plan);
+      pkg.configurePlan(plan, graph.getPackageGroup(pkg.id));
 
       const prerelease = semver.prerelease(pkg.version)?.[0];
-      const targetPrerelease = plan.prerelease ?? graph.getPackageGroup(pkg.id)?.options.prerelease;
+      const targetPrerelease = plan.prerelease;
 
       if (
         // entering prerelease

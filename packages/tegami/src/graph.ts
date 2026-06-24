@@ -34,14 +34,19 @@ export abstract class WorkspacePackage {
   }
 
   /** configure an initial draft plan to match script-level configs. */
-  configurePlan(plan: PackagePlan): void {
-    const { publish, prerelease, npm } = this.opts;
+  configurePlan(plan: PackagePlan, group?: PackageGroup): void {
+    const groupOptions = group?.options;
+    const {
+      publish,
+      prerelease = groupOptions?.prerelease,
+      npm: { distTag = groupOptions?.npm?.distTag } = {},
+    } = this.opts;
 
     if (publish !== undefined) plan.publish = publish;
     if (prerelease !== undefined) plan.prerelease = prerelease;
-    if (npm?.distTag) {
+    if (distTag) {
       plan.npm ??= {};
-      plan.npm.distTag = npm.distTag;
+      plan.npm.distTag = distTag;
     }
   }
 }
