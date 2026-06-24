@@ -4,6 +4,7 @@ import { cargo } from "./providers/cargo";
 import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
+import type { AgentName } from "package-manager-detector";
 
 export interface TegamiContext {
   /** absolute path */
@@ -22,6 +23,10 @@ export interface TegamiContext {
   github?: {
     repo?: string;
     token?: string;
+  };
+  /** additional context when npm plugin is configured */
+  npm?: {
+    client: AgentName;
   };
 }
 

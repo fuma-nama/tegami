@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { x } from "tinyexec";
@@ -9,7 +9,7 @@ import {
 } from "../src/utils/conventional-commit";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { tegami } from "../src";
-import type { CreatedChangelog } from "../src/changelog/generate";
+import type { GeneratedChangelog } from "../src/changelog/generate";
 import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
@@ -226,7 +226,7 @@ function result(overrides: Partial<Awaited<ReturnType<typeof x>>>): Awaited<Retu
   } as Awaited<ReturnType<typeof x>>;
 }
 
-function normalizeFile(file: Pick<CreatedChangelog, "packages" | "changes" | "content">) {
+function normalizeFile(file: Pick<GeneratedChangelog, "packages" | "changes" | "content">) {
   return {
     packages: file.packages,
     changes: file.changes.length,

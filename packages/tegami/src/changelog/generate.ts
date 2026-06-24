@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import { bumpDepth, maxBump, type BumpType } from "../utils/semver";
-import { changelogFilename } from "../utils/changelog";
 import {
   conventionalCommitToBump,
   createConventionalCommitParser,
@@ -13,7 +12,7 @@ import { type ChangelogPackageConfig, renderChangelog } from "./shared";
 import type { PackageGraph } from "../graph";
 import * as semver from "semver";
 
-export interface CreateChangelogOptions {
+export interface GenerateChangelogOptions {
   /** Start revision. Defaults to the latest reachable git tag, or all history if none exists. */
   from?: string;
   /** End revision. Defaults to HEAD. */
@@ -26,7 +25,7 @@ export interface CreateChangelogOptions {
   write?: boolean;
 }
 
-export interface CreatedChangelog {
+export interface GeneratedChangelog {
   filename: string;
   content: string;
   packages: Record<string, BumpType | ChangelogPackageConfig>;
@@ -44,8 +43,8 @@ interface CommitChange {
 
 export async function generateChangelog(
   context: TegamiContext,
-  options: CreateChangelogOptions = {},
-): Promise<CreatedChangelog[]> {
+  options: GenerateChangelogOptions = {},
+): Promise<GeneratedChangelog[]> {
   const write = options.write ?? true;
   const commits = await readConventionalCommits(context, options);
   const groups = new Map<string, CommitChange[]>();
@@ -57,7 +56,7 @@ export async function generateChangelog(
     else groups.set(key, [commit]);
   }
 
-  const changelogs = Array.from(groups, ([key, changes], index): CreatedChangelog => {
+  const changelogs = Array.from(groups, ([key, changes], index): GeneratedChangelog => {
     const packageNames = key ? key.split("\0") : [];
     let bumpType: BumpType = "patch";
     for (const change of changes) {
@@ -99,7 +98,7 @@ export async function generateChangelog(
 
 async function readConventionalCommits(
   context: TegamiContext,
-  options: CreateChangelogOptions,
+  options: GenerateChangelogOptions,
 ): Promise<CommitChange[]> {
   const to = options.to ?? "HEAD";
   const from = options.from ?? (await latestTag(context.cwd));
@@ -185,4 +184,14 @@ export function generateReplays(graph: PackageGraph, base: Record<string, BumpTy
   }
 
   return packages;
+}
+
+export function changelogFilename(disambiguator = 0): string {
+  const date = new Date();
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hash = (Date.now() + disambiguator).toString(36);
+
+  return `${yyyy}-${mm}-${dd}-${hash}.md`;
 }

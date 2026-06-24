@@ -11,7 +11,6 @@ import { parseChangelogFile } from "../src/changelog/parse";
 import type { TegamiContext } from "../src/context";
 import type { PackageOptions } from "../src/types";
 import { buildPrPreview, postPrComment } from "../src/cli/pr";
-import { formatRunScriptCommand } from "../src/utils/package-manager";
 
 vi.mock("package-manager-detector", () => ({
   detect: vi.fn(),
@@ -372,13 +371,6 @@ packages: ["@acme/core"]
     await expect(buildPrPreview(context, draft)).rejects.toThrow(
       "Failed to list pull request changelog files.",
     );
-  });
-
-  test("formats run script commands for the detected package manager", async () => {
-    detectPackageManager.mockResolvedValue({ name: "pnpm", agent: "pnpm" });
-
-    await expect(formatRunScriptCommand("/repo", "tegami")).resolves.toBe("pnpm run tegami");
-    await expect(formatRunScriptCommand("/repo", "tegami", "npm")).resolves.toBe("npm run tegami");
   });
 
   test("writes preview artifact markdown", async () => {

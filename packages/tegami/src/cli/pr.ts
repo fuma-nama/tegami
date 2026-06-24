@@ -4,10 +4,10 @@ import { basename, join, relative } from "node:path";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPlan } from "../plans/draft";
-import { changelogFilename } from "../utils/changelog";
 import { execFailure } from "../utils/error";
-import { formatRunScriptCommand } from "../utils/package-manager";
 import { formatNpmDistTag } from "../utils/semver";
+import { resolveCommand } from "package-manager-detector";
+import { changelogFilename } from "../changelog/generate";
 
 export const TEGAMI_DOCS_URL = "https://tegami.fuma-nama.dev";
 export const CHANGELOG_DOCS_URL = `${TEGAMI_DOCS_URL}/changelog`;
@@ -31,11 +31,8 @@ export async function buildPrPreview(
   options: PrPreviewOptions = {},
 ): Promise<string> {
   const pullRequest = await resolvePullRequest(context, options);
-  const tegamiCommand = await formatRunScriptCommand(
-    context.cwd,
-    "tegami",
-    context.options.npm?.client,
-  );
+  const tegamiCommandRaw = resolveCommand(context.npm?.client ?? "npm", "run", ["tegami"])!;
+  const tegamiCommand = [tegamiCommandRaw.command, ...tegamiCommandRaw.args].join(" ");
   const prChangelogFiles = await listPullRequestChangelogFiles(
     context,
     pullRequest.baseSha,

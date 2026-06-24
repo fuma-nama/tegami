@@ -28,6 +28,9 @@ const SENSITIVE_TOKEN_PATTERNS = [
   /\b(glpat-[A-Za-z0-9-_]{20,})\b/g, // GitLab personal access tokens
 ];
 
+/**
+ * should not be needed, but we cannot be sure if the used CLI tools will expose secrets by accident.
+ */
 function redactSensitiveTokens(text: string): string {
   // when running locally, allow secrets to be shown
   if (!isCI()) return text;

@@ -381,14 +381,14 @@ export function npm({
     async init() {
       if (defaultClient) {
         client = defaultClient;
-        return;
+      } else {
+        const result = await detect({
+          cwd: this.cwd,
+        });
+        client = result?.name ?? "npm";
       }
 
-      const result = await detect({
-        cwd: this.cwd,
-      });
-
-      client = result?.name ?? "npm";
+      this.npm = { client };
     },
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));

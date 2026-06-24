@@ -12,11 +12,10 @@ import {
   spinner,
 } from "@clack/prompts";
 import type { Tegami } from "..";
-import { generateReplays } from "../changelog/generate";
+import { changelogFilename, generateReplays } from "../changelog/generate";
 import type { PackageGroup, PackageGraph, WorkspacePackage } from "../graph";
 import type { TegamiContext } from "../context";
 import { assertPublishPlanFinished } from "../plans/checks";
-import { changelogFilename } from "../utils/changelog";
 import { isCI } from "../utils/constants";
 import { CancelledError } from "../utils/error";
 import { getChangedPackages } from "../utils/git-changes";

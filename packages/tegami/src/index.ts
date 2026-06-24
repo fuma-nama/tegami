@@ -1,9 +1,9 @@
 import { generateChangelog } from "./changelog/generate";
-import type { CreateChangelogOptions, CreatedChangelog } from "./changelog/generate";
+import type { GenerateChangelogOptions, GeneratedChangelog } from "./changelog/generate";
 import { createTegamiContext, TegamiContext } from "./context";
 import { DraftPlan, cleanupPublishPlan, createDraftPlan } from "./plans/draft";
 import type { CleanupResult } from "./plans/draft";
-import { getChangelogFiles, readChangelogEntries } from "./changelog/parse";
+import { readChangelogEntries } from "./changelog/parse";
 import { publishFromPlan } from "./publish";
 import type { PublishOptions, PublishResult } from "./publish";
 import type { TegamiOptions } from "./types";
@@ -12,7 +12,7 @@ import { PackageGraph } from "./graph";
 import { readPlanStore } from "./plans/store";
 
 export type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
-export type { CreateChangelogOptions, CreatedChangelog } from "./changelog/generate";
+export type { GenerateChangelogOptions, GeneratedChangelog } from "./changelog/generate";
 export type {
   LogGenerator,
   TegamiOptions,
@@ -28,7 +28,7 @@ export type { PackageGraph, PackageGroup, WorkspacePackage } from "./graph";
 
 export interface Tegami {
   /** Create pending changelog files from git commit history. */
-  generateChangelog(options?: CreateChangelogOptions): Promise<CreatedChangelog[]>;
+  generateChangelog(options?: GenerateChangelogOptions): Promise<GeneratedChangelog[]>;
   /** Build a draft from pending changelog files. */
   draft(): Promise<DraftPlan>;
   /** Publish the current publish plan. */
