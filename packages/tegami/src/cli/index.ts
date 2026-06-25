@@ -233,6 +233,8 @@ async function publishPackages(
   let hasFailed = false;
 
   for (const [id, packagePlan] of plan.packages) {
+    if (!packagePlan.updated) continue;
+
     const result = packagePlan.publishResult!;
     const pkg = context.graph.get(id)!;
 

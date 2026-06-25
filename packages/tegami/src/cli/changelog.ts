@@ -137,6 +137,7 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   };
 
   const changedPackages = new Set(await getChangedPackages(graph, cwd));
+  const initialValues = new Set<string>();
   const selectOptions: {
     label: string;
     value: string;
@@ -149,6 +150,8 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   }
   groups.sort((a, b) => (a[1] ? 0 : 1) - (b[1] ? 0 : 1));
   for (const [group, changed] of groups) {
+    if (changed) initialValues.add(`group:${group.name}`);
+
     selectOptions.push({
       label: `(Group) ${group.name}` + (changed ? "*" : ""),
       value: `group:${group.name}`,
@@ -160,8 +163,11 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     .getPackages()
     .toSorted((a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1));
   for (const pkg of packages) {
+    const changed = changedPackages.has(pkg);
+
+    if (changed) initialValues.add(pkg.id);
     selectOptions.push({
-      label: getPackageLabel(pkg) + (changedPackages.has(pkg) ? "*" : ""),
+      label: getPackageLabel(pkg) + (changed ? "*" : ""),
       value: pkg.id,
     });
   }
@@ -170,6 +176,7 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     message: "Select packages (leave empty to auto-generate from commits)",
     required: false,
     options: selectOptions,
+    initialValues: Array.from(initialValues),
   });
 
   if (isCancel(selected)) throw new CancelledError();
