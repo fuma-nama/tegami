@@ -234,8 +234,7 @@ async function publishPackages(
 
   for (const [id, packagePlan] of plan.packages) {
     const result = packagePlan.publishResult!;
-    const pkg = context.graph.get(id);
-    if (!pkg) continue;
+    const pkg = context.graph.get(id)!;
 
     if (result.type === "failed") {
       hasFailed = true;

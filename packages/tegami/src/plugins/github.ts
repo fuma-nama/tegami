@@ -211,8 +211,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             return;
           }
 
-          const pkg = this.graph.get(id);
-          if (!pkg) continue;
+          const pkg = this.graph.get(id)!;
           const tag = packagePlan.git?.tag;
           if (!tag) continue;
 
@@ -223,14 +222,21 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
         await Promise.all(
           Array.from(groups, async ([tag, packages]) => {
-            // require all group members to be published
-            if (
-              packages.some((member) => {
-                const publishResult = plan.packages.get(member.id)!.publishResult!;
-                return publishResult.type === "failed";
-              })
-            )
-              return;
+            let hasFailed = false;
+            let hasPublished = false;
+            for (const member of packages) {
+              const result = plan.packages.get(member.id)!.publishResult!;
+              switch (result.type) {
+                case "published":
+                  hasPublished = true;
+                  break;
+                case "failed":
+                  hasFailed = true;
+                  break;
+              }
+            }
+
+            if (hasFailed || !hasPublished) return;
 
             const release =
               packages.length > 1

@@ -173,7 +173,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     }
 
     const published = [...result.packages.entries()]
-      .filter(([, plan]) => plan.publishResult?.type === "published")
+      .filter(([, plan]) => plan.publishResult!.type === "published")
       .map(([id]) => id);
 
     expect(published.sort()).toEqual(

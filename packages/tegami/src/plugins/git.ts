@@ -27,7 +27,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
     if (dryRun || !createTags) return pendingTags;
 
     for (const pkg of plan.packages.values()) {
-      if (pkg.publishResult?.type !== "published") continue;
+      if (pkg.publishResult!.type !== "published") continue;
 
       const tag = pkg.git?.tag;
       if (tag) pendingTags.add(tag);
@@ -59,8 +59,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
       const { graph } = this;
 
       for (const [id, packagePlan] of plan.packages) {
-        const pkg = graph.get(id);
-        if (!pkg) continue;
+        const pkg = graph.get(id)!;
         const group = pkg && graph.getPackageGroup(pkg.id);
 
         let tag: string;

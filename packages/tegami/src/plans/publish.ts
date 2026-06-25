@@ -13,7 +13,7 @@ export interface PublishPlan {
 
   /** id -> entry */
   changelogs: Map<string, ChangelogEntry>;
-  /** id -> package data */
+  /** id -> package data. The package id will always exist in package graph, stale items will be pruned at init-time */
   packages: Map<string, PackagePublishPlan>;
 }
 
@@ -68,6 +68,7 @@ export async function initPublishPlan(
   while ((data = lock.read("core:packages"))) {
     const parsed = packageStoreSchema.safeParse(data).data;
     if (!parsed) continue;
+    if (!context.graph.get(parsed.id)) continue;
 
     const pkgChangelogs: ChangelogEntry[] = [];
     for (const id of parsed.changelogIds ?? []) {
@@ -117,8 +118,9 @@ export async function cleanupPublishLock(context: TegamiContext): Promise<Cleanu
   return { state: "removed" };
 }
 
-function resolvePublishTargets(_context: TegamiContext, plan: PublishPlan): string[] {
+function resolvePublishTargets(plan: PublishPlan): string[] {
   const ordered: string[] = [];
+
   function scan(id: string, stack = new Set<string>()) {
     const preflight = plan.packages.get(id)?.preflight;
     if (!preflight || preflight.publish === false) return;
@@ -161,7 +163,8 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
 
   const onPublishResult = async (pkg: WorkspacePackage, publishResult: PackagePublishResult) => {
     const packagePlan = plan.packages.get(pkg.id);
-    if (packagePlan) packagePlan.publishResult = publishResult;
+    if (!packagePlan) return;
+    packagePlan.publishResult = publishResult;
 
     for (const plugin of context.plugins) {
       await handlePluginError(plugin, "afterPublish", () =>
@@ -173,7 +176,7 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
     }
   };
 
-  for (const id of resolvePublishTargets(context, plan)) {
+  for (const id of resolvePublishTargets(plan)) {
     const pkg = context.graph.get(id)!;
 
     if (dryRun) {
@@ -224,6 +227,18 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
     }
   }
 
+  await Promise.all(
+    Array.from(plan.packages, async ([id, packagePlan]) => {
+      const pkg = context.graph.get(id)!;
+
+      // for packages not listed in publish targets
+      if (!packagePlan.publishResult)
+        await onPublishResult(pkg, {
+          type: "skipped",
+        });
+    }),
+  );
+
   for (const plugin of context.plugins) {
     await handlePluginError(plugin, "afterPublishAll", () =>
       plugin.afterPublishAll?.call(context, { plan }),
@@ -254,8 +269,7 @@ export async function runPreflights(context: TegamiContext, plan: PublishPlan): 
   };
 
   for (const [id, packagePlan] of plan.packages) {
-    const pkg = context.graph.get(id);
-    if (!pkg) continue;
+    const pkg = context.graph.get(id)!;
 
     if (!packagePlan.updated) {
       packagePlan.preflight = { publish: false };
