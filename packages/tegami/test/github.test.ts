@@ -1,9 +1,10 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { PackagePublishResult, PublishResult } from "../src/publish";
 import type { ChangelogEntry } from "../src/changelog/parse";
-import { DraftPlan } from "../src/plans/draft";
+import { Draft } from "../src/plans/draft";
+import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../src/plans/publish";
 import { github } from "../src/plugins/github";
+import type { TegamiContext } from "../src/context";
 import type { TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 
@@ -28,29 +29,23 @@ describe("github release plugin", () => {
   test("creates GitHub releases for successful published packages", async () => {
     const plugin = githubPlugin({
       repo: "acme/repo",
-      onCreateRelease(pkg) {
+      onCreateRelease({ pkg, plan }) {
+        const packagePlan = plan.packages.get(pkg.id);
         return {
-          prerelease: pkg.npm?.distTag !== "latest",
+          prerelease: packagePlan?.npm?.distTag !== "latest",
           title: `Release ${pkg.version}`,
           notes: `Notes for ${pkg.name}`,
         };
       },
     });
 
-    await plugin.afterPublishAll?.call(
-      publishContext(),
-      publishResult({
-        packages: [
-          packageResult({
-            npm: { distTag: "alpha" },
-          }),
-          packageResult({
-            name: "@acme/no-tag",
-            git: undefined,
-          }),
-        ],
-      }),
-    );
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/no-tag")]);
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        { npm: { distTag: "alpha" } },
+        { name: "@acme/no-tag", git: undefined },
+      ]),
+    });
 
     expect(exec).toHaveBeenCalledTimes(2);
     expect(ghReleaseViewCall()?.[1]).toEqual(["release", "view", "@acme/core@1.0.1"]);
@@ -77,15 +72,14 @@ describe("github release plugin", () => {
 
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublishAll?.call(
-      {
-        ...publishContext(),
-        github: { repo: "acme/repo" },
-      },
-      publishResult({
-        packages: [packageResult()],
-      }),
-    );
+    const context = {
+      ...publishContext(),
+      github: { repo: "acme/repo" },
+    };
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [{}]),
+    });
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(ghReleaseViewCall()?.[1]).toEqual([
@@ -101,19 +95,14 @@ describe("github release plugin", () => {
   test("does not create releases when any package failed", async () => {
     const plugin = githubPlugin();
 
-    await plugin.afterPublishAll?.call(
-      publishContext(),
-      publishResult({
-        state: "failed",
-        packages: [
-          packageResult(),
-          packageResult({
-            name: "@acme/ui",
-            state: "failed",
-          }),
-        ],
-      }),
-    );
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {},
+        { name: "@acme/ui", publishResult: { type: "failed", error: "publish failed" } },
+      ]),
+    });
 
     expect(exec).not.toHaveBeenCalled();
   });
@@ -121,21 +110,19 @@ describe("github release plugin", () => {
   test("uses changelog entries for default notes", async () => {
     const plugin = githubPlugin();
 
-    await plugin.afterPublishAll?.call(
-      publishContext(),
-      publishResult({
-        packages: [
-          packageResult({
-            changelogs: [
-              testChangelogEntry({
-                packages: new Map([["@acme/core", { type: "minor" }]]),
-                sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
+    const context = publishContext();
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {
+          changelogs: [
+            testChangelogEntry({
+              packages: new Map([["@acme/core", { type: "minor" }]]),
+              sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
+            }),
+          ],
+        },
+      ]),
+    });
 
     expect(ghReleaseCreateCall()).toMatchInlineSnapshot(`
       [
@@ -172,24 +159,23 @@ describe("github release plugin", () => {
 
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublishAll?.call(
-      {
-        ...publishContext(),
-        github: { repo: "acme/repo" },
-      },
-      publishResult({
-        packages: [
-          packageResult({
-            changelogs: [
-              testChangelogEntry({
-                packages: new Map([["@acme/core", { type: "minor" }]]),
-                sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
+    const context = {
+      ...publishContext(),
+      github: { repo: "acme/repo" },
+    };
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {
+          changelogs: [
+            testChangelogEntry({
+              packages: new Map([["@acme/core", { type: "minor" }]]),
+              sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
+            }),
+          ],
+        },
+      ]),
+    });
 
     expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
@@ -207,17 +193,17 @@ describe("github release plugin", () => {
   test("marks semver prerelease versions as GitHub prerelease by default", async () => {
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublishAll?.call(
-      publishContext(),
-      publishResult({
-        packages: [
-          packageResult({
-            version: "1.0.1-beta.0",
-            git: { tag: "@acme/core@1.0.1-beta.0", tagState: "created" },
-          }),
-        ],
-      }),
-    );
+    const context = publishContext();
+    const pkg = context.graph.get("test:@acme/core") as TestPackage;
+    pkg.setVersion("1.0.1-beta.0");
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {
+          git: { tag: "@acme/core@1.0.1-beta.0" },
+        },
+      ]),
+    });
 
     expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
@@ -234,33 +220,18 @@ describe("github release plugin", () => {
   test("summarizes all packages sharing a git tag in release notes", async () => {
     const plugin = githubPlugin({ repo: "acme/repo" });
 
-    await plugin.afterPublishAll?.call(
-      publishContext(),
-      publishResult({
-        packages: [
-          packageResult({
-            name: "@acme/core",
-            git: { tag: "acme@1.0.1", tagState: "created" },
-            changelogs: [
-              testChangelogEntry({
-                packages: new Map([["group:acme", { type: "minor" }]]),
-                sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
-              }),
-            ],
-          }),
-          packageResult({
-            name: "@acme/ui",
-            git: { tag: "acme@1.0.1", tagState: "created" },
-            changelogs: [
-              testChangelogEntry({
-                packages: new Map([["group:acme", { type: "minor" }]]),
-                sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
+    const sharedChangelog = testChangelogEntry({
+      packages: new Map([["group:acme", { type: "minor" }]]),
+      sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
+    });
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        { name: "@acme/core", git: { tag: "acme@1.0.1" }, changelogs: [sharedChangelog] },
+        { name: "@acme/ui", git: { tag: "acme@1.0.1" }, changelogs: [sharedChangelog] },
+      ]),
+    });
 
     expect(exec).toHaveBeenCalledTimes(3);
     expect(ghReleaseCreateCall()?.[1]).toEqual([
@@ -277,9 +248,9 @@ describe("github release plugin", () => {
   test("uses onCreateGroupedRelease for packages sharing a git tag", async () => {
     const plugin = githubPlugin({
       repo: "acme/repo",
-      onCreateGroupedRelease(packages) {
+      onCreateGroupedRelease({ packages }) {
         return {
-          title: `Group release ${packages[0]!.git!.tag}`,
+          title: `Group release ${packages[0]!.name}`,
           notes: packages.map((pkg) => pkg.name).join(", "),
         };
       },
@@ -288,22 +259,21 @@ describe("github release plugin", () => {
       },
     });
 
-    await plugin.afterPublishAll?.call(
-      publishContext(),
-      publishResult({
-        packages: [
-          packageResult({ name: "@acme/core", git: { tag: "acme@1.0.1", tagState: "created" } }),
-          packageResult({ name: "@acme/ui", git: { tag: "acme@1.0.1", tagState: "created" } }),
-        ],
-      }),
-    );
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        { name: "@acme/core", git: { tag: "acme@1.0.1" } },
+        { name: "@acme/ui", git: { tag: "acme@1.0.1" } },
+      ]),
+    });
 
     expect(ghReleaseCreateCall()?.[1]).toEqual([
       "release",
       "create",
       "acme@1.0.1",
       "--title",
-      "Group release acme@1.0.1",
+      "Group release @acme/core",
       "--notes",
       "@acme/core, @acme/ui",
     ]);
@@ -350,7 +320,7 @@ describe("github version pull request", () => {
 
     try {
       const plugin = githubPlugin({ repo: "acme/repo" });
-      const context = publishContext();
+      const context = publishContext([testPackage("@acme/core", "1.0.0")]);
       const draft = versionDraft(context);
 
       exec.mockImplementation((command, args = []) => {
@@ -454,7 +424,7 @@ describe("github version pull request", () => {
 
         Merge this PR to publish the versioned packages.
 
-        - @acme/core@1.0.0 → @acme/core@1.1.0
+        - **@acme/core**: 1.0.0 → 1.1.0
 
         ## Changelogs
         ### \`change.md\`
@@ -482,7 +452,7 @@ describe("github version pull request", () => {
 
     try {
       const plugin = githubPlugin({ repo: "acme/repo" });
-      const context = publishContext();
+      const context = publishContext([testPackage("@acme/core", "1.0.0")]);
       const draft = versionDraft(context);
 
       exec.mockImplementation((command, args = []) => {
@@ -585,7 +555,7 @@ describe("github version pull request", () => {
 
         Merge this PR to publish the versioned packages.
 
-        - @acme/core@1.0.0 → @acme/core@1.1.0
+        - **@acme/core**: 1.0.0 → 1.1.0
 
         ## Changelogs
         ### \`change.md\`
@@ -667,30 +637,36 @@ function githubPlugin(options?: Parameters<typeof github>[0]): TegamiPlugin {
   return plugin;
 }
 
-function publishContext() {
+function publishContext(packages: TestPackage[] = [testPackage()]): TegamiContext {
   return {
     cwd: "/repo",
     changelogDir: "/repo/.tegami",
-    planPath: "/repo/.tegami/publish-plan",
+    lockPath: "/repo/.tegami/publish-lock.yaml",
     options: {},
     plugins: [],
-    publishOptions: {},
-    graph: new PackageGraph([testPackage()]),
-    getRegistryClient: registryClient,
+    graph: new PackageGraph(packages),
   };
 }
 
-function testPackage(): TestPackage {
-  return new TestPackage();
+function testPackage(name = "@acme/core", version = "1.0.1"): TestPackage {
+  return new TestPackage(name, version);
 }
 
 class TestPackage extends WorkspacePackage {
-  readonly name = "@acme/core";
-  readonly path = "/repo/packages/core";
+  readonly path: string;
   readonly manager = "test";
   readonly publish = true;
 
-  #version = "1.0.0";
+  #version: string;
+
+  constructor(
+    readonly name: string,
+    version = "1.0.1",
+  ) {
+    super();
+    this.#version = version;
+    this.path = `/repo/packages/${name.replace("@", "").replace("/", "-")}`;
+  }
 
   get version() {
     return this.#version;
@@ -700,17 +676,11 @@ class TestPackage extends WorkspacePackage {
     this.#version = version;
   }
 
-  initPlan() {
-    const defaults = super.initPlan();
-    defaults.publish = true;
-    return defaults;
-  }
-
   async write(): Promise<void> {}
 }
 
-function versionDraft(context = publishContext()): DraftPlan {
-  const draft = new DraftPlan(context);
+function versionDraft(context = publishContext([testPackage("@acme/core", "1.0.0")])): Draft {
+  const draft = new Draft(context);
   draft.addChangelog(
     testChangelogEntry({
       packages: new Map([["@acme/core", { type: "minor" }]]),
@@ -723,39 +693,47 @@ function versionDraft(context = publishContext()): DraftPlan {
 async function runVersionPullRequest(
   plugin: TegamiPlugin,
   context: ReturnType<typeof publishContext>,
-  draft: DraftPlan,
+  draft: Draft,
 ) {
   const pkg = context.graph.get("test:@acme/core");
   if (!(pkg instanceof TestPackage)) throw new Error("missing package");
 
-  await plugin.cli?.publishPlanCreated?.call(context, draft);
+  await plugin.cli?.draftCreated?.call(context, draft);
   pkg.setVersion("1.1.0");
-  await plugin.cli?.publishPlanApplied?.call(context, draft);
+  await plugin.cli?.draftApplied?.call(context, draft);
 }
 
-function registryClient() {
-  return {
-    id: "test",
-    supports: () => true,
-    async isPackagePublished() {
-      return false;
-    },
-    async publish() {},
-  };
-}
+function releasePlan(
+  context: TegamiContext,
+  entries: Array<{
+    name?: string;
+    npm?: { distTag?: string };
+    git?: { tag: string };
+    publishResult?: PackagePublishResult;
+    changelogs?: ChangelogEntry[];
+  }>,
+): PublishPlan {
+  const packages = new Map<string, PackagePublishPlan>();
 
-function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
+  for (const entry of entries) {
+    const name = entry.name ?? "@acme/core";
+    const id = `test:${name}`;
+    const pkg = context.graph.get(id);
+    if (!pkg) throw new Error(`missing package ${id}`);
+
+    packages.set(id, {
+      changelogs: entry.changelogs ?? [],
+      updated: true,
+      git: "git" in entry ? entry.git : { tag: `${name}@${pkg.version}` },
+      npm: entry.npm ?? { distTag: "latest" },
+      publishResult: entry.publishResult ?? { type: "published" },
+    });
+  }
+
   return {
-    _rawPlan: {
-      version: "0.0.0",
-      id: "tegami-test",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      changelogs: {},
-      packages: {},
-    },
-    state: "created",
-    packages: [],
-    ...overrides,
+    options: {},
+    changelogs: new Map(),
+    packages,
   };
 }
 
@@ -766,21 +744,6 @@ function testChangelogEntry(overrides: Partial<ChangelogEntry> = {}): ChangelogE
     packages: new Map(),
     sections: [],
     getRawContent: () => "",
-    ...overrides,
-  };
-}
-
-function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePublishResult {
-  const name = overrides.name ?? "@acme/core";
-  const version = overrides.version ?? "1.0.1";
-  return {
-    id: `test:${name}`,
-    name,
-    version,
-    npm: { distTag: "latest" },
-    changelogs: [],
-    git: { tag: `${name}@${version}`, tagState: "created" },
-    state: "success",
     ...overrides,
   };
 }

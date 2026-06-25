@@ -41,9 +41,17 @@ function redactSensitiveTokens(text: string): string {
   return redacted;
 }
 
+type NestedKeyOf<T extends object> = {
+  [K in Extract<keyof T, string>]: NonNullable<T[K]> extends object
+    ? NonNullable<T[K]> extends Function
+      ? K
+      : `${K}.${NestedKeyOf<NonNullable<T[K]>>}`
+    : never;
+}[Extract<keyof T, string>];
+
 export async function handlePluginError<T>(
   plugin: TegamiPlugin,
-  hookName: string,
+  hookName: NestedKeyOf<TegamiPlugin>,
   callback: () => Awaitable<T>,
 ): Promise<T> {
   try {

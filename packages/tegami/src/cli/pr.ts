@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import type { DraftPlan } from "../plans/draft";
+import type { Draft } from "../plans/draft";
 import { execFailure } from "../utils/error";
 import { formatNpmDistTag } from "../utils/semver";
 import { resolveCommand } from "package-manager-detector";
@@ -29,7 +29,7 @@ interface PullRequestRef {
 
 export async function buildPrPreview(
   context: TegamiContext,
-  draft: DraftPlan,
+  draft: Draft,
   options: PrPreviewOptions = {},
 ): Promise<string> {
   const pullRequest = await resolvePullRequest(context, options);
@@ -63,11 +63,10 @@ export async function buildPrPreview(
     from: string;
     to: string;
     distTag?: string;
-    publish: boolean;
   }[] = [];
 
   for (const pkg of context.graph.getPackages()) {
-    const plan = draft.getPackagePlan(pkg.id);
+    const plan = draft.getPackageDraft(pkg.id);
     if (!plan || plan.bumpVersion(pkg) === pkg.version) continue;
 
     pendingPackages.push({
@@ -76,7 +75,6 @@ export async function buildPrPreview(
       from: pkg.version,
       to: plan.bumpVersion(pkg),
       distTag: plan.npm?.distTag,
-      publish: plan.publish ?? false,
     });
   }
 
@@ -87,11 +85,8 @@ export async function buildPrPreview(
   if (pendingPackages.length > 0) {
     lines.push("#### Release preview", "", "| Package | Bump | Version |", "| --- | --- | --- |");
 
-    for (const { name, type, from, to, distTag, publish } of pendingPackages) {
-      const publishNote = publish ? "" : " (no publish)";
-      lines.push(
-        `| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)}${publishNote} |`,
-      );
+    for (const { name, type, from, to, distTag } of pendingPackages) {
+      lines.push(`| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)} |`);
     }
 
     lines.push("");

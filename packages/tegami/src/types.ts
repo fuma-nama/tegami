@@ -1,24 +1,19 @@
 import type { TegamiContext } from "./context";
-import type { DraftPlan, PackagePlan } from "./plans/draft";
-import type { ChangelogEntry } from "./changelog/parse";
-import type { PackagePublishResult, PublishOptions, PublishResult } from "./publish";
+import type { Draft, PackageDraft } from "./plans/draft";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
-import type { PlanStore, PackagePlanStore } from "./plans/store";
 import type { CargoPluginOptions } from "./providers/cargo";
+import type { PackagePublishResult, PublishPlan } from "./plans/publish";
+import type { PublishLock } from "./plans/lock";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
   generate(
     this: TegamiContext,
     opts: {
-      packageId: string;
-      packageName: string;
-      version: string;
-      changelogs: ChangelogEntry[];
-
-      plan: PackagePlan;
-      unstable_draft: DraftPlan;
+      pkg: WorkspacePackage;
+      packageDraft: PackageDraft;
+      draft: Draft;
     },
   ): string | Promise<string>;
 }
@@ -28,8 +23,8 @@ export interface TegamiOptions<Groups extends string = string> {
   cwd?: string;
   /** Directory containing pending changelog markdown files. */
   changelogDir?: string;
-  /** Path to the publish plan file. */
-  planPath?: string;
+  /** Path to the publish lock file. Defaults to `.tegami/publish-lock.yaml`. */
+  lockPath?: string;
   /** Changelog generator used when applying a publish plan. */
   generator?: LogGenerator;
   /** Per-package release and publish options keyed by package name. */
@@ -65,8 +60,6 @@ export interface GroupOptions {
 export interface PackageOptions<Group extends string = string> {
   /** Prerelease identifier appended to bumped versions (e.g. `alpha` → `1.1.0-alpha.0`). */
   prerelease?: string;
-  /** Set to false to keep this package out of npm publishing. */
-  publish?: boolean;
   /** the group of this package, ignored if the group doesn't exist */
   group?: Group;
 
@@ -86,77 +79,82 @@ export interface TegamiPlugin {
   init?(this: TegamiContext): Awaitable<void>;
   /** Resolve workspace packages and dependency metadata into the shared graph. */
   resolve?(this: TegamiContext): Awaitable<void>;
-  /** Register registry clients used to handle packages for different package managers. */
-  createRegistryClient?(
+
+  /** Called when Tegami creates an empty draft. */
+  initDraft?(this: TegamiContext, draft: Draft): Awaitable<Draft | void | undefined>;
+
+  /** Called when Tegami applies the draft. */
+  applyDraft?(this: TegamiContext, draft: Draft): Awaitable<void>;
+
+  /** Called when Tegami creates publish lock. */
+  initPublishLock?(this: TegamiContext, opts: { lock: PublishLock; draft: Draft }): Awaitable<void>;
+
+  /** Called when Tegami creates publish plan. */
+  initPublishPlan?(
     this: TegamiContext,
-  ): Awaitable<RegistryClient | RegistryClient[] | void | undefined>;
+    opts: { lock: PublishLock; plan: PublishPlan },
+  ): Awaitable<void>;
 
-  /** Called when Tegami creates an empty draft plan. */
-  initPlan?(this: TegamiContext, plan: DraftPlan): Awaitable<DraftPlan | void | undefined>;
-  /** Called when Tegami applies the draft plan. */
-  applyPlan?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
+  /** Collect data before publishing a package, will be merged if multiple plugins return preflight data for this package. */
+  publishPreflight?(
+    this: TegamiContext,
+    opts: { pkg: WorkspacePackage; plan: PublishPlan },
+  ): Awaitable<PublishPreflight | void | undefined>;
 
-  /** resolve the plan status, crucial to check if the plan is finished successfully, or needs retries */
+  /** Publish package, return a result object indicating if the package is published, skipped, or failed. Return `undefined` if the package is not handled by this plugin. */
+  publish?(
+    this: TegamiContext,
+    opts: { pkg: WorkspacePackage; plan: PublishPlan },
+  ): Promise<PackagePublishResult | undefined | void>;
+
+  /**
+   * Resolve publish plan status, used to check if the plan is finished successfully, or needs retries.
+   *
+   * Each plugin should only report the status of its own tasks, Tegami will summarize the results from all plugins.
+   */
   resolvePlanStatus?(
     this: TegamiContext,
-    status: PublishPlanStatus,
-    env: {
-      plan: PlanStore;
-    },
-  ): Awaitable<PublishPlanStatus>;
+    opts: { plan: PublishPlan },
+  ): Awaitable<"success" | "pending" | undefined | void>;
 
   /** Called before a package will be published, return `false` to prevent from publishing. */
   willPublish?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage },
-  ): Awaitable<PackagePublishResult | false | void | undefined>;
+  ): Awaitable<false | void | undefined>;
 
-  /** Called after a package is published. */
+  /** Called after a package is published, skipped, or failed. */
   afterPublish?(
     this: TegamiContext,
-    opts: { pkg: WorkspacePackage; result: PackagePublishResult },
-  ): Awaitable<PackagePublishResult | void | undefined>;
+    opts: { pkg: WorkspacePackage; plan: PublishPlan },
+  ): Awaitable<void>;
 
-  /** Called after publishing finishes. */
-  afterPublishAll?(
-    this: TegamiContext & { publishOptions: PublishOptions },
-    result: PublishResult,
-  ): Awaitable<PublishResult | void | undefined>;
+  /** Called after all publishing finishes. */
+  afterPublishAll?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
 
   /** CLI lifecycle hooks. */
   cli?: {
     /** Called once before a CLI command runs. */
     init?(this: TegamiContext): Awaitable<void>;
 
-    /** Called after `tegami version` returns a draft plan. */
-    publishPlanCreated?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
+    /** Called after `tegami version` returns a draft. */
+    draftCreated?(this: TegamiContext, draft: Draft): Awaitable<void>;
 
-    /** Called after `tegami version` applies a publish plan. */
-    publishPlanApplied?(this: TegamiContext, draft: DraftPlan): Awaitable<void>;
+    /** Called after `tegami version` applies a draft. */
+    draftApplied?(this: TegamiContext, draft: Draft): Awaitable<void>;
   };
 }
 
 export type Awaitable<T> = T | Promise<T>;
 
-export interface PublishPlanStatus {
-  state: "pending" | "success" | "missing";
-}
-
 export interface PublishPreflight {
-  /** Package ids that must be published before this one, this will automatically disallow circular dependency. */
-  wait: string[];
-}
+  /** if the package should be published, default to `true`. */
+  publish?: boolean;
 
-export interface RegistryClient {
-  id: string;
-  supports(pkg: WorkspacePackage): boolean;
-  isPackagePublished(pkg: WorkspacePackage): Promise<boolean>;
-  publishPreflight?(
-    pkg: WorkspacePackage,
-    env: { store: PlanStore; packageStore: PackagePlanStore },
-  ): Awaitable<PublishPreflight | void | undefined>;
-  publish(
-    pkg: WorkspacePackage,
-    env: { store: PlanStore; packageStore: PackagePlanStore },
-  ): Promise<void>;
+  /**
+   * Package ids that must be published before this one, this will automatically disallow circular dependency.
+   *
+   * It is okay to add unpublished packages to `wait`, they will be ignored.
+   */
+  wait?: string[];
 }

@@ -6,14 +6,14 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
-import type { Awaitable, RegistryClient, TegamiPlugin } from "../types";
+import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { PackageGraph, WorkspacePackage } from "../graph";
+import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
-import type { PackagePlanStore, PlanStore } from "../plans/store";
 import type { BumpType } from "../utils/semver";
-import type { PlanPolicy } from "../plans/draft";
+import type { DraftPolicy } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
+import z from "zod";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -47,9 +47,8 @@ export class NpmPackage extends WorkspacePackage {
     );
   }
 
-  initPlan() {
-    const defaults = super.initPlan();
-    defaults.publish ??= this.manifest.private !== true;
+  initDraft() {
+    const defaults = super.initDraft();
 
     if (this.manifest.publishConfig?.tag) {
       defaults.npm ??= {};
@@ -57,116 +56,6 @@ export class NpmPackage extends WorkspacePackage {
     }
 
     return defaults;
-  }
-}
-
-export class NpmRegistryClient implements RegistryClient {
-  readonly id = "npm";
-
-  // package@version -> if published
-  #versionMap = new Map<string, Promise<boolean>>();
-
-  constructor(
-    private readonly cwd: string,
-    private readonly client: AgentName,
-    _graph: PackageGraph,
-  ) {}
-
-  supports(pkg: WorkspacePackage): boolean {
-    return pkg instanceof NpmPackage;
-  }
-
-  async isPackagePublished(pkg: NpmPackage): Promise<boolean> {
-    const cacheKey = `${pkg.id}@${pkg.version}`;
-    let info = this.#versionMap.get(cacheKey);
-    if (!info) {
-      const run = async () => {
-        const registry = pkg.manifest.publishConfig?.registry;
-        const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
-        if (registry) args.push("--registry", registry);
-
-        const result = await x(this.client === "pnpm" ? "pnpm" : "npm", args, {
-          nodeOptions: {
-            cwd: this.cwd,
-          },
-        });
-        if (result.exitCode === 0) return true;
-
-        if (isMissingRegistryEntry(result.stderr) || isMissingRegistryEntry(result.stdout))
-          return false;
-
-        throw execFailure(
-          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
-          result,
-        );
-      };
-
-      info = run();
-      this.#versionMap.set(cacheKey, info);
-    }
-
-    return info;
-  }
-
-  async publish(
-    pkg: NpmPackage,
-    { packageStore }: { store: PlanStore; packageStore: PackagePlanStore },
-  ) {
-    const distTag = packageStore.npm?.distTag;
-
-    // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
-    if (this.client === "bun") {
-      const tarballPath = path.resolve(pkg.path, "pkg.tgz");
-      const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-      if (packResult.exitCode !== 0) {
-        throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
-      }
-
-      const publishArgs = ["publish", tarballPath];
-      if (distTag) publishArgs.push("--tag", distTag);
-
-      const publishResult = await x("npm", publishArgs, {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-      if (publishResult.exitCode !== 0) {
-        throw execFailure(
-          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-          publishResult,
-        );
-      }
-      return;
-    }
-
-    const args = ["publish"];
-    if (distTag) args.push("--tag", distTag);
-
-    let client: AgentName;
-    if (this.client === "pnpm") {
-      client = "pnpm";
-      args.push("--no-git-checks");
-    } else if (this.client === "yarn") {
-      client = "yarn";
-    } else {
-      client = "npm";
-    }
-
-    const result = await x(client, args, {
-      nodeOptions: {
-        cwd: pkg.path,
-      },
-    });
-    if (result.exitCode !== 0) {
-      throw execFailure(
-        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-        result,
-      );
-    }
   }
 }
 
@@ -295,6 +184,11 @@ export interface NpmPluginOptions {
   updateLockFile?: boolean;
 }
 
+const packageLockSchema = z.object({
+  id: z.string(),
+  distTag: z.string().optional(),
+});
+
 export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
@@ -314,7 +208,28 @@ export function npm({
 }: NpmPluginOptions = {}): TegamiPlugin {
   let client: AgentName;
 
-  function depsPolicy(context: TegamiContext): PlanPolicy {
+  async function isPackagePublished(context: TegamiContext, pkg: NpmPackage): Promise<boolean> {
+    const registry = pkg.manifest.publishConfig?.registry;
+    const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
+    if (registry) args.push("--registry", registry);
+
+    const result = await x(client === "pnpm" ? "pnpm" : "npm", args, {
+      nodeOptions: {
+        cwd: context.cwd,
+      },
+    });
+    if (result.exitCode === 0) return true;
+
+    if (isMissingRegistryEntry(result.stderr) || isMissingRegistryEntry(result.stdout))
+      return false;
+
+    throw execFailure(
+      `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+      result,
+    );
+  }
+
+  function depsPolicy(context: TegamiContext): DraftPolicy {
     const { graph } = context;
 
     function needsUpdate(dependent: NpmPackage, spec: DependencySpec, target: string): boolean {
@@ -349,7 +264,7 @@ export function npm({
 
     return {
       id: "npm:deps",
-      onUpdate({ pkg, plan }) {
+      onUpdate({ pkg, packageDraft: plan }) {
         if (!(pkg instanceof NpmPackage)) return;
 
         for (const dependent of graph.getPackages()) {
@@ -393,19 +308,121 @@ export function npm({
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));
     },
-    createRegistryClient() {
-      return new NpmRegistryClient(this.cwd, client, this.graph);
+    async publishPreflight({ pkg }) {
+      if (!(pkg instanceof NpmPackage)) return;
+
+      return {
+        publish: pkg.manifest.private !== true && !(await isPackagePublished(this, pkg)),
+      };
     },
-    initPlan(plan) {
+    initPublishLock({ lock, draft }) {
+      for (const [id, pkg] of draft.getPackageDrafts()) {
+        lock.write("npm:packages", {
+          id,
+          distTag: pkg.npm?.distTag,
+        } satisfies z.input<typeof packageLockSchema>);
+      }
+    },
+    initPublishPlan({ lock, plan }) {
+      let data: unknown;
+
+      while ((data = lock.read("npm:packages"))) {
+        const parsed = packageLockSchema.safeParse(data).data;
+        if (!parsed) continue;
+        const packagePlan = plan.packages.get(parsed.id);
+        if (!packagePlan) continue;
+
+        packagePlan.npm = {
+          distTag: parsed.distTag,
+        };
+      }
+    },
+    async publish({ pkg, plan }) {
+      if (!(pkg instanceof NpmPackage)) return;
+
+      const packagePlan = plan.packages.get(pkg.id)!;
+      const distTag = packagePlan.npm?.distTag;
+
+      // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
+      if (client === "bun") {
+        const tarballPath = path.resolve(pkg.path, "pkg.tgz");
+        const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
+          nodeOptions: {
+            cwd: pkg.path,
+          },
+        });
+        if (packResult.exitCode !== 0) {
+          return {
+            type: "failed",
+            error: execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult).message,
+          };
+        }
+
+        const publishArgs = ["publish", tarballPath];
+        if (distTag) publishArgs.push("--tag", distTag);
+
+        const publishResult = await x("npm", publishArgs, {
+          nodeOptions: {
+            cwd: pkg.path,
+          },
+        });
+        if (publishResult.exitCode !== 0) {
+          return {
+            type: "failed",
+            error: execFailure(
+              `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+              publishResult,
+            ).message,
+          };
+        }
+        return {
+          type: "published",
+        };
+      }
+
+      let command: AgentName;
+      const args = ["publish"];
+      if (distTag) args.push("--tag", distTag);
+
+      if (client === "pnpm") {
+        command = "pnpm";
+        args.push("--no-git-checks");
+      } else if (client === "yarn") {
+        command = "yarn";
+      } else {
+        command = "npm";
+      }
+
+      const result = await x(command, args, {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+
+      if (result.exitCode !== 0) {
+        return {
+          type: "failed",
+          error: execFailure(
+            `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+            result,
+          ).message,
+        };
+      }
+
+      return {
+        type: "published",
+      };
+    },
+    initDraft(plan) {
       plan.addPolicy(depsPolicy(this));
     },
-    async applyPlan(draft) {
+    async applyDraft(draft) {
       const { graph } = this;
       const writes: Awaitable<void>[] = [];
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof NpmPackage)) continue;
-        const plan = draft.getPackagePlan(pkg.id);
+        const plan = draft.getPackageDraft(pkg.id);
         if (plan) {
           pkg.manifest.version = plan.bumpVersion(pkg);
         }
@@ -455,7 +472,7 @@ export function npm({
       await Promise.all(writes);
     },
     cli: {
-      async publishPlanApplied() {
+      async draftApplied() {
         if (!updateLockFile) return;
 
         let args: string[];

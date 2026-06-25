@@ -3,13 +3,14 @@ import { join, relative } from "node:path";
 import { prerelease as getPrerelease } from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
-import type { DraftPlan } from "../plans/draft";
-import { publishError, type PackagePublishResult } from "../publish";
+import type { Draft } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatNpmDistTag, formatPackageVersion } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
 import { isCI } from "../utils/constants";
+import { PackagePublishPlan, PublishPlan } from "../plans/publish";
+import { WorkspacePackage } from "../graph";
 
 interface GithubRelease {
   /** Release title */
@@ -66,17 +67,17 @@ export interface GitHubPluginOptions extends GitPluginOptions {
   /** Override release details for a single package, return `false` to skip. */
   onCreateRelease?: (
     this: TegamiContext,
-    result: PackagePublishResult,
+    opts: { tag: string; pkg: WorkspacePackage; plan: PublishPlan },
   ) => Awaitable<GithubRelease | false>;
   /** Override release details when multiple packages share a git tag, return `false` to skip. */
   onCreateGroupedRelease?: (
     this: TegamiContext,
-    packages: PackagePublishResult[],
+    opts: { tag: string; packages: WorkspacePackage[]; plan: PublishPlan },
   ) => Awaitable<GithubRelease | false>;
   /** Override details for "Version Packages" PR. */
   onCreateVersionPullRequest?: (
     this: TegamiContext,
-    publishPlan: DraftPlan,
+    draft: Draft,
   ) => Awaitable<VersionPullRequest | false>;
 
   cli?: {
@@ -101,31 +102,33 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
   async function createRelease(
     context: TegamiContext,
-    pkg: PackagePublishResult,
+    tag: string,
+    plan: PublishPlan,
+    pkg: WorkspacePackage,
   ): Promise<ResolvedGithubRelease | undefined> {
-    if (pkg.state === "failed") return;
-
-    const release = (await onCreateRelease?.call(context, pkg)) ?? {};
+    const release = (await onCreateRelease?.call(context, { tag, pkg, plan })) ?? {};
     if (release === false) return;
 
+    const packagePlan = plan.packages.get(pkg.id);
     return {
-      title: release.title ?? defaultTitle(pkg),
-      notes: release.notes ?? (await defaultNotes(context, pkg)),
+      title:
+        release.title ?? formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
+      notes: release.notes ?? (await defaultNotes(context, pkg, packagePlan)),
       prerelease: release.prerelease ?? getPrerelease(pkg.version) !== null,
     };
   }
 
   async function createGroupedRelease(
     context: TegamiContext,
-    packages: PackagePublishResult[],
+    tag: string,
+    plan: PublishPlan,
+    packages: WorkspacePackage[],
   ): Promise<ResolvedGithubRelease | undefined> {
-    if (packages.some((member) => member.state === "failed")) return;
-
-    const release = (await onCreateGroupedRelease?.call(context, packages)) ?? {};
+    const release = (await onCreateGroupedRelease?.call(context, { tag, packages, plan })) ?? {};
     if (release === false) return;
     return {
-      title: release.title ?? defaultGroupedTitle(packages),
-      notes: release.notes ?? (await defaultGroupedNotes(context, packages)),
+      title: release.title ?? tag,
+      notes: release.notes ?? (await defaultGroupedNotes(context, plan, packages)),
       prerelease: release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
     };
   }
@@ -148,20 +151,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     return [false];
   }
 
-  function defaultVersionPRBody(draft: DraftPlan, context: TegamiContext): string {
+  function defaultVersionPRBody(draft: Draft, context: TegamiContext): string {
     const packageLines: string[] = [];
 
     for (const pkg of context.graph.getPackages()) {
-      const packagePlan = draft.getPackagePlan(pkg.id);
-      if (!packagePlan) continue;
+      const packageDraft = draft.getPackageDraft(pkg.id);
+      if (!packageDraft) continue;
       const originalVersion = cliOriginalPackageVersions.get(pkg.id) ?? pkg.version;
       if (originalVersion === pkg.version) continue;
 
-      const publishTxt = packagePlan.publish ? "" : " (no publish)";
-      const distTagTxt = formatNpmDistTag(packagePlan.npm?.distTag);
-      packageLines.push(
-        `- ${pkg.name}@${originalVersion} → ${pkg.name}@${pkg.version}${distTagTxt}${publishTxt}`,
-      );
+      let line = `- **${pkg.name}**: ${originalVersion} → ${pkg.version}`;
+      line += formatNpmDistTag(packageDraft.npm?.distTag);
+      packageLines.push(line);
     }
 
     const changelogLines: string[] = [];
@@ -201,6 +202,73 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           token: options.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
         };
       },
+      async afterPublishAll({ plan }) {
+        const repo = this.github?.repo;
+        const groups = new Map<string, WorkspacePackage[]>();
+
+        for (const [id, packagePlan] of plan.packages) {
+          if (!eagerRelease && packagePlan.publishResult!.type === "failed") {
+            return;
+          }
+
+          const pkg = this.graph.get(id);
+          if (!pkg) continue;
+          const tag = packagePlan.git?.tag;
+          if (!tag) continue;
+
+          const group = groups.get(tag);
+          if (group) group.push(pkg);
+          else groups.set(tag, [pkg]);
+        }
+
+        await Promise.all(
+          Array.from(groups, async ([tag, packages]) => {
+            // require all group members to be published
+            if (
+              packages.some((member) => {
+                const publishResult = plan.packages.get(member.id)!.publishResult!;
+                return publishResult.type === "failed";
+              })
+            )
+              return;
+
+            const release =
+              packages.length > 1
+                ? await createGroupedRelease(this, tag, plan, packages)
+                : await createRelease(this, tag, plan, packages[0]!);
+            if (!release) return;
+
+            const viewArgs: string[] = ["release", "view", tag];
+            if (repo) viewArgs.push("--repo", repo);
+
+            const existing = await x("gh", viewArgs);
+            if (existing.exitCode === 0) return;
+
+            const args: string[] = [
+              "release",
+              "create",
+              tag,
+              "--title",
+              release.title,
+              "--notes",
+              release.notes,
+            ];
+
+            if (repo) {
+              args.push("--repo", repo);
+            }
+
+            if (release.prerelease) {
+              args.push("--prerelease");
+            }
+
+            const ghOut = await x("gh", args);
+            if (ghOut.exitCode !== 0) {
+              throw execFailure(`Failed to create GitHub release for ${tag}.`, ghOut);
+            }
+          }),
+        );
+      },
       cli: {
         async init() {
           if (!isCI()) return;
@@ -221,12 +289,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             throw execFailure("Failed to configure git remote for GitHub Actions.", result);
           }
         },
-        publishPlanCreated() {
+        draftCreated() {
           for (const pkg of this.graph.getPackages()) {
             cliOriginalPackageVersions.set(pkg.id, pkg.version);
           }
         },
-        async publishPlanApplied(draft) {
+        async draftApplied(draft) {
           const { cwd } = this;
           const [enabled, config] = resolvePROptions();
           const repo = this.github?.repo;
@@ -300,54 +368,6 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           }
         },
       },
-      async afterPublishAll(result) {
-        if (result.state === "skipped") return;
-        if (!eagerRelease && result.state === "failed") return;
-
-        const repo = this.github?.repo;
-
-        await Promise.all(
-          Array.from(groupPackagesByGitTag(result.packages), async ([tag, packages]) => {
-            const release =
-              packages.length > 1
-                ? await createGroupedRelease(this, packages)
-                : await createRelease(this, packages[0]!);
-            if (!release) return;
-
-            const viewArgs: string[] = ["release", "view", tag];
-            if (repo) viewArgs.push("--repo", repo);
-
-            const existing = await x("gh", viewArgs);
-            if (existing.exitCode === 0) return;
-
-            const args: string[] = [
-              "release",
-              "create",
-              tag,
-              "--title",
-              release.title,
-              "--notes",
-              release.notes,
-            ];
-
-            if (repo) {
-              args.push("--repo", repo);
-            }
-
-            if (release.prerelease) {
-              args.push("--prerelease");
-            }
-
-            const ghOut = await x("gh", args);
-            if (ghOut.exitCode !== 0) {
-              publishError(
-                result,
-                execFailure(`Failed to create GitHub release for ${tag}.`, ghOut).message,
-              );
-            }
-          }),
-        );
-      },
     },
   ];
 }
@@ -376,36 +396,6 @@ async function findOpenPullRequest(
 
   const pullRequests = JSON.parse(result.stdout) as Array<{ number: number }>;
   return pullRequests[0]?.number;
-}
-
-function groupPackagesByGitTag(
-  packages: PackagePublishResult[],
-): Map<string, PackagePublishResult[]> {
-  const groups = new Map<string, PackagePublishResult[]>();
-
-  for (const pkg of packages) {
-    if (!pkg.git?.tag) continue;
-
-    const group = groups.get(pkg.git.tag);
-    if (group) group.push(pkg);
-    else groups.set(pkg.git.tag, [pkg]);
-  }
-
-  return groups;
-}
-
-function defaultTitle(pkg: PackagePublishResult): string {
-  return formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag);
-}
-
-function defaultGroupedTitle(packages: PackagePublishResult[]): string {
-  const primary = packages[0]!;
-  const distTag = packages.every((pkg) => pkg.npm?.distTag === primary.npm?.distTag)
-    ? primary.npm?.distTag
-    : undefined;
-
-  const tag = primary.git!.tag;
-  return formatPackageVersion(tag.slice(0, tag.lastIndexOf("@")), primary.version, distTag);
 }
 
 function formatCommitLink(commit: string, repo?: string): string {
@@ -449,42 +439,52 @@ async function renderChangelogEntryNotes(
   return lines.join("\n").trim();
 }
 
-async function defaultNotes(context: TegamiContext, pkg: PackagePublishResult): Promise<string> {
-  if (pkg.changelogs.length > 0) {
+async function defaultNotes(
+  context: TegamiContext,
+  pkg: WorkspacePackage,
+  packagePlan?: PackagePublishPlan,
+): Promise<string> {
+  if (packagePlan && packagePlan.changelogs.length > 0) {
     const notes = await Promise.all(
-      pkg.changelogs.map(async (entry) => renderChangelogEntryNotes(context, entry)),
+      packagePlan.changelogs.map(async (entry) => renderChangelogEntryNotes(context, entry)),
     );
 
     return notes.join("\n\n");
   }
 
-  return `Published ${formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag)}.`;
+  return `Published ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}.`;
 }
 
 async function defaultGroupedNotes(
   context: TegamiContext,
-  packages: PackagePublishResult[],
+  plan: PublishPlan,
+  packages: WorkspacePackage[],
 ): Promise<string> {
   const changelogs = new Map<string, ChangelogEntry>();
 
   for (const pkg of packages) {
-    for (const entry of pkg.changelogs) changelogs.set(entry.id, entry);
+    const packagePlan = plan.packages.get(pkg.id);
+    if (!packagePlan) continue;
+
+    for (const entry of packagePlan.changelogs) changelogs.set(entry.id, entry);
   }
 
   const sections = [
     packages
-      .map((pkg) => `- ${formatPackageVersion(pkg.name, pkg.version, pkg.npm?.distTag)}`)
+      .map((pkg) => {
+        const packagePlan = plan.packages.get(pkg.id);
+
+        return `- ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}`;
+      })
       .join("\n"),
   ];
 
   if (changelogs.size > 0) {
     const notes = await Promise.all(
-      Array.from(changelogs.values()).map((entry) => renderChangelogEntryNotes(context, entry)),
+      Array.from(changelogs.values(), (entry) => renderChangelogEntryNotes(context, entry)),
     );
 
     sections.push("", notes.join("\n\n"));
-  } else {
-    sections.push("", `Published ${packages[0]!.git!.tag}.`);
   }
 
   return sections.join("\n");

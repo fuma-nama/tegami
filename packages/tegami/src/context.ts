@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { TegamiOptions, RegistryClient, TegamiPlugin, TegamiPluginOption } from "./types";
+import type { TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
 import { cargo } from "./providers/cargo";
 import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
@@ -12,12 +12,10 @@ export interface TegamiContext {
   /** absolute path */
   changelogDir: string;
   /** absolute path */
-  planPath: string;
+  lockPath: string;
   options: TegamiOptions;
   plugins: TegamiPlugin[];
   graph: PackageGraph;
-  /** error if doesn't exist */
-  getRegistryClient(pkgOrId: WorkspacePackage | string): RegistryClient;
 
   /** additional context when GitHub plugin is configured */
   github?: {
@@ -34,37 +32,15 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const changelogDir = path.resolve(cwd, options.changelogDir ?? ".tegami");
   const graph = new PackageGraph();
-  const registryClients = new Map<string, RegistryClient>();
   const ctx: TegamiContext = {
     cwd,
     changelogDir,
-    planPath: options.planPath
-      ? path.resolve(cwd, options.planPath)
-      : path.join(changelogDir, "publish-plan"),
+    lockPath: options.lockPath
+      ? path.resolve(cwd, options.lockPath)
+      : path.join(changelogDir, "publish-lock.yaml"),
     options,
     plugins: resolvePlugins([npm(options.npm), cargo(options.cargo), ...(options.plugins ?? [])]),
     graph,
-    getRegistryClient(pkgOrId) {
-      let client: RegistryClient | undefined;
-
-      if (typeof pkgOrId === "string") {
-        client = registryClients.get(pkgOrId);
-      } else {
-        for (const item of registryClients.values()) {
-          if (item.supports && item.supports(pkgOrId)) {
-            client = item;
-            break;
-          }
-        }
-      }
-
-      if (!client) {
-        const id = typeof pkgOrId === "string" ? pkgOrId : pkgOrId.manager;
-        throw new Error(`No registry client is available for ${id}.`);
-      }
-
-      return client;
-    },
   };
 
   for (const plugin of ctx.plugins) {
@@ -100,17 +76,6 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
 
     if (packageOptions.group) {
       graph.addGroupMember(packageOptions.group, pkg.id);
-    }
-  }
-
-  for (const plugin of ctx.plugins) {
-    const clients = await handlePluginError(plugin, "createRegistryClient", () =>
-      plugin.createRegistryClient?.call(ctx),
-    );
-    if (!clients) continue;
-
-    for (const client of Array.isArray(clients) ? clients : [clients]) {
-      registryClients.set(client.id, client);
     }
   }
 

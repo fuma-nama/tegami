@@ -6,7 +6,7 @@ import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
-import { createDraftPlan } from "../src/plans/draft";
+import { createDraft } from "../src/plans/draft";
 import { parseChangelogFile } from "../src/changelog/parse";
 import type { TegamiContext } from "../src/context";
 import type { PackageOptions } from "../src/types";
@@ -63,7 +63,7 @@ describe("pr", () => {
       [testPackage("@acme/core", "1.0.0"), testPackage("@acme/ui", "2.0.0")],
       cwd,
     );
-    const draft = await createDraftPlan(
+    const draft = await createDraft(
       [
         parseChangelogFile(
           "2026-06-19-core.md",
@@ -94,8 +94,8 @@ packages:
     expect(body).toContain(
       "[**Create a changelog →**](https://github.com/acme/repo/new/feature/release?filename=.tegami%2F",
     );
-    expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` (no publish) |");
-    expect(body).toContain("| `@acme/ui` | patch | `2.0.0` → `2.0.1` (no publish) |");
+    expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` |");
+    expect(body).toContain("| `@acme/ui` | patch | `2.0.0` → `2.0.1` |");
     expect(body).toContain("#### Changelogs in this PR");
     expect(body).toContain("- `2026-06-19-core.md` — Support auto changelogs");
     expect(body).not.toContain("2026-06-19-ui.md");
@@ -127,10 +127,10 @@ packages:
       [testPackage("tegami", "1.1.0-alpha.2", { prerelease: "alpha" })],
       cwd,
     );
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft);
 
-    expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
+    expect(draft.getPackageDraft("npm:tegami")?.type).toBeUndefined();
     expect(body).not.toContain("#### Release preview");
     expect(body).toContain("#### No changelogs yet");
   });
@@ -159,7 +159,7 @@ packages:
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")], cwd);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft);
 
     expect(body).toContain(
@@ -195,7 +195,7 @@ packages:
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
@@ -257,7 +257,7 @@ packages:
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")], cwd);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
@@ -277,7 +277,7 @@ packages:
   test("requires pull request event or number", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     await expect(buildPrPreview(context, draft)).rejects.toThrow(
       "A pull request event or --number is required.",
@@ -287,7 +287,7 @@ packages:
   test("rejects invalid pull request numbers", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     await expect(buildPrPreview(context, draft, { number: Number.NaN })).rejects.toThrow(
       "--number must be a positive integer.",
@@ -319,7 +319,7 @@ packages:
 
     exec.mockReturnValueOnce(commandResult({ stdout: ".tegami/2026-06-19-core.md\n" }));
 
-    const draft = await createDraftPlan(
+    const draft = await createDraft(
       [
         parseChangelogFile(
           "2026-06-19-core.md",
@@ -366,7 +366,7 @@ packages: ["@acme/core"]
     exec.mockReturnValueOnce(commandResult({ exitCode: 128, stderr: "fatal: bad revision" }));
 
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     await expect(buildPrPreview(context, draft)).rejects.toThrow(
       "Failed to list pull request changelog files.",
@@ -399,7 +399,7 @@ packages: ["@acme/core"]
     exec.mockReturnValueOnce(commandResult());
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft);
     const path = join(cwd, "tegami-pr-preview.md");
     await writeFile(path, body);
@@ -429,7 +429,7 @@ packages: ["@acme/core"]
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     const body = await buildPrPreview(context, draft);
 
@@ -566,13 +566,10 @@ function createTestContext(packages: WorkspacePackage[], cwd?: string): TegamiCo
   return {
     cwd: root,
     changelogDir: join(root, ".tegami"),
-    planPath: join(root, ".tegami", "publish-plan"),
+    lockPath: join(root, ".tegami", "publish-lock.yaml"),
     options: {},
     plugins: [],
     graph: new PackageGraph(packages),
-    getRegistryClient() {
-      throw new Error("not implemented");
-    },
   };
 }
 

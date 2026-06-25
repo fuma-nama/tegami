@@ -1,48 +1,48 @@
 import type { TegamiContext } from "../context";
-import type { PublishPlanStatus } from "../types";
 import { handlePluginError } from "../utils/error";
-import { readPlanStore, type PlanStore } from "./store";
+import { PublishPlan, initPublishPlan, runPreflights } from "./publish";
+
+export type PublishPlanStatus = "success" | "pending";
 
 export async function publishPlanStatus(
-  store: PlanStore,
+  plan: PublishPlan,
   context: TegamiContext,
 ): Promise<PublishPlanStatus> {
-  async function defaultStatus(): Promise<PublishPlanStatus> {
-    try {
-      await Promise.all(
-        Object.entries(store.packages).map(async ([id, plan]) => {
-          const pkg = context.graph.get(id);
-          if (!pkg || !plan.publish) return;
+  for (const pkg of plan.packages.values()) {
+    if (!pkg.preflight) throw new Error("Should perform preflight before checking plan status.");
 
-          const published = await context.getRegistryClient(pkg).isPackagePublished(pkg);
-          if (!published) throw "pending";
-        }),
-      );
-      return { state: "success" };
-    } catch (err) {
-      if (err === "pending") return { state: "pending" };
-      throw err;
-    }
+    const shouldPublish = pkg.preflight.publish ?? true;
+    if (shouldPublish) return "pending";
   }
 
-  let status = await defaultStatus();
-  for (const plugin of context.plugins) {
-    const resolved = await handlePluginError(plugin, "resolvePlanStatus", () =>
-      plugin.resolvePlanStatus?.call(context, status, { plan: store }),
+  try {
+    await Promise.all(
+      context.plugins.map(async (plugin) => {
+        const status = await handlePluginError(plugin, "resolvePlanStatus", () =>
+          plugin.resolvePlanStatus?.call(context, { plan }),
+        );
+
+        if (status === "pending") throw "pending";
+      }),
     );
-    if (resolved) status = resolved;
+
+    return "success";
+  } catch (e) {
+    if (e === "pending") return "pending";
+    throw e;
   }
-  return status;
 }
 
 export async function assertPublishPlanFinished(context: TegamiContext): Promise<void> {
-  const store = await readPlanStore(context);
-  if (!store) return;
-  const status = await publishPlanStatus(store, context);
+  const plan = await initPublishPlan(context, {});
+  if (!plan) return;
 
-  if (status.state === "pending") {
+  await runPreflights(context, plan);
+  const status = await publishPlanStatus(plan, context);
+
+  if (status === "pending") {
     throw new Error(
-      `Publish plan already exists at ${context.planPath} and is pending. Publish it before applying a new plan.`,
+      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
     );
   }
 }

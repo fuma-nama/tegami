@@ -149,11 +149,10 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   }
   groups.sort((a, b) => (a[1] ? 0 : 1) - (b[1] ? 0 : 1));
   for (const [group, changed] of groups) {
-    const members = group.packages.map(getPackageLabel).join(", ");
     selectOptions.push({
-      label: `(Group) ${group.name}`,
+      label: `(Group) ${group.name}` + (changed ? "*" : ""),
       value: `group:${group.name}`,
-      hint: changed ? `changed · ${members}` : members,
+      hint: group.packages.map(getPackageLabel).join(", "),
     });
   }
 
@@ -162,9 +161,8 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     .toSorted((a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1));
   for (const pkg of packages) {
     selectOptions.push({
-      label: getPackageLabel(pkg),
+      label: getPackageLabel(pkg) + (changedPackages.has(pkg) ? "*" : ""),
       value: pkg.id,
-      hint: changedPackages.has(pkg) ? "changed" : undefined,
     });
   }
 

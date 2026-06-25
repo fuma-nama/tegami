@@ -62,7 +62,7 @@ describe("init-agent", () => {
       - Include YAML frontmatter with \`packages\`
       - Include at least one \`#\`, \`##\`, or \`###\` heading in the body
       - Write user-facing release notes under each heading
-      - Do not edit \`.tegami/publish-plan\` or package \`CHANGELOG.md\` files directly
+      - Do not edit \`.tegami/publish-lock.yaml\` or package \`CHANGELOG.md\` files directly
       "
     `);
   });
@@ -120,7 +120,7 @@ describe("init-agent", () => {
       - Include YAML frontmatter with \`packages\`
       - Include at least one \`#\`, \`##\`, or \`###\` heading in the body
       - Write user-facing release notes under each heading
-      - Do not edit \`.tegami/publish-plan\` or package \`CHANGELOG.md\` files directly
+      - Do not edit \`.tegami/publish-lock.yaml\` or package \`CHANGELOG.md\` files directly
       "
     `);
   });
@@ -132,13 +132,10 @@ function createTestContext(cwd: string, packages: WorkspacePackage[]): TegamiCon
   return {
     cwd,
     changelogDir: join(cwd, ".tegami"),
-    planPath: join(cwd, ".tegami", "publish-plan"),
+    lockPath: join(cwd, ".tegami", "publish-lock.yaml"),
     options: {},
     plugins: [],
     graph,
-    getRegistryClient() {
-      throw new Error("not implemented");
-    },
   };
 }
 

@@ -32,7 +32,7 @@ export async function initAgent(
 
 export function renderAgentsMd(context: TegamiContext): string {
   const changelogDir = path.relative(context.cwd, context.changelogDir) || "project root";
-  const planPath = path.relative(context.cwd, context.planPath) || "project root";
+  const planPath = path.relative(context.cwd, context.lockPath) || "project root";
 
   return [
     "# Release workflow",

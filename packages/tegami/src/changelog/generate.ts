@@ -163,8 +163,8 @@ export function generateReplays(graph: PackageGraph, base: Record<string, BumpTy
     const resolved = graph.getByName(ref);
 
     for (const pkg of resolved) {
-      const plan = pkg.initPlan();
-      pkg.configurePlan(plan, graph.getPackageGroup(pkg.id));
+      const plan = pkg.initDraft();
+      pkg.configureDraft(plan, graph.getPackageGroup(pkg.id));
 
       const prerelease = semver.prerelease(pkg.version)?.[0];
       const targetPrerelease = plan.prerelease;

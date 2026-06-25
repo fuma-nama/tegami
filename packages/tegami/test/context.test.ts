@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createTegamiContext } from "../src/context";
 import { NpmPackage } from "../src/providers/npm";
 import type { TegamiPlugin } from "../src/types";
-import { WorkspacePackage } from "../src/graph";
 
 vi.mock("package-manager-detector", () => ({
   detect: vi.fn(),
@@ -34,8 +33,12 @@ describe("tegami context", () => {
     });
     const pkg = npmPackage();
     context.graph.add(pkg);
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    await context.getRegistryClient("npm").isPackagePublished(pkg);
+    await npmPlugin.publishPreflight?.call(context, {
+      pkg,
+      plan: emptyPlan(),
+    });
 
     expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
       nodeOptions: {
@@ -56,8 +59,12 @@ describe("tegami context", () => {
     });
     const pkg = npmPackage();
     context.graph.add(pkg);
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    await context.getRegistryClient("npm").isPackagePublished(pkg);
+    await npmPlugin.publishPreflight?.call(context, {
+      pkg,
+      plan: emptyPlan(),
+    });
 
     expect(exec).toHaveBeenCalledWith("pnpm", ["view", "@acme/core@1.0.0", "version", "--json"], {
       nodeOptions: {
@@ -70,30 +77,33 @@ describe("tegami context", () => {
     });
   });
 
-  test("throws for unsupported package managers", async () => {
+  test("defaults npm client when package manager detection fails", async () => {
     const context = await createTegamiContext({
       cwd: "/repo",
     });
+    const pkg = npmPackage();
+    context.graph.add(pkg);
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    expect(() => context.getRegistryClient("yarn")).toThrow(
-      "No registry client is available for yarn.",
-    );
-    expect(() => context.getRegistryClient(workspacePackage("yarn"))).toThrow(
-      "No registry client is available for yarn.",
-    );
-    expect(() => context.getRegistryClient(workspacePackage("npm"))).toThrow(
-      "No registry client is available for npm.",
-    );
-    expect(exec).not.toHaveBeenCalled();
+    await npmPlugin.publishPreflight?.call(context, {
+      pkg,
+      plan: emptyPlan(),
+    });
+
+    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
+      nodeOptions: {
+        cwd: "/repo",
+      },
+    });
   });
 
-  test("defaults the publish plan path", async () => {
+  test("defaults the publish lock path", async () => {
     const context = await createTegamiContext({
       cwd: "/repo",
     });
 
     expect(context.changelogDir).toBe("/repo/.tegami");
-    expect(context.planPath).toBe("/repo/.tegami/publish-plan");
+    expect(context.lockPath).toBe("/repo/.tegami/publish-lock.yaml");
   });
 
   test("stores plugins in enforce order", async () => {
@@ -126,32 +136,19 @@ describe("tegami context", () => {
   });
 });
 
+function emptyPlan() {
+  return {
+    options: {},
+    changelogs: new Map(),
+    packages: new Map(),
+  };
+}
+
 function plugin(name: string, enforce?: TegamiPlugin["enforce"]): TegamiPlugin {
   return {
     name,
     enforce,
   };
-}
-
-function workspacePackage(manager: string): WorkspacePackage {
-  return new TestPackage(manager);
-}
-
-class TestPackage extends WorkspacePackage {
-  readonly name = "pkg";
-  readonly path = "/repo/pkg";
-  readonly publish = true;
-  readonly version = "1.0.0";
-
-  constructor(readonly manager: string) {
-    super();
-  }
-
-  setVersion(): void {}
-
-  async updateDependency(): Promise<void> {}
-
-  async write(): Promise<void> {}
 }
 
 function npmPackage(): NpmPackage {

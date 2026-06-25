@@ -5,11 +5,10 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import type { PlanPolicy } from "../plans/draft";
-import type { Awaitable, PublishPreflight, TegamiPlugin, RegistryClient } from "../types";
-import type { PlanStore, PackagePlanStore } from "../plans/store";
+import type { DraftPolicy } from "../plans/draft";
+import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { PackageGraph, WorkspacePackage } from "../graph";
+import { WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 
 interface TomlTable {
@@ -39,12 +38,6 @@ export class CargoPackage extends WorkspacePackage {
     return stringValue(this.packageInfo.version) ?? this.workspaceVersion ?? "0.0.0";
   }
 
-  initPlan() {
-    const defaults = super.initPlan();
-    defaults.publish ??= this.packageInfo.publish !== false;
-    return defaults;
-  }
-
   setVersion(version: string): void {
     this.packageInfo.version = version;
     this.patch("package.version", version);
@@ -66,73 +59,6 @@ export class CargoPackage extends WorkspacePackage {
   private get workspaceVersion(): string | undefined {
     const workspace = tableValue(this.workspaceManifest?.workspace);
     return stringValue(tableValue(workspace?.package)?.version);
-  }
-}
-
-export class CargoRegistryClient implements RegistryClient {
-  readonly id = "cargo";
-
-  #versionMap = new Map<string, Promise<boolean>>();
-
-  constructor(private readonly graph: PackageGraph) {}
-
-  supports(pkg: WorkspacePackage): boolean {
-    return pkg instanceof CargoPackage;
-  }
-
-  async isPackagePublished(pkg: CargoPackage): Promise<boolean> {
-    const cacheKey = `${pkg.id}@${pkg.version}`;
-    let info = this.#versionMap.get(cacheKey);
-    if (!info) {
-      info = fetch(
-        `https://crates.io/api/v1/crates/${encodeURIComponent(pkg.name)}/${pkg.version}`,
-      ).then(async (response) => {
-        if (response.status === 200) return true;
-        if (response.status === 404) return false;
-
-        throw new Error(
-          `Unable to validate ${pkg.name}@${pkg.version} against crates.io: ${await response.text()}`,
-        );
-      });
-      this.#versionMap.set(cacheKey, info);
-    }
-
-    return info;
-  }
-
-  publishPreflight(pkg: CargoPackage, { store }: { store: PlanStore }): PublishPreflight {
-    const wait: string[] = [];
-
-    for (const { table } of dependencyTables(pkg.manifest, "")) {
-      for (const [rawName, rawSpec] of Object.entries(table)) {
-        if (!isTableValue(rawSpec) || typeof rawSpec.path !== "string") continue;
-
-        const packageName = stringValue(rawSpec.package) ?? rawName;
-        const id = `cargo:${packageName}`;
-        if (!store.packages[id]?.publish) continue;
-
-        const linked = this.graph.get(id);
-        if (!linked || !(linked instanceof CargoPackage)) continue;
-
-        wait.push(id);
-      }
-    }
-
-    return { wait };
-  }
-
-  async publish(
-    pkg: CargoPackage,
-    _env: { store: PlanStore; packageStore: PackagePlanStore },
-  ): Promise<void> {
-    const result = await x("cargo", ["publish"], {
-      nodeOptions: {
-        cwd: pkg.path,
-      },
-    });
-    if (result.exitCode !== 0) {
-      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
-    }
   }
 }
 
@@ -172,10 +98,23 @@ export function cargo({
     return next;
   }
 
-  function depsPolicy({ graph }: TegamiContext): PlanPolicy {
+  async function isPackagePublished(pkg: CargoPackage): Promise<boolean> {
+    const response = await fetch(
+      `https://crates.io/api/v1/crates/${encodeURIComponent(pkg.name)}/${pkg.version}`,
+    );
+
+    if (response.status === 200) return true;
+    if (response.status === 404) return false;
+
+    throw new Error(
+      `Unable to validate ${pkg.name}@${pkg.version} against crates.io: ${await response.text()}`,
+    );
+  }
+
+  function depsPolicy({ graph }: TegamiContext): DraftPolicy {
     return {
       id: "cargo:deps",
-      onUpdate({ pkg, plan }) {
+      onUpdate({ pkg, packageDraft: plan }) {
         for (const other of graph.getPackages()) {
           if (!(other instanceof CargoPackage)) continue;
 
@@ -210,20 +149,60 @@ export function cargo({
     async resolve() {
       await discoverCargoPackages(this.cwd, (pkg) => this.graph.add(pkg));
     },
-    createRegistryClient() {
-      return new CargoRegistryClient(this.graph);
-    },
-    initPlan(plan) {
+    initDraft(plan) {
       plan.addPolicy(depsPolicy(this));
     },
-    async applyPlan(draft) {
+    async publishPreflight({ pkg }) {
+      if (!(pkg instanceof CargoPackage)) return;
+
+      const wait: string[] = [];
+
+      for (const { table } of dependencyTables(pkg.manifest, "")) {
+        for (const [rawName, rawSpec] of Object.entries(table)) {
+          if (!isTableValue(rawSpec) || typeof rawSpec.path !== "string") continue;
+
+          const packageName = stringValue(rawSpec.package) ?? rawName;
+          const id = `cargo:${packageName}`;
+          const linked = this.graph.get(id);
+          if (!linked || !(linked instanceof CargoPackage)) continue;
+
+          wait.push(id);
+        }
+      }
+
+      return {
+        publish: pkg.packageInfo.publish !== false && !(await isPackagePublished(pkg)),
+        wait,
+      };
+    },
+    async publish({ pkg }) {
+      if (!(pkg instanceof CargoPackage)) return;
+
+      const result = await x("cargo", ["publish"], {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+
+      if (result.exitCode !== 0) {
+        return {
+          type: "failed",
+          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
+        };
+      }
+
+      return {
+        type: "published",
+      };
+    },
+    async applyDraft(draft) {
       const { graph } = this;
       const writes: Awaitable<void>[] = [];
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof CargoPackage)) continue;
 
-        const plan = draft.getPackagePlan(pkg.id);
+        const plan = draft.getPackageDraft(pkg.id);
         if (plan) {
           pkg.setVersion(plan.bumpVersion(pkg));
         }
@@ -260,7 +239,7 @@ export function cargo({
       await Promise.all(writes);
     },
     cli: {
-      async publishPlanApplied() {
+      async draftApplied() {
         if (!updateLockFile) return;
         const result = await x("cargo", ["update", "--workspace"], {
           nodeOptions: { cwd: this.cwd },

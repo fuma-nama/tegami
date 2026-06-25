@@ -1,4 +1,4 @@
-import type { PackagePlan } from "./plans/draft";
+import type { PackageDraft } from "./plans/draft";
 import type { GroupOptions, PackageOptions } from "./types";
 import { bumpVersion } from "./utils/semver";
 
@@ -24,8 +24,8 @@ export abstract class WorkspacePackage {
     this.opts = options;
   }
 
-  /** create the initial draft plan. */
-  initPlan(): PackagePlan {
+  /** create the initial draft. */
+  initDraft(): PackageDraft {
     return {
       bumpVersion(pkg) {
         return bumpVersion(pkg.version, this.type, this.prerelease);
@@ -33,20 +33,18 @@ export abstract class WorkspacePackage {
     };
   }
 
-  /** configure an initial draft plan to match script-level configs. */
-  configurePlan(plan: PackagePlan, group?: PackageGroup): void {
+  /** configure an initial draft to match script-level configs. */
+  configureDraft(draft: PackageDraft, group?: PackageGroup): void {
     const groupOptions = group?.options;
     const {
-      publish,
       prerelease = groupOptions?.prerelease,
       npm: { distTag = groupOptions?.npm?.distTag } = {},
     } = this.opts;
 
-    if (publish !== undefined) plan.publish = publish;
-    if (prerelease !== undefined) plan.prerelease = prerelease;
+    if (prerelease !== undefined) draft.prerelease = prerelease;
     if (distTag) {
-      plan.npm ??= {};
-      plan.npm.distTag = distTag;
+      draft.npm ??= {};
+      draft.npm.distTag = distTag;
     }
   }
 }
