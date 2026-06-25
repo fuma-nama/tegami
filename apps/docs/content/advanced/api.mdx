@@ -64,6 +64,14 @@ if (result.state === "created") {
 
 Pass `{ dryRun: true }` to validate without touching registries.
 
+<Callout title="Publish Strategy">
+
+Tegami will not publish any packages unless they are listed in the publish plan.
+
+This ensures for new public packages created between `version` and `publish`, they will only be published in the next versioning cycle.
+
+</Callout>
+
 ### `cleanup()`
 
 Optionally remove a finished publish plan file:
