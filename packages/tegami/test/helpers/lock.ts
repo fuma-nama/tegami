@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dump } from "js-yaml";
+import { lockDumpOptions } from "../../src/plans/lock";
 
 export interface LockChangelog {
   filename: string;
@@ -55,6 +56,6 @@ export async function writePublishLock(
   }
 
   await mkdir(join(cwd, ".tegami"), { recursive: true });
-  await writeFile(lockPath, dump(data, { sortKeys: true }) + "\n");
+  await writeFile(lockPath, dump(data, lockDumpOptions) + "\n");
   return lockPath;
 }

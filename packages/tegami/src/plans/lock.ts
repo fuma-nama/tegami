@@ -1,5 +1,22 @@
-import { dump, load } from "js-yaml";
+import { dump, load, visit, type Document, type DumpOptions } from "js-yaml";
 import z from "zod";
+
+function inlineMultilineScalars(documents: Document[]): void {
+  visit(documents, (node) => {
+    if (node.kind !== "scalar" || !node.value.includes("\n")) return;
+
+    node.style.doubleQuoted = true;
+    node.style.literal = false;
+    node.style.folded = false;
+    node.style.singleQuoted = false;
+  });
+}
+
+export const lockDumpOptions = {
+  sortKeys: true,
+  lineWidth: -1,
+  transform: inlineMultilineScalars,
+} satisfies DumpOptions;
 
 /**
  * the data structure of `publish-lock.yaml` file.
@@ -30,7 +47,9 @@ export class PublishLock {
   }
 
   serialize(): string {
-    return dump(Object.fromEntries(this.data.entries()), { sortKeys: true }) + "\n";
+    let res = dump(Object.fromEntries(this.data.entries()), lockDumpOptions);
+    if (!res.endsWith("\n")) res += "\n";
+    return res;
   }
 }
 
