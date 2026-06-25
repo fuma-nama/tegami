@@ -113,8 +113,8 @@ Run `tegami` for an interactive prompt, or write a file under `.tegami/` manuall
 
 ### In Tegami
 
-- `tegami version` — draft and apply a publish plan.
-- `tegami publish` — publish from the applied plan in `.tegami/publish-plan`.
+- `tegami version` — draft version changes and write the publish lock.
+- `tegami publish` — publish from the publish lock at `.tegami/publish-lock.yaml`.
 
 ## CI on the default branch
 
@@ -124,7 +124,7 @@ Use [`@changesets/action`](https://github.com/changesets/action) to run `version
 
 ### In Tegami
 
-Run `tegami ci` on pushes to your main branch. It versions when pending changelogs exist; otherwise it publishes from the publish plan.
+Run `tegami ci` on pushes to your main branch. It versions when pending changelogs exist; otherwise it publishes from the publish lock.
 
 ```yaml title=".github/workflows/publish.yml"
 name: Publish
@@ -168,7 +168,7 @@ With the [GitHub plugin](/plugins/github), this follows the same two-PR flow Cha
 2. CI runs `tegami ci`, applies versions, and opens a **Version Packages** PR.
 3. Merge the version PR; the next CI run publishes packages and creates GitHub releases.
 
-Because the publish plan lives in git, failed publish jobs can be retried safely. See [CI Setup](/ci) for build steps and other details.
+Because the publish lock lives in git, failed publish jobs can be retried safely. See [CI Setup](/ci) for build steps and other details.
 
 Remove `@changesets/cli`, `@changesets/action`, and `.changeset/config.json` once migration is complete.
 
@@ -326,7 +326,7 @@ Features Changesets does not cover out of the box:
 
 - **Cross-registry monorepos** — npm and Cargo in one graph ([npm](/plugins/npm), [cargo](/plugins/cargo)).
 - **Configurable dependency bump policy** — especially for `workspace:` peer dependencies ([npm plugin](/plugins/npm#dependency-bumps)).
-- **Publish plan in git** — `.tegami/publish-plan` makes failed publishes safe to retry ([CI Setup](/ci)).
+- **Publish lock in git** — `.tegami/publish-lock.yaml` makes failed publishes safe to retry ([CI Setup](/ci)).
 - **Programmatic API** — `generateChangelog()`, `draft()`, `publish()` for custom tooling ([API](/advanced/api)).
 - **Conventional commit generation** — draft changelogs from git history ([Changelogs](/changelog#generate-from-commits)).
 

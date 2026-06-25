@@ -40,7 +40,7 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
 
   program
     .command("version")
-    .description("draft and apply a publish plan")
+    .description("draft version changes and write the publish lock")
     .action(() =>
       runAction(tegami, async () => {
         await versionPackages(tegami, { cli: options });
@@ -120,8 +120,8 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
 
   program
     .command("publish")
-    .description("publish packages from the applied publish plan")
-    .option("--dry-run", "validate the publish plan without publishing packages")
+    .description("publish packages from the publish lock")
+    .option("--dry-run", "validate the publish lock without publishing packages")
     .action((commandOptions: PublishCommandOptions) =>
       runAction(tegami, async () => {
         await publishPackages(tegami, { ...commandOptions, cli: options });
@@ -130,7 +130,7 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
 
   program
     .command("cleanup")
-    .description("remove the publish plan after all packages have been published")
+    .description("remove the publish lock after all packages have been published")
     .action(() => runAction(tegami, () => runCleanup(tegami)));
 
   program
@@ -191,7 +191,7 @@ async function versionPackages(
   try {
     await draft.apply();
   } catch (error) {
-    s.stop("Failed to apply publish plan");
+    s.stop("Failed to apply draft");
     throw error;
   }
 
@@ -203,7 +203,7 @@ async function versionPackages(
     );
   }
 
-  outro("Publish plan applied.");
+  outro("Publish lock written.");
   return true;
 }
 
@@ -219,16 +219,16 @@ async function publishPackages(
   intro(dryRun ? "Publish packages (dry run)" : "Publish packages");
 
   const s = spinner();
-  s.start(dryRun ? "Validating publish plan" : "Publishing packages");
+  s.start(dryRun ? "Validating publish lock" : "Publishing packages");
   const plan = customPublish ? await customPublish() : await tegami.publish({ dryRun });
 
   if (plan === "skipped") {
-    s.stop(dryRun ? "No publish plan to validate" : "Nothing to publish");
+    s.stop(dryRun ? "No publish lock to validate" : "Nothing to publish");
     outro(`No publishable packages were found in ${context.lockPath}.`);
     return false;
   }
 
-  s.stop(dryRun ? "Publish plan validated" : "Publish complete");
+  s.stop(dryRun ? "Publish lock validated" : "Publish complete");
   const lines: string[] = [];
   let hasFailed = false;
 
@@ -258,7 +258,7 @@ async function publishPackages(
     return false;
   }
 
-  outro(dryRun ? "Publish plan is valid." : "Packages published.");
+  outro(dryRun ? "Publish lock is valid." : "Packages published.");
   return true;
 }
 
@@ -276,25 +276,25 @@ async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): P
 }
 
 async function runCleanup(tegami: Tegami): Promise<void> {
-  intro("Cleanup publish plan");
+  intro("Cleanup publish lock");
 
   const s = spinner();
-  s.start("Checking publish plan status");
+  s.start("Checking publish lock status");
   const result = await tegami.cleanup();
-  const { lockPath: planPath } = await tegami._internal.context();
-  s.stop(result.state === "removed" ? "Publish plan removed" : "Publish plan kept");
+  const { lockPath } = await tegami._internal.context();
+  s.stop(result.state === "removed" ? "Publish lock removed" : "Publish lock kept");
 
   if (result.state === "removed") {
-    outro(`Removed ${planPath}.`);
+    outro(`Removed ${lockPath}.`);
     return;
   }
 
   if (result.reason === "missing") {
-    outro(`No publish plan found at ${planPath}.`);
+    outro(`No publish lock found at ${lockPath}.`);
     return;
   }
 
-  outro(`Publish plan at ${planPath} is still pending. Publish it before cleanup.`);
+  outro(`Publish lock at ${lockPath} is still pending. Publish it before cleanup.`);
 }
 
 async function runAction(tegami: Tegami, action: () => Awaitable<void>): Promise<void> {

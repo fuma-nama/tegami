@@ -27,11 +27,11 @@ Create changelog files under `.tegami/` directory. Each file lists which package
 
 ### Version [step]
 
-Tegami reads pending changelogs, computes version bumps (including dependency updates), and writes a publish plan.
+Tegami reads pending changelogs, computes version bumps (including dependency updates), and writes a publish lock file.
 
 ### Publish [step]
 
-CI reads the publish plan and publishes packages to registries like npm and crates.io.
+CI reads the publish lock and publishes packages to registries like npm and crates.io.
 
 ## Next steps
 

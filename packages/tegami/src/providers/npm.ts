@@ -180,7 +180,7 @@ export interface NpmPluginOptions {
    */
   onBreakPeerDep?: "set" | "error" | "ignore";
 
-  /** update lockfile after appling publish plan */
+  /** update lockfile after applying a draft */
   updateLockFile?: boolean;
 }
 

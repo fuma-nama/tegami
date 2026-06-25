@@ -25,7 +25,7 @@ export interface TegamiOptions<Groups extends string = string> {
   changelogDir?: string;
   /** Path to the publish lock file. Defaults to `.tegami/publish-lock.yaml`. */
   lockPath?: string;
-  /** Changelog generator used when applying a publish plan. */
+  /** Changelog generator used when applying a draft. */
   generator?: LogGenerator;
   /** Per-package release and publish options keyed by package name. */
   packages?: Record<string, PackageOptions<NoInfer<Groups>>>;

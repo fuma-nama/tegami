@@ -30,7 +30,7 @@ export class PublishLock {
   }
 
   serialize(): string {
-    return dump(Object.fromEntries(this.data.entries()), { sortKeys: true });
+    return dump(Object.fromEntries(this.data.entries()), { sortKeys: true }) + "\n";
   }
 }
 

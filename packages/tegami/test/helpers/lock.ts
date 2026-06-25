@@ -55,6 +55,6 @@ export async function writePublishLock(
   }
 
   await mkdir(join(cwd, ".tegami"), { recursive: true });
-  await writeFile(lockPath, dump(data, { sortKeys: true }));
+  await writeFile(lockPath, dump(data, { sortKeys: true }) + "\n");
   return lockPath;
 }

@@ -42,9 +42,9 @@ export interface Tegami {
   generateChangelog(options?: GenerateChangelogOptions): Promise<GeneratedChangelog[]>;
   /** Build a draft from pending changelog files. */
   draft(): Promise<Draft>;
-  /** Publish the current publish plan. */
+  /** Publish packages from the publish lock. */
   publish(options?: PublishOptions): Promise<PublishPlan | "skipped">;
-  /** Remove the publish plan file after it has finished successfully. */
+  /** Remove the publish lock file after publishing has finished successfully. */
   cleanup(): Promise<CleanupResult>;
 
   /** Internal APIs, do not use it unless you know what you are doing */

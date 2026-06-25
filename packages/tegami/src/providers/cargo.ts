@@ -44,7 +44,7 @@ export class CargoPackage extends WorkspacePackage {
   }
 
   async write(): Promise<void> {
-    await writeFile(join(this.path, "Cargo.toml"), this.content);
+    await writeFile(join(this.path, "Cargo.toml"), this.content + "\n");
   }
 
   patch(path: string, value: unknown): void {
