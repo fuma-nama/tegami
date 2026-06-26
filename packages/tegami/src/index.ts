@@ -1,8 +1,10 @@
-import { generateChangelog } from "./changelog/generate";
-import type { GenerateChangelogOptions, GeneratedChangelog } from "./changelog/generate";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { generateFromCommits } from "./changelog/generate";
+import type { CommitChangelog, GenerateFromCommitsOptions } from "./changelog/generate";
 import { createTegamiContext, TegamiContext } from "./context";
 import { Draft, createDraft } from "./plans/draft";
-import { readChangelogEntries } from "./changelog/parse";
+import { parseChangelogFile, readChangelogEntries } from "./changelog/parse";
 import type { TegamiOptions } from "./types";
 import { PackageGraph } from "./graph";
 import {
@@ -10,12 +12,11 @@ import {
   PublishPlan,
   initPublishPlan,
   runPreflights,
+  publishPlanStatus,
   runPublishPlan,
 } from "./plans/publish";
-import { publishPlanStatus } from "./plans/checks";
-import { rm } from "node:fs/promises";
 
-export type { GenerateChangelogOptions, GeneratedChangelog } from "./changelog/generate";
+export type { CommitChangelog } from "./changelog/generate";
 export type {
   LogGenerator,
   TegamiOptions,
@@ -35,9 +36,18 @@ export type {
 } from "./plans/publish";
 export type { PackageGraph, PackageGroup, WorkspacePackage } from "./graph";
 
+export interface GenerateChangelogOptions extends GenerateFromCommitsOptions {
+  /**
+   * Write changelog files to disk.
+   *
+   * @default true
+   */
+  write?: boolean;
+}
+
 export interface Tegami {
   /** Create pending changelog files from git commit history. */
-  generateChangelog(options?: GenerateChangelogOptions): Promise<GeneratedChangelog[]>;
+  generateChangelog(options?: GenerateChangelogOptions): Promise<CommitChangelog[]>;
   /** Build a draft from pending changelog files. */
   draft(): Promise<Draft>;
   /** Publish packages from the publish lock. */
@@ -77,8 +87,20 @@ export function tegami<const Groups extends string = string>(
   }
 
   return {
-    async generateChangelog(createOptions = {}) {
-      return generateChangelog(await $context, createOptions);
+    async generateChangelog(generateOptions = {}) {
+      const { write = true } = generateOptions;
+
+      const context = await $context;
+      const changelogs = await generateFromCommits(context, generateOptions);
+      if (write && changelogs.length > 0) {
+        await mkdir(context.changelogDir, { recursive: true });
+        await Promise.all(
+          changelogs.map((entry) =>
+            writeFile(join(context.changelogDir, entry.filename), entry.content),
+          ),
+        );
+      }
+      return changelogs;
     },
     _internal: {
       options,
@@ -92,6 +114,18 @@ export function tegami<const Groups extends string = string>(
     async draft() {
       const context = await $context;
       const changelogs = await readChangelogEntries(context);
+
+      if (context.options.conventionalCommits) {
+        const generated = await generateFromCommits(context);
+        for (const entry of generated) {
+          const parsed = parseChangelogFile(entry.filename, entry.content);
+          if (!parsed) continue;
+
+          parsed.virtual = true;
+          changelogs.push(parsed);
+        }
+      }
+
       return createDraft(changelogs, context);
     },
     async publishStatus() {

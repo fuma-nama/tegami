@@ -180,9 +180,15 @@ export class Draft {
       const updated = updatedChangelogs.get(entry.id);
       const filePath = path.join(this.context.changelogDir, entry.filename);
 
-      writes.push(
-        updated ? writeFile(filePath, updated.getRawContent()) : rm(filePath, { force: true }),
-      );
+      if (updated) {
+        writes.push(
+          mkdir(this.context.changelogDir, { recursive: true }).then(() =>
+            writeFile(filePath, updated.getRawContent()),
+          ),
+        );
+      } else if (!entry.virtual) {
+        writes.push(rm(filePath, { force: true }));
+      }
     }
 
     writes.push(this.writeLockFile(snapshots));

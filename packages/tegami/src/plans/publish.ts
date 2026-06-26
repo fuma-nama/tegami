@@ -259,3 +259,32 @@ export async function runPreflights(context: TegamiContext, plan: PublishPlan): 
 
   await Promise.all(promises);
 }
+
+export async function publishPlanStatus(
+  plan: PublishPlan,
+  context: TegamiContext,
+): Promise<"success" | "pending"> {
+  for (const pkg of plan.packages.values()) {
+    if (!pkg.preflight) throw new Error("Should perform preflight before checking plan status.");
+
+    const shouldPublish = pkg.preflight.publish ?? true;
+    if (shouldPublish) return "pending";
+  }
+
+  try {
+    await Promise.all(
+      context.plugins.map(async (plugin) => {
+        const status = await handlePluginError(plugin, "resolvePlanStatus", () =>
+          plugin.resolvePlanStatus?.call(context, { plan }),
+        );
+
+        if (status === "pending") throw "pending";
+      }),
+    );
+
+    return "success";
+  } catch (e) {
+    if (e === "pending") return "pending";
+    throw e;
+  }
+}

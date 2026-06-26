@@ -1,5 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import { bumpDepth, maxBump, type BumpType } from "../utils/semver";
@@ -12,20 +10,14 @@ import { type ChangelogPackageConfig, renderChangelog } from "./shared";
 import type { PackageGraph } from "../graph";
 import * as semver from "semver";
 
-export interface GenerateChangelogOptions {
+export interface GenerateFromCommitsOptions {
   /** Start revision. Defaults to the latest reachable git tag, or all history if none exists. */
   from?: string;
   /** End revision. Defaults to HEAD. */
   to?: string;
-  /**
-   * Write changelog files to disk.
-   *
-   * @default true
-   */
-  write?: boolean;
 }
 
-export interface GeneratedChangelog {
+export interface CommitChangelog {
   filename: string;
   content: string;
   packages: Record<string, BumpType | ChangelogPackageConfig>;
@@ -41,12 +33,11 @@ interface CommitChange {
   title: string;
 }
 
-export async function generateChangelog(
+export async function generateFromCommits(
   context: TegamiContext,
-  options: GenerateChangelogOptions = {},
-): Promise<GeneratedChangelog[]> {
-  const write = options.write ?? true;
-  const commits = await readConventionalCommits(context, options);
+  { from, to }: GenerateFromCommitsOptions = {},
+): Promise<CommitChangelog[]> {
+  const commits = await readConventionalCommits(context, from, to);
   const groups = new Map<string, CommitChange[]>();
 
   for (const commit of commits) {
@@ -56,7 +47,7 @@ export async function generateChangelog(
     else groups.set(key, [commit]);
   }
 
-  const changelogs = Array.from(groups, ([key, changes], index): GeneratedChangelog => {
+  const changelogs = Array.from(groups, ([key, changes], index): CommitChangelog => {
     const packageNames = key ? key.split("\0") : [];
     let bumpType: BumpType = "patch";
     for (const change of changes) {
@@ -84,24 +75,16 @@ export async function generateChangelog(
     };
   });
 
-  if (write && changelogs.length > 0) {
-    await mkdir(context.changelogDir, { recursive: true });
-    await Promise.all(
-      changelogs.map((entry) =>
-        writeFile(join(context.changelogDir, entry.filename), entry.content),
-      ),
-    );
-  }
-
   return changelogs;
 }
 
 async function readConventionalCommits(
   context: TegamiContext,
-  options: GenerateChangelogOptions,
+  from?: string,
+  to?: string,
 ): Promise<CommitChange[]> {
-  const to = options.to ?? "HEAD";
-  const from = options.from ?? (await latestTag(context.cwd));
+  from ??= await latestTag(context.cwd);
+  to ??= "HEAD";
   const args = ["log", "--no-merges", "--format=%H%x1f%s%x1f%b%x1e"];
 
   if (from) args.push(`${from}..${to}`);

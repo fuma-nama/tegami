@@ -23,6 +23,9 @@ export interface ChangelogEntry {
     content: string;
   }[];
 
+  /** Generated in memory and not yet written to `changelogDir`. */
+  virtual?: boolean;
+
   getRawContent: () => string;
 }
 

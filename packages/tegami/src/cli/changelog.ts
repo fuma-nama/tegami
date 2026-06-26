@@ -12,7 +12,7 @@ import {
   spinner,
 } from "@clack/prompts";
 import type { Tegami } from "..";
-import { changelogFilename, generateReplays } from "../changelog/generate";
+import { changelogFilename, generateFromCommits, generateReplays } from "../changelog/generate";
 import type { PackageGroup, PackageGraph, WorkspacePackage } from "../graph";
 import type { TegamiContext } from "../context";
 import { isCI } from "../utils/constants";
@@ -50,7 +50,7 @@ export async function runChangelogTui(tegami: Tegami): Promise<void> {
       }
     }
 
-    const created = await tegami.generateChangelog({ write: false });
+    const created = await generateFromCommits(context);
     await persistChangelogs(
       context,
       created.map(({ filename, content, packages }) => ({ filename, content, packages })),

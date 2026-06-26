@@ -9,7 +9,7 @@ import {
 } from "../src/utils/conventional-commit";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { tegami } from "../src";
-import type { GeneratedChangelog } from "../src/changelog/generate";
+import type { CommitChangelog } from "../src/changelog/generate";
 import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
@@ -189,6 +189,35 @@ describe("createChangelog", () => {
       }
     `);
   });
+
+  test("draft auto-generates changelogs when conventionalCommits is enabled", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+    exec.mockImplementation((_command, args = []) => {
+      if (args[0] === "describe") {
+        return Promise.resolve(result({ stdout: "v1.0.0\n" })) as unknown as ReturnType<typeof x>;
+      }
+
+      return Promise.resolve(
+        result({
+          stdout: [record("abc123", "feat(core): support auto changelogs", "")].join(""),
+        }),
+      ) as unknown as ReturnType<typeof x>;
+    });
+
+    const draft = await tegami({ cwd, conventionalCommits: true }).draft();
+
+    expect(exec.mock.calls.map((call) => call[1])).toEqual([
+      ["describe", "--tags", "--abbrev=0"],
+      ["log", "--no-merges", "--format=%H%x1f%s%x1f%b%x1e", "v1.0.0..HEAD"],
+    ]);
+    expect(await normalizePlan(draft, cwd)).toEqual({
+      "npm:@acme/core": {
+        changelogIds: ["<stamp>.md"],
+        type: "minor",
+      },
+    });
+  });
 });
 
 async function createWorkspace(): Promise<string> {
@@ -226,7 +255,7 @@ function result(overrides: Partial<Awaited<ReturnType<typeof x>>>): Awaited<Retu
   } as Awaited<ReturnType<typeof x>>;
 }
 
-function normalizeFile(file: Pick<GeneratedChangelog, "packages" | "changes" | "content">) {
+function normalizeFile(file: Pick<CommitChangelog, "packages" | "changes" | "content">) {
   return {
     packages: file.packages,
     changes: file.changes.length,

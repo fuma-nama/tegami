@@ -36,6 +36,15 @@ export interface TegamiOptions<Groups extends string = string> {
   /** Package names, ids, or regex patterns to exclude from the dependency graph. */
   ignore?: (string | RegExp)[];
 
+  /**
+   * When creating draft, automatically generate changelogs from conventional commits.
+   *
+   * When disabled (default), it requires you to run `generateChangelog()` to pre-generate changelogs before draft.
+   *
+   * @default false
+   */
+  conventionalCommits?: boolean;
+
   npm?: NpmPluginOptions;
   cargo?: CargoPluginOptions;
 }
