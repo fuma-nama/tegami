@@ -180,9 +180,11 @@ async function versionPackages(
   }
 
   if ((await tegami.publishStatus()) === "pending") {
-    throw new Error(
+    note(
       `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
     );
+    outro("Cannot apply.");
+    return false;
   }
 
   const lines: string[] = [];
