@@ -1,11 +1,11 @@
 import type { TegamiContext } from "../context";
-import type { PlanPolicy } from "./draft";
+import type { DraftPolicy } from "./draft";
 
-export function groupPolicy({ graph }: TegamiContext): PlanPolicy {
+export function groupPolicy({ graph }: TegamiContext): DraftPolicy {
   return {
     id: "group",
-    onUpdate({ pkg, plan }) {
-      if (!plan.type) return;
+    onUpdate({ pkg, packageDraft }) {
+      if (!packageDraft.type) return;
 
       const group = graph.getPackageGroup(pkg.id);
       if (!group || !group.options.syncBump) return;
@@ -14,7 +14,7 @@ export function groupPolicy({ graph }: TegamiContext): PlanPolicy {
         if (member === pkg) continue;
 
         this.bumpPackage(member, {
-          type: plan.type,
+          type: packageDraft.type,
           reason: `sync "${group.name}" group package versions`,
         });
       }

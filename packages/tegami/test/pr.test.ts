@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,12 +5,12 @@ import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
-import { createDraftPlan } from "../src/plans/draft";
+import { createDraft } from "../src/plans/draft";
 import { parseChangelogFile } from "../src/changelog/parse";
 import type { TegamiContext } from "../src/context";
 import type { PackageOptions } from "../src/types";
+import * as githubClient from "../src/plugins/github/api";
 import { buildPrPreview, postPrComment } from "../src/cli/pr";
-import { formatRunScriptCommand } from "../src/utils/package-manager";
 
 vi.mock("package-manager-detector", () => ({
   detect: vi.fn(),
@@ -24,14 +23,28 @@ vi.mock("package-manager-detector", () => ({
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
 }));
+vi.mock("../src/plugins/github/api", () => ({
+  getPullRequest: vi.fn(),
+  findIssueCommentByPrefix: vi.fn(),
+  updateIssueComment: vi.fn(),
+  createIssueComment: vi.fn(),
+}));
 
 const detectPackageManager = vi.mocked(detect);
 const exec = vi.mocked(x);
+const getPullRequest = vi.mocked(githubClient.getPullRequest);
+const findIssueCommentByPrefix = vi.mocked(githubClient.findIssueCommentByPrefix);
+const updateIssueComment = vi.mocked(githubClient.updateIssueComment);
+const createIssueComment = vi.mocked(githubClient.createIssueComment);
 const tempDirs: string[] = [];
 
 afterEach(async () => {
   detectPackageManager.mockReset();
   exec.mockReset();
+  getPullRequest.mockReset();
+  findIssueCommentByPrefix.mockReset();
+  updateIssueComment.mockReset();
+  createIssueComment.mockReset();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
   delete process.env.GITHUB_EVENT_PATH;
   delete process.env.GITHUB_REPOSITORY;
@@ -64,7 +77,7 @@ describe("pr", () => {
       [testPackage("@acme/core", "1.0.0"), testPackage("@acme/ui", "2.0.0")],
       cwd,
     );
-    const draft = await createDraftPlan(
+    const draft = await createDraft(
       [
         parseChangelogFile(
           "2026-06-19-core.md",
@@ -95,14 +108,14 @@ packages:
     expect(body).toContain(
       "[**Create a changelog →**](https://github.com/acme/repo/new/feature/release?filename=.tegami%2F",
     );
-    expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` (no publish) |");
-    expect(body).toContain("| `@acme/ui` | patch | `2.0.0` → `2.0.1` (no publish) |");
+    expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` |");
+    expect(body).toContain("| `@acme/ui` | patch | `2.0.0` → `2.0.1` |");
     expect(body).toContain("#### Changelogs in this PR");
     expect(body).toContain("- `2026-06-19-core.md` — Support auto changelogs");
     expect(body).not.toContain("2026-06-19-ui.md");
   });
 
-  test("includes prerelease-only version changes in release preview", async () => {
+  test("omits release preview when prerelease config matches current version", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-pr-prerelease-"));
     tempDirs.push(cwd);
     process.env.GITHUB_REPOSITORY = "acme/repo";
@@ -128,12 +141,12 @@ packages:
       [testPackage("tegami", "1.1.0-alpha.2", { prerelease: "alpha" })],
       cwd,
     );
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
+    const body = await buildPrPreview(context, draft);
 
-    expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
-    expect(await buildPrPreview(context, draft)).toContain(
-      "| `tegami` | — | `1.1.0-alpha.2` → `1.1.0-alpha.3` (no publish) |",
-    );
+    expect(draft.getPackageDraft("npm:tegami")?.type).toBeUndefined();
+    expect(body).not.toContain("#### Release preview");
+    expect(body).toContain("#### No changelogs yet");
   });
 
   test("uses fork head repository for create changelog links", async () => {
@@ -160,7 +173,7 @@ packages:
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")], cwd);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft);
 
     expect(body).toContain(
@@ -171,46 +184,26 @@ packages:
   test("resolves branch from pull request number", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
 
-    exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "pr" && args[1] === "view") {
-        return commandResult({
-          stdout: JSON.stringify({
-            number: 7,
-            headRefName: "feature/test",
-            baseRefOid: "base-sha",
-            headRefOid: "head-sha",
-            headRepository: {
-              name: "repo",
-              owner: { login: "fork-user" },
-            },
-          }),
-        });
-      }
-
-      if (command === "git") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    getPullRequest.mockResolvedValue({
+      headRefName: "feature/test",
+      baseRefOid: "base-sha",
+      headRefOid: "head-sha",
+      headRepository: {
+        name: "repo",
+        owner: { login: "fork-user" },
+      },
     });
+    exec.mockImplementation(() => commandResult());
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
       "[**Create a changelog →**](https://github.com/fork-user/repo/new/feature/test?filename=.tegami%2F",
     );
-    expect(exec).toHaveBeenCalledWith("gh", [
-      "pr",
-      "view",
-      "7",
-      "--repo",
-      "acme/repo",
-      "--json",
-      "headRefName,baseRefOid,headRefOid,headRepository",
-    ]);
+    expect(getPullRequest).toHaveBeenCalledWith("acme/repo", 7, undefined);
   });
 
   test("prefers --number over pull request event metadata", async () => {
@@ -233,52 +226,32 @@ packages:
       }),
     );
 
-    exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "pr" && args[1] === "view") {
-        return commandResult({
-          stdout: JSON.stringify({
-            number: 7,
-            headRefName: "from-gh",
-            baseRefOid: "base-sha",
-            headRefOid: "head-sha",
-            headRepository: {
-              name: "repo",
-              owner: { login: "acme" },
-            },
-          }),
-        });
-      }
-
-      if (command === "git") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    getPullRequest.mockResolvedValue({
+      headRefName: "from-gh",
+      baseRefOid: "base-sha",
+      headRefOid: "head-sha",
+      headRepository: {
+        name: "repo",
+        owner: { login: "acme" },
+      },
     });
+    exec.mockImplementation(() => commandResult());
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")], cwd);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
       "[**Create a changelog →**](https://github.com/acme/repo/new/from-gh?filename=.tegami%2F",
     );
-    expect(exec).toHaveBeenCalledWith("gh", [
-      "pr",
-      "view",
-      "7",
-      "--repo",
-      "acme/repo",
-      "--json",
-      expect.any(String),
-    ]);
+    expect(getPullRequest).toHaveBeenCalledWith("acme/repo", 7, undefined);
   });
 
   test("requires pull request event or number", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     await expect(buildPrPreview(context, draft)).rejects.toThrow(
       "A pull request event or --number is required.",
@@ -288,7 +261,7 @@ packages:
   test("rejects invalid pull request numbers", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     await expect(buildPrPreview(context, draft, { number: Number.NaN })).rejects.toThrow(
       "--number must be a positive integer.",
@@ -320,7 +293,7 @@ packages:
 
     exec.mockReturnValueOnce(commandResult({ stdout: ".tegami/2026-06-19-core.md\n" }));
 
-    const draft = await createDraftPlan(
+    const draft = await createDraft(
       [
         parseChangelogFile(
           "2026-06-19-core.md",
@@ -367,18 +340,11 @@ packages: ["@acme/core"]
     exec.mockReturnValueOnce(commandResult({ exitCode: 128, stderr: "fatal: bad revision" }));
 
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     await expect(buildPrPreview(context, draft)).rejects.toThrow(
       "Failed to list pull request changelog files.",
     );
-  });
-
-  test("formats run script commands for the detected package manager", async () => {
-    detectPackageManager.mockResolvedValue({ name: "pnpm", agent: "pnpm" });
-
-    await expect(formatRunScriptCommand("/repo", "tegami")).resolves.toBe("pnpm run tegami");
-    await expect(formatRunScriptCommand("/repo", "tegami", "npm")).resolves.toBe("npm run tegami");
   });
 
   test("writes preview artifact markdown", async () => {
@@ -407,7 +373,7 @@ packages: ["@acme/core"]
     exec.mockReturnValueOnce(commandResult());
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
     const body = await buildPrPreview(context, draft);
     const path = join(cwd, "tegami-pr-preview.md");
     await writeFile(path, body);
@@ -437,7 +403,7 @@ packages: ["@acme/core"]
 
     detectPackageManager.mockResolvedValue({ name: "npm", agent: "npm" });
     const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraftPlan([], context);
+    const draft = await createDraft([], context);
 
     const body = await buildPrPreview(context, draft);
 
@@ -449,89 +415,58 @@ packages: ["@acme/core"]
     process.env.GITHUB_REPOSITORY = "acme/repo";
     await setWorkflowRunEvent({ pullRequestNumber: 42 });
 
-    exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "api" && args[1]?.includes("/comments")) {
-        return commandResult();
-      }
-
-      if (command === "gh" && args[0] === "pr" && args[1] === "comment") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
-    });
+    findIssueCommentByPrefix.mockResolvedValue(undefined);
+    createIssueComment.mockResolvedValue(undefined);
 
     await postPrComment("### Tegami\n");
 
-    expect(exec).toHaveBeenCalledWith("gh", [
-      "api",
-      "repos/acme/repo/issues/42/comments",
-      "--paginate",
-      "--jq",
-      `[.[] | select(.body | startswith("<!-- tegami -->")) | .id][0] // empty`,
-    ]);
-    expect(exec).toHaveBeenCalledWith("gh", [
-      "pr",
-      "comment",
-      "42",
-      "--body",
-      "<!-- tegami -->\n### Tegami\n",
-      "--repo",
+    expect(findIssueCommentByPrefix).toHaveBeenCalledWith(
       "acme/repo",
-    ]);
+      42,
+      "<!-- tegami -->",
+      undefined,
+    );
+    expect(createIssueComment).toHaveBeenCalledWith(
+      "acme/repo",
+      42,
+      "<!-- tegami -->\n### Tegami\n",
+      undefined,
+    );
   });
 
   test("updates the first existing pull request comment", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     await setWorkflowRunEvent({ pullRequestNumber: 42 });
 
-    exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "api" && args[1]?.includes("/comments")) {
-        return commandResult({ stdout: "12345\n" });
-      }
-
-      if (command === "gh" && args[0] === "api" && args[1] === "-X") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
-    });
+    findIssueCommentByPrefix.mockResolvedValue(12345);
+    updateIssueComment.mockResolvedValue(undefined);
 
     await postPrComment("### Tegami\n");
 
-    expect(exec).toHaveBeenCalledWith("gh", [
-      "api",
-      "-X",
-      "PATCH",
-      "repos/acme/repo/issues/comments/12345",
-      "--input",
-      expect.stringMatching(/body\.json$/),
-    ]);
+    expect(updateIssueComment).toHaveBeenCalledWith(
+      "acme/repo",
+      12345,
+      "<!-- tegami -->\n### Tegami\n",
+      undefined,
+    );
+    expect(createIssueComment).not.toHaveBeenCalled();
   });
 
   test("updates comments with special characters using JSON input", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     await setWorkflowRunEvent({ pullRequestNumber: 42 });
-    let patchInput = "";
 
-    exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "api" && args[1]?.includes("/comments")) {
-        return commandResult({ stdout: "12345\n" });
-      }
-
-      if (command === "gh" && args[0] === "api" && args[1] === "-X") {
-        patchInput = readFileSync(args[5] as string, "utf8");
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
-    });
+    findIssueCommentByPrefix.mockResolvedValue(12345);
+    updateIssueComment.mockResolvedValue(undefined);
 
     const preview = "### Tegami\n\n`code` and key=value\n";
     await postPrComment(preview);
 
-    expect(patchInput).toBe(
-      JSON.stringify({ body: "<!-- tegami -->\n### Tegami\n\n`code` and key=value\n" }),
+    expect(updateIssueComment).toHaveBeenCalledWith(
+      "acme/repo",
+      12345,
+      "<!-- tegami -->\n### Tegami\n\n`code` and key=value\n",
+      undefined,
     );
   });
 });
@@ -574,13 +509,10 @@ function createTestContext(packages: WorkspacePackage[], cwd?: string): TegamiCo
   return {
     cwd: root,
     changelogDir: join(root, ".tegami"),
-    planPath: join(root, ".tegami", "publish-plan"),
+    lockPath: join(root, ".tegami", "publish-lock.yaml"),
     options: {},
     plugins: [],
     graph: new PackageGraph(packages),
-    getRegistryClient() {
-      throw new Error("not implemented");
-    },
   };
 }
 

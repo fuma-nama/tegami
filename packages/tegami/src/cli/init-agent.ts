@@ -32,7 +32,7 @@ export async function initAgent(
 
 export function renderAgentsMd(context: TegamiContext): string {
   const changelogDir = path.relative(context.cwd, context.changelogDir) || "project root";
-  const planPath = path.relative(context.cwd, context.planPath) || "project root";
+  const lockPath = path.relative(context.cwd, context.lockPath) || "project root";
 
   return [
     "# Release workflow",
@@ -71,7 +71,7 @@ export function renderAgentsMd(context: TegamiContext): string {
     "- Include YAML frontmatter with `packages`",
     "- Include at least one `#`, `##`, or `###` heading in the body",
     "- Write user-facing release notes under each heading",
-    `- Do not edit \`${planPath}\` or package \`CHANGELOG.md\` files directly`,
+    `- Do not edit the publish lock file (\`${lockPath}\`) or package \`CHANGELOG.md\` files directly`,
     "",
   ].join("\n");
 }

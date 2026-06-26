@@ -12,11 +12,9 @@ import {
   spinner,
 } from "@clack/prompts";
 import type { Tegami } from "..";
-import { generateReplays } from "../changelog/generate";
+import { changelogFilename, generateFromCommits, generateReplays } from "../changelog/generate";
 import type { PackageGroup, PackageGraph, WorkspacePackage } from "../graph";
 import type { TegamiContext } from "../context";
-import { assertPublishPlanFinished } from "../plans/checks";
-import { changelogFilename } from "../utils/changelog";
 import { isCI } from "../utils/constants";
 import { CancelledError } from "../utils/error";
 import { getChangedPackages } from "../utils/git-changes";
@@ -25,7 +23,11 @@ import { type ChangelogPackageConfig, renderChangelog } from "../changelog/share
 
 export async function runChangelogTui(tegami: Tegami): Promise<void> {
   const context = await tegami._internal.context();
-  await assertPublishPlanFinished(context);
+  if ((await tegami.publishStatus()) === "pending") {
+    throw new Error(
+      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
+    );
+  }
 
   intro("Create changelogs");
   let selectedPackages: string[] = [];
@@ -48,7 +50,7 @@ export async function runChangelogTui(tegami: Tegami): Promise<void> {
       }
     }
 
-    const created = await tegami.generateChangelog({ write: false });
+    const created = await generateFromCommits(context);
     await persistChangelogs(
       context,
       created.map(({ filename, content, packages }) => ({ filename, content, packages })),
@@ -138,6 +140,7 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   };
 
   const changedPackages = new Set(await getChangedPackages(graph, cwd));
+  const initialValues = new Set<string>();
   const selectOptions: {
     label: string;
     value: string;
@@ -150,11 +153,12 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   }
   groups.sort((a, b) => (a[1] ? 0 : 1) - (b[1] ? 0 : 1));
   for (const [group, changed] of groups) {
-    const members = group.packages.map(getPackageLabel).join(", ");
+    if (changed) initialValues.add(`group:${group.name}`);
+
     selectOptions.push({
-      label: `(Group) ${group.name}`,
+      label: `(Group) ${group.name}` + (changed ? "*" : ""),
       value: `group:${group.name}`,
-      hint: changed ? `changed · ${members}` : members,
+      hint: group.packages.map(getPackageLabel).join(", "),
     });
   }
 
@@ -162,10 +166,12 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     .getPackages()
     .toSorted((a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1));
   for (const pkg of packages) {
+    const changed = changedPackages.has(pkg);
+
+    if (changed) initialValues.add(pkg.id);
     selectOptions.push({
-      label: getPackageLabel(pkg),
+      label: getPackageLabel(pkg) + (changed ? "*" : ""),
       value: pkg.id,
-      hint: changedPackages.has(pkg) ? "changed" : undefined,
     });
   }
 
@@ -173,6 +179,7 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     message: "Select packages (leave empty to auto-generate from commits)",
     required: false,
     options: selectOptions,
+    initialValues: Array.from(initialValues),
   });
 
   if (isCancel(selected)) throw new CancelledError();

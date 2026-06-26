@@ -1,4 +1,4 @@
-import type { PackagePlan } from "./plans/draft";
+import type { PackageDraft } from "./plans/draft";
 import type { GroupOptions, PackageOptions } from "./types";
 import { bumpVersion } from "./utils/semver";
 
@@ -24,8 +24,8 @@ export abstract class WorkspacePackage {
     this.opts = options;
   }
 
-  /** create the initial draft plan. */
-  initPlan(): PackagePlan {
+  /** create the initial draft. */
+  initDraft(): PackageDraft {
     return {
       bumpVersion(pkg) {
         return bumpVersion(pkg.version, this.type, this.prerelease);
@@ -33,15 +33,18 @@ export abstract class WorkspacePackage {
     };
   }
 
-  /** configure an initial draft plan to match script-level configs. */
-  configurePlan(plan: PackagePlan): void {
-    const { publish, prerelease, npm } = this.opts;
+  /** configure an initial draft to match script-level configs. */
+  configureDraft(draft: PackageDraft, group?: PackageGroup): void {
+    const groupOptions = group?.options;
+    const {
+      prerelease = groupOptions?.prerelease,
+      npm: { distTag = groupOptions?.npm?.distTag } = {},
+    } = this.opts;
 
-    if (publish !== undefined) plan.publish = publish;
-    if (prerelease !== undefined) plan.prerelease = prerelease;
-    if (npm?.distTag) {
-      plan.npm ??= {};
-      plan.npm.distTag = npm.distTag;
+    if (prerelease !== undefined) draft.prerelease = prerelease;
+    if (distTag) {
+      draft.npm ??= {};
+      draft.npm.distTag = distTag;
     }
   }
 }
@@ -148,13 +151,23 @@ export class PackageGraph {
 
   removeGroupMember(group: string, id: string): void {
     const entry = this.groups.get(group);
-    if (!entry) return;
+    const pkg = this.packages.get(id);
+    if (!entry || !pkg || pkg.group !== entry) return;
 
     const index = entry.packages.findIndex((pkg) => pkg.id === id);
     if (index >= 0) entry.packages.splice(index, 1);
+    pkg.group = undefined;
   }
 
   unregisterGroup(name: string): void {
+    const group = this.groups.get(name);
+    if (!group) return;
+
+    for (const pkg of group.packages) {
+      const entry = this.packages.get(pkg.id);
+      if (entry?.group === group) entry.group = undefined;
+    }
+
     this.groups.delete(name);
   }
 }

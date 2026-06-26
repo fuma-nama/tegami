@@ -10,23 +10,24 @@
     "types:check": "fumadocs-mdx && tsc --noEmit"
   },
   "dependencies": {
-    "fumadocs-core": "^16.10.2",
+    "beautiful-mermaid": "^1.1.3",
+    "fumadocs-core": "^16.10.5",
     "fumadocs-mdx": "^15.0.12",
     "fumadocs-typescript": "^5.2.6",
-    "fumadocs-ui": "^16.10.2",
-    "fumapress": "^0.6.1",
+    "fumadocs-ui": "^16.10.5",
+    "fumapress": "^0.6.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-server-dom-webpack": "^19.2.7",
     "waku": "1.0.0-beta.3"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.0",
+    "@tailwindcss/vite": "^4.3.1",
     "@types/mdx": "^2.0.14",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "tailwindcss": "^4.3.0",
+    "tailwindcss": "^4.3.1",
     "tegami": "workspace:*",
     "typescript": "^6.0.3"
   }

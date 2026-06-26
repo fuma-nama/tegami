@@ -14,14 +14,16 @@ Tegami reads the root `Cargo.toml` and expands `[workspace].members` (respecting
 ```ts
 const paper = tegami({
   cargo: {
+    updateLockFile: false,
     bumpDep: ({ kind }) => (kind === "dependencies" ? "patch" : false),
   },
 });
 ```
 
-| Option    | Description                                          |
-| --------- | ---------------------------------------------------- |
-| `bumpDep` | Decide how to bump dependents when a crate is bumped |
+| Option           | Default | Description                                          |
+| ---------------- | ------- | ---------------------------------------------------- |
+| `updateLockFile` | `true`  | Run `cargo update --workspace` after versioning      |
+| `bumpDep`        | —       | Decide how to bump dependents when a crate is bumped |
 
 Default behavior:
 

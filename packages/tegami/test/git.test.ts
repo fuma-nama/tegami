@@ -4,9 +4,10 @@ import { join } from "node:path";
 import * as tinyexec from "tinyexec";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
+import type { TegamiContext } from "../src/context";
+import { publishPlan } from "./helpers/plan";
 
 vi.mock("tinyexec", async (importOriginal) => {
   const actual = await importOriginal<typeof tinyexec>();
@@ -83,20 +84,15 @@ describe("git utils", () => {
 
   test("creates git tags for successful publish results", async () => {
     const plugin = git();
-    const result = publishResult({
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    const ui = context.graph.get("test:@acme/ui")!;
+    const plan = publishPlan(context.graph, {
       packages: [
-        packageResult({
-          name: "@acme/core",
-          version: "1.0.1",
-        }),
-        packageResult({
-          name: "@acme/ui",
-          version: "1.0.1",
-        }),
+        { pkg: core, git: { tag: "@acme/core@1.0.1" } },
+        { pkg: ui, git: { tag: "@acme/ui@1.0.1" } },
       ],
     });
-
-    if (result.state !== "created") throw new Error("must be created");
 
     exec.mockImplementation((_command, args = []) => {
       if (args.at(0) === "rev-parse") {
@@ -112,12 +108,7 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const next = await plugin.afterPublishAll?.call(pluginContext(), result);
-    expect(next).toBe(result);
-    expect(result.packages.map((pkg) => pkg.gitTag)).toEqual([
-      "@acme/core@1.0.1",
-      "@acme/ui@1.0.1",
-    ]);
+    await plugin.afterPublishAll?.call(context, { plan });
     expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
       [
         {
@@ -165,15 +156,20 @@ describe("git utils", () => {
   });
 
   test("skips plugin tags on dry runs, disabled tags, and failed publishes", async () => {
-    await git().afterPublishAll?.call(pluginContext({ dryRun: true }), publishResult());
-    await git({ createTags: false }).afterPublishAll?.call(pluginContext(), publishResult());
-    await git().afterPublishAll?.call(
-      pluginContext(),
-      publishResult({
-        state: "failed",
-        packages: [packageResult({ state: "failed" })],
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+
+    await git().afterPublishAll?.call(context, {
+      plan: publishPlan(context.graph, { dryRun: true, packages: [{ pkg: core }] }),
+    });
+    await git({ createTags: false }).afterPublishAll?.call(context, {
+      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    });
+    await git().afterPublishAll?.call(context, {
+      plan: publishPlan(context.graph, {
+        packages: [{ pkg: core, publishResult: { type: "failed", error: "publish failed" } }],
       }),
-    );
+    });
 
     expect(exec).not.toHaveBeenCalled();
   });
@@ -184,6 +180,8 @@ describe("git utils", () => {
 
     try {
       const plugin = git();
+      const context = pluginContext();
+      const core = context.graph.get("test:@acme/core")!;
       exec.mockImplementation((_command, args = []) => {
         if (args.at(0) === "rev-parse") {
           return commandResult({
@@ -198,7 +196,9 @@ describe("git utils", () => {
         throw new Error(`Unexpected command: ${args.join(" ")}`);
       });
 
-      await plugin.afterPublishAll?.call(pluginContext(), publishResult());
+      await plugin.afterPublishAll?.call(context, {
+        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+      });
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
@@ -240,8 +240,10 @@ describe("git utils", () => {
     }
   });
 
-  test("marks the publish result failed when git tag creation fails", async () => {
+  test("throws when git tag creation fails", async () => {
     const plugin = git();
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
     exec.mockImplementation((_command, args = []) => {
       if (args.at(0) === "rev-parse") {
         return commandResult({
@@ -256,39 +258,25 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const result = await plugin.afterPublishAll?.call(pluginContext(), publishResult());
-
-    expect(result).toMatchObject({
-      state: "failed",
-      error: expect.stringContaining("tag failed"),
-    });
+    await expect(
+      plugin.afterPublishAll?.call(context, {
+        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+      }),
+    ).rejects.toThrow(/tag failed/);
   });
 });
 
-function pluginContext(publishOptions: { dryRun?: boolean } = {}) {
+function pluginContext(): TegamiContext {
   return {
     cwd: "/repo",
-    changelogDir: ".tegami",
-    planPath: "/repo/.tegami/publish-plan",
+    changelogDir: "/repo/.tegami",
+    lockPath: "/repo/.tegami/publish-lock.yaml",
     options: {},
     plugins: [],
-    publishOptions,
     graph: new PackageGraph([
       workspacePackage("@acme/core", "/repo/packages/core"),
       workspacePackage("@acme/ui", "/repo/packages/ui"),
     ]),
-    getRegistryClient: registryClient,
-  };
-}
-
-function registryClient() {
-  return {
-    id: "test",
-    supports: () => true,
-    async isPackagePublished() {
-      return false;
-    },
-    async publish() {},
   };
 }
 
@@ -313,34 +301,6 @@ class TestPackage extends WorkspacePackage {
   async updateDependency(): Promise<void> {}
 
   async write(): Promise<void> {}
-}
-
-function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
-  return {
-    _rawPlan: {
-      version: "0.0.0",
-      id: "tegami-test",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      changelogs: {},
-      packages: {},
-    },
-    state: "created",
-    packages: [packageResult()],
-    ...overrides,
-  };
-}
-
-function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePublishResult {
-  const name = overrides.name ?? "@acme/core";
-  return {
-    id: `test:${name}`,
-    name,
-    version: "1.0.1",
-    npm: { distTag: "latest" },
-    changelogs: [],
-    state: "success",
-    ...overrides,
-  };
 }
 
 type ExecResult = Awaited<ReturnType<typeof x>>;

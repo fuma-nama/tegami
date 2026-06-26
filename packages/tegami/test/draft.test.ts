@@ -1,11 +1,17 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
+import { load } from "js-yaml";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import type { PackageManifest } from "../src/schemas";
 import { getPendingPackageIds, normalizePackagePlan } from "./helpers/draft";
+import { writePublishLock } from "./helpers/lock";
+import {
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -16,9 +22,12 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  installRegistryFetchMock();
+  mockRegistryMissing();
 });
 
 afterEach(async () => {
+  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
@@ -44,8 +53,8 @@ describe("draft publish plans", () => {
     expect(changelogId).toEqual(expect.any(String));
     expect({
       packages,
-      core: normalizePackagePlan(draft.getPackagePlan("npm:@acme/core")),
-      ui: normalizePackagePlan(draft.getPackagePlan("npm:@acme/ui")),
+      core: normalizePackagePlan(draft.getPackageDraft("npm:@acme/core")),
+      ui: normalizePackagePlan(draft.getPackageDraft("npm:@acme/ui")),
     }).toMatchInlineSnapshot(`
       {
         "core": {
@@ -56,7 +65,6 @@ describe("draft publish plans", () => {
           "npm": {
             "distTag": "alpha",
           },
-          "publish": true,
           "type": "minor",
         },
         "packages": [
@@ -72,13 +80,12 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md",
           ],
-          "publish": true,
           "type": "major",
         },
       }
     `);
 
-    await draft.applyPlan();
+    await draft.apply();
     expect(await readFile(join(cwd, "packages/core/package.json"), "utf-8")).toMatchInlineSnapshot(`
       "{
         "name": "@acme/core",
@@ -114,58 +121,34 @@ describe("draft publish plans", () => {
       code: "ENOENT",
     });
 
-    const rawPlan = await readJson<{ packages: Record<string, { version?: string }> }>(
-      join(cwd, ".tegami/publish-plan"),
+    const rawPlan = load(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8")) as Record<
+      string,
+      unknown[]
+    >;
+
+    expect(rawPlan["core:changelogs"]).toEqual([
+      expect.objectContaining({
+        filename: "change.md",
+        v: "0.0.0",
+      }),
+    ]);
+    expect(rawPlan["core:packages"]).toEqual(
+      expect.arrayContaining([
+        {
+          changelogIds: ["change.md"],
+          id: "npm:@acme/core",
+          updated: true,
+        },
+        {
+          changelogIds: ["change.md"],
+          id: "npm:@acme/ui",
+          updated: true,
+        },
+      ]),
     );
-
-    delete (rawPlan as Record<string, unknown>).createdAt;
-    delete (rawPlan as Record<string, unknown>).id;
-
-    expect(rawPlan).toMatchInlineSnapshot(`
-      {
-        "changelogs": {
-          "change.md": {
-            "content": "---
-      packages:
-        '@acme/core':
-          type: minor
-        '@acme/ui':
-          type: minor
-      ---
-
-      ## Add shared API
-
-      Useful release note.
-      ",
-            "filename": "change.md",
-          },
-        },
-        "packages": {
-          "npm:@acme/core": {
-            "changelogIds": [
-              "change.md",
-            ],
-            "npm": {
-              "distTag": "alpha",
-            },
-            "publish": true,
-            "type": "minor",
-          },
-          "npm:@acme/ui": {
-            "bumpReasons": [
-              "update dependency "@acme/core-alias"",
-              "update dependency "@acme/core"",
-            ],
-            "changelogIds": [
-              "change.md",
-            ],
-            "publish": true,
-            "type": "major",
-          },
-        },
-        "version": "0.0.0",
-      }
-    `);
+    expect(rawPlan["npm:packages"]).toEqual(
+      expect.arrayContaining([{ distTag: "alpha", id: "npm:@acme/core" }]),
+    );
   });
 
   test("omits packages without pending version changes from the draft", async () => {
@@ -181,7 +164,7 @@ describe("draft publish plans", () => {
     expect(getPendingPackageIds(draft, (await paper._internal.context()).graph)).toEqual([]);
   });
 
-  test("versions packages when script-level prerelease config changes without a bump type", async () => {
+  test("does not treat matching prerelease config as a pending version bump", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-prerelease-"));
     tempDirs.push(cwd);
 
@@ -208,24 +191,11 @@ describe("draft publish plans", () => {
     const draft = await paper.draft();
     const pkg = context.graph.get("npm:tegami")!;
 
-    expect(draft.getPackagePlan("npm:tegami")?.type).toBeUndefined();
-    expect(draft.hasPending()).toBe(true);
-    expect(getPendingPackageIds(draft, context.graph)).toEqual(["npm:tegami"]);
-    expect(draft.getPackagePlan("npm:tegami")?.bumpVersion(pkg)).toBe("1.1.0-alpha.3");
-
-    await draft.applyPlan();
-
-    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
-      name: "tegami",
-      version: "1.1.0-alpha.3",
-    });
-
-    const rawPlan = await readJson<{ packages: Record<string, { type?: string }> }>(
-      join(cwd, ".tegami/publish-plan"),
-    );
-
-    expect(Object.keys(rawPlan.packages)).toEqual(["npm:tegami"]);
-    expect(rawPlan.packages["npm:tegami"]?.type).toBeUndefined();
+    expect(draft.getPackageDraft("npm:tegami")?.type).toBeUndefined();
+    expect(draft.getPackageDraft("npm:tegami")?.prerelease).toBe("alpha");
+    expect(draft.hasPending()).toBe(false);
+    expect(getPendingPackageIds(draft, context.graph)).toEqual([]);
+    expect(draft.getPackageDraft("npm:tegami")?.bumpVersion(pkg)).toBe("1.1.0-alpha.2");
   });
 
   test("treats file: dependencies outside the workspace as external", async () => {
@@ -271,10 +241,10 @@ Core only.
 
     const draft = await tegami({ cwd }).draft();
 
-    expect(draft.getPackagePlan("npm:@acme/core")?.type).toBe("minor");
-    expect(draft.getPackagePlan("npm:@acme/ui")?.type).toBeUndefined();
+    expect(draft.getPackageDraft("npm:@acme/core")?.type).toBe("minor");
+    expect(draft.getPackageDraft("npm:@acme/ui")?.type).toBeUndefined();
 
-    await draft.applyPlan();
+    await draft.apply();
 
     expect(JSON.parse(await readFile(join(cwd, "packages/ui/package.json"), "utf8"))).toMatchObject(
       {
@@ -323,8 +293,8 @@ Core only.
 
     const draft = await tegami({ cwd }).draft();
 
-    expect(draft.getPackagePlan("npm:@acme/core")?.type).toBe("minor");
-    expect(draft.getPackagePlan("npm:@acme/ui")?.type).toBe("patch");
+    expect(draft.getPackageDraft("npm:@acme/core")?.type).toBe("minor");
+    expect(draft.getPackageDraft("npm:@acme/ui")?.type).toBe("patch");
   });
 
   test("uses a custom log generator", async () => {
@@ -334,13 +304,13 @@ Core only.
     const draft = await tegami({
       cwd,
       generator: {
-        generate({ packageName, version }) {
-          return `## custom ${packageName}@${version}`;
+        generate({ pkg }) {
+          return `## custom ${pkg.name}@${pkg.version}`;
         },
       },
     }).draft();
 
-    await draft.applyPlan();
+    await draft.apply();
 
     await expect(
       await readFile(join(cwd, "packages/core/CHANGELOG.md"), "utf8"),
@@ -351,31 +321,12 @@ Core only.
     const cwd = await createWorkspace();
     tempDirs.push(cwd);
 
-    await writeJson(join(cwd, ".tegami/publish-plan"), {
-      id: "tegami-existing",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      changelogs: {},
-      packages: {
-        "npm:@acme/core": {
-          type: "patch",
-          changelogIds: [],
-          npm: { distTag: "latest" },
-          publish: true,
-        },
-      },
+    await writePublishLock(cwd, {
+      packages: [{ id: "npm:@acme/core", updated: true }],
+      npm: [{ id: "npm:@acme/core", distTag: "latest" }],
     });
 
-    const draft = await tegami({ cwd }).draft();
-    exec.mockResolvedValue({
-      exitCode: 1,
-      stdout: "",
-      stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-    } as Awaited<ReturnType<typeof x>>);
-
-    await expect(draft.applyPlan()).rejects.toThrow(/Publish plan already exists/);
-    expect(await readJson<PackageManifest>(join(cwd, "packages/core/package.json"))).toMatchObject({
-      version: "1.0.0",
-    });
+    await expect(tegami({ cwd }).publishStatus()).resolves.toBe("pending");
   });
 
   test("excludes packages listed in ignore", async () => {
@@ -453,8 +404,8 @@ This ensures the pm-specific protocols are respected.
     const paper = tegami({ cwd });
     const draft = await paper.draft();
 
-    expect(draft.getPackagePlan("npm:tegami")?.type).toBe("patch");
-    await draft.applyPlan();
+    expect(draft.getPackageDraft("npm:tegami")?.type).toBe("patch");
+    await draft.apply();
 
     expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
       name: "tegami",
@@ -488,11 +439,11 @@ packages: ["tegami"]
 More features.
 `,
     );
-    await rm(join(cwd, ".tegami/publish-plan"), { force: true });
+    await rm(join(cwd, ".tegami/publish-lock.yaml"), { force: true });
 
     const replayDraft = await paper.draft();
-    expect(replayDraft.getPackagePlan("npm:tegami")?.type).toBe("minor");
-    await replayDraft.applyPlan();
+    expect(replayDraft.getPackageDraft("npm:tegami")?.type).toBe("minor");
+    await replayDraft.apply();
 
     expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
       name: "tegami",
@@ -590,10 +541,6 @@ Useful release note.
 
 async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-async function readJson<T>(path: string): Promise<T> {
-  return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
 function normalizeDirPath(path: string): string {

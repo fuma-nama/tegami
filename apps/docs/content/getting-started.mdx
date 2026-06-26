@@ -26,10 +26,8 @@ const paper = tegami({
   plugins: [
     github({
       repo: "your-org/your-repo",
-      cli: {
-        versionPr: {
-          base: "main",
-        },
+      versionPr: {
+        base: "main",
       },
     }),
   ],
@@ -61,12 +59,12 @@ Tegami discovers npm and Cargo workspace packages automatically. Use the `packag
 | Command             | Description                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------- |
 | `tegami`            | Create changelog files interactively or from conventional commits                           |
-| `tegami version`    | Draft and apply a publish plan                                                              |
-| `tegami publish`    | Publish packages from the applied plan                                                      |
+| `tegami version`    | Draft version changes and write the publish lock                                            |
+| `tegami publish`    | Publish packages from the publish lock                                                      |
 | `tegami ci`         | Version if changelogs are pending, otherwise publish                                        |
 | `tegami pr preview` | Build a pull request release preview (for CI)                                               |
 | `tegami pr comment` | Post a release preview artifact as a pull request comment (requires a `workflow_run` event) |
-| `tegami cleanup`    | Optionally remove a finished publish plan file from `.tegami/`                              |
+| `tegami cleanup`    | Optionally remove a finished publish lock file from `.tegami/`                              |
 | `tegami init-agent` | Append AGENTS.md instructions for AI agents writing changelogs                              |
 
 Locally, `tegami` and `tegami version` use interactive prompts. In CI (`CI=true`), prompts are skipped and commands run non-interactively.

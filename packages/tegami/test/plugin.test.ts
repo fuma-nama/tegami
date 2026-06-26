@@ -1,13 +1,24 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { tegami } from "../src";
 import type { TegamiPlugin } from "../src/types";
+import {
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 const tempDirs: string[] = [];
 
+beforeEach(() => {
+  installRegistryFetchMock();
+  mockRegistryMissing();
+});
+
 afterEach(async () => {
+  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
@@ -26,20 +37,39 @@ describe("tegami plugins", () => {
       plugin("post-b", calls, "post"),
     ];
 
-    await tegami({ cwd, plugins }).draft();
-    await writePublishPlan(cwd);
+    await tegami({ cwd, plugins })
+      .draft()
+      .then((draft) => draft.apply());
     await tegami({ cwd, plugins }).publish({
       dryRun: true,
     });
 
     expect(calls).toMatchInlineSnapshot(`
       [
-        "initPlan:pre-a",
-        "initPlan:pre-b",
-        "initPlan:default-a",
-        "initPlan:default-b",
-        "initPlan:post-a",
-        "initPlan:post-b",
+        "initDraft:pre-a",
+        "initDraft:pre-b",
+        "initDraft:default-a",
+        "initDraft:default-b",
+        "initDraft:post-a",
+        "initDraft:post-b",
+        "initPublishPlan:pre-a",
+        "initPublishPlan:pre-b",
+        "initPublishPlan:default-a",
+        "initPublishPlan:default-b",
+        "initPublishPlan:post-a",
+        "initPublishPlan:post-b",
+        "afterPublish:pre-a",
+        "afterPublish:pre-b",
+        "afterPublish:default-a",
+        "afterPublish:default-b",
+        "afterPublish:post-a",
+        "afterPublish:post-b",
+        "afterPublishAll:pre-a",
+        "afterPublishAll:pre-b",
+        "afterPublishAll:default-a",
+        "afterPublishAll:default-b",
+        "afterPublishAll:post-a",
+        "afterPublishAll:post-b",
       ]
     `);
   });
@@ -49,11 +79,17 @@ function plugin(name: string, calls: string[], enforce?: TegamiPlugin["enforce"]
   return {
     name,
     enforce,
-    initPlan() {
-      calls.push(`initPlan:${name}`);
+    initDraft() {
+      calls.push(`initDraft:${name}`);
+    },
+    initPublishPlan() {
+      calls.push(`initPublishPlan:${name}`);
+    },
+    afterPublish() {
+      calls.push(`afterPublish:${name}`);
     },
     afterPublishAll() {
-      calls.push(`afterPublish:${name}`);
+      calls.push(`afterPublishAll:${name}`);
     },
   };
 }
@@ -80,32 +116,6 @@ packages: ["@acme/core"]
   );
 
   return cwd;
-}
-
-async function writePublishPlan(cwd: string): Promise<void> {
-  const changelog = await readFile(join(cwd, ".tegami/change.md"), "utf8").catch(() => undefined);
-
-  await writeJson(join(cwd, ".tegami/publish-plan"), {
-    id: "tegami-plugin-test",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    changelogs: changelog
-      ? {
-          "change.md": {
-            filename: "change.md",
-            packages: { "@acme/core": "patch" },
-            sections: [{ title: "Patch", content: "" }],
-          },
-        }
-      : {},
-    packages: {
-      "@acme/core": {
-        type: "patch",
-        changelogIds: changelog ? ["change.md"] : [],
-        npm: { distTag: "latest" },
-        publish: true,
-      },
-    },
-  });
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

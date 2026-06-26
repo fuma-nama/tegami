@@ -5,9 +5,9 @@ import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import { createTegamiContext } from "../src/context";
-import { parsePlanStore } from "../src/plans/store";
+import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
+import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
 
 initSync();
 
@@ -23,6 +23,8 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  installRegistryFetchMock();
+  mockRegistryMissing();
 });
 
 afterEach(async () => {
@@ -31,13 +33,42 @@ afterEach(async () => {
 });
 
 describe("cargo packages", () => {
+  test("skips cargo lockfile update on npm-only workspaces", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-inactive-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "package.json"),
+      `${JSON.stringify({ name: "root", version: "1.0.0" }, null, 2)}\n`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["root"]
+---
+
+## Change
+
+Note.
+`,
+    );
+
+    exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
+      ReturnType<typeof x>
+    >);
+    await tegami({ cwd })
+      .draft()
+      .then((draft) => draft.apply());
+
+    expect(exec.mock.calls.some(([command]) => command === "cargo")).toBe(false);
+  });
+
   test("resolves npm packages and cargo crates into one graph", async () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
     const graph = await tegami({ cwd })._internal.graph();
-    const context = await createTegamiContext({ cwd });
-
     const packages = graph.getPackages().map((pkg) => ({
       manager: pkg.manager,
       name: pkg.name,
@@ -64,27 +95,31 @@ describe("cargo packages", () => {
         },
       ]),
     );
-    expect(context.getRegistryClient("npm").id).toBe("npm");
-    expect(context.getRegistryClient("cargo").id).toBe("cargo");
   });
 
-  test("writes a mixed npm and cargo publish plan", async () => {
+  test("writes a mixed npm and cargo publish lock", async () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
     const draft = await tegami({ cwd }).draft();
-    await draft.applyPlan();
+    await draft.apply();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/js/package.json"), "utf8"));
     const core = await readCargo(join(cwd, "crates/core"));
     const binding = await readCargo(join(cwd, "crates/binding"));
-    const plan = parsePlanStore(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
+    const lock = parsePublishLock(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8"));
 
     expect(npmPackage.version).toBe("1.1.0");
     expect(table(core.package)?.version).toBe("1.1.0");
     expect(table(table(binding.dependencies)?.acme_core)?.version).toBe("1.1.0");
     expect(table(binding.package)?.version).toBe("1.0.1");
-    expect(Object.keys(plan.packages).sort()).toEqual(
+
+    const packageIds: string[] = [];
+    let entry: unknown;
+    while ((entry = lock.read("core:packages"))) {
+      packageIds.push((entry as { id: string }).id);
+    }
+    expect(packageIds.sort()).toEqual(
       ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
     );
   });
@@ -95,11 +130,11 @@ describe("cargo packages", () => {
 
     const paper = tegami({ cwd });
     const draft = await paper.draft();
-    await draft.applyPlan();
+    await draft.apply();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/pkg-a/package.json"), "utf8"));
     const crate = await readCargo(join(cwd, "crates/pkg-a"));
-    const plan = parsePlanStore(await readFile(join(cwd, ".tegami/publish-plan"), "utf8"));
+    const lock = parsePublishLock(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8"));
 
     expect(getPendingPackageIds(draft, (await paper._internal.context()).graph).sort()).toEqual([
       "cargo:pkg-a",
@@ -107,7 +142,13 @@ describe("cargo packages", () => {
     ]);
     expect(npmPackage.version).toBe("1.1.0");
     expect(table(crate.package)?.version).toBe("1.1.0");
-    expect(Object.keys(plan.packages)).toEqual(["npm:pkg-a", "cargo:pkg-a"]);
+
+    const packageIds: string[] = [];
+    let entry: unknown;
+    while ((entry = lock.read("core:packages"))) {
+      packageIds.push((entry as { id: string }).id);
+    }
+    expect(packageIds.sort()).toEqual(["cargo:pkg-a", "npm:pkg-a"]);
   });
 
   test("preserves Cargo.toml formatting and comments when applying a plan", async () => {
@@ -125,7 +166,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
 
     await tegami({ cwd })
       .draft()
-      .then((draft) => draft.applyPlan());
+      .then((draft) => draft.apply());
 
     const written = await readFile(join(cwd, "crates/binding/Cargo.toml"), "utf8");
     expect(written).toContain("# keep this comment");
@@ -139,40 +180,27 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     tempDirs.push(cwd);
     await tegami({ cwd })
       .draft()
-      .then((draft) => draft.applyPlan());
+      .then((draft) => draft.apply());
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        status: 404,
-        text: async () => "not found",
-      })),
+      vi.fn(async () => new Response("not found", { status: 404 })),
     );
-    exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "view") {
-        return commandResult({
-          exitCode: 1,
-          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-        });
-      }
-
-      return commandResult();
-    });
+    exec.mockImplementation(() => commandResult());
 
     const result = await tegami({ cwd, npm: { client: "npm" } }).publish();
 
-    if (result.state !== "created") {
-      throw new Error(`expected created, got ${result.state}`);
+    if (result === "skipped") {
+      throw new Error("expected publish plan, got skipped");
     }
 
-    expect(result.packages.map((pkg) => ({ name: pkg.name, state: pkg.state }))).toEqual(
-      expect.arrayContaining([
-        { name: "@acme/js", state: "success" },
-        { name: "acme_core", state: "success" },
-        { name: "acme_binding", state: "success" },
-      ]),
+    const published = [...result.packages.entries()]
+      .filter(([, plan]) => plan.publishResult!.type === "published")
+      .map(([id]) => id);
+
+    expect(published.sort()).toEqual(
+      ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
     );
-    expect(result.packages).toHaveLength(3);
     expect(
       exec.mock.calls.map(([command, args, options]) => ({
         command,
@@ -180,11 +208,6 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
         cwd: normalizeDirPath(String(options?.nodeOptions?.cwd)),
       })),
     ).toEqual([
-      {
-        command: "npm",
-        args: ["view", "@acme/js@1.1.0", "version", "--json"],
-        cwd,
-      },
       {
         command: "npm",
         args: ["publish"],
@@ -210,7 +233,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     tempDirs.push(cwd);
     await tegami({ cwd })
       .draft()
-      .then((draft) => draft.applyPlan());
+      .then((draft) => draft.apply());
 
     vi.stubGlobal(
       "fetch",

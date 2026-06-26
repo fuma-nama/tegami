@@ -3,7 +3,7 @@ title: CI Setup
 description: Run Tegami in your release pipeline.
 ---
 
-The `tegami ci` command is designed for a release pipeline on your main branch. It runs versioning first; only when there is nothing to version does it publish from the existing publish plan.
+The `tegami ci` command is designed for a release pipeline on your main branch. It runs versioning first; only when there is nothing to version does it publish from the existing publish lock.
 
 ## GitHub Actions
 
@@ -95,13 +95,13 @@ With the GitHub plugin enabled, CI follows a two-step flow:
 
 1. **Changelogs committed**
    - Maintainers push commits that add `.tegami/*.md` changelog files.
-   - CI runs `tegami ci`, applies the publish plan.
+   - CI runs `tegami ci`, writes the publish lock.
    - CI opens a **Version Packages** pull request (at `tegami/version-packages` by default).
 2. **Version PR merges**
-   - The merged commit contains bumped versions and `.tegami/publish-plan`.
+   - The merged commit contains bumped versions and `.tegami/publish-lock.yaml`.
    - The next CI run publishes packages and creates GitHub releases.
 
-Because the publish plan lives in git, failed publish jobs can be retried safely without duplicating releases.
+Because the publish lock lives in git, failed publish jobs can be retried safely without duplicating releases.
 
 ## Pull request preview
 

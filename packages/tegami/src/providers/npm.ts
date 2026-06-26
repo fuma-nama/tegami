@@ -6,14 +6,14 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
-import type { Awaitable, RegistryClient, TegamiPlugin } from "../types";
+import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { PackageGraph, WorkspacePackage } from "../graph";
+import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
-import type { PackagePlanStore, PlanStore } from "../plans/store";
 import type { BumpType } from "../utils/semver";
-import type { PlanPolicy } from "../plans/draft";
+import type { DraftPolicy } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
+import z from "zod";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -47,9 +47,8 @@ export class NpmPackage extends WorkspacePackage {
     );
   }
 
-  initPlan() {
-    const defaults = super.initPlan();
-    defaults.publish ??= this.manifest.private !== true;
+  initDraft() {
+    const defaults = super.initDraft();
 
     if (this.manifest.publishConfig?.tag) {
       defaults.npm ??= {};
@@ -58,128 +57,6 @@ export class NpmPackage extends WorkspacePackage {
 
     return defaults;
   }
-}
-
-export class NpmRegistryClient implements RegistryClient {
-  readonly id = "npm";
-
-  // package@version -> if published
-  #versionMap = new Map<string, Promise<boolean>>();
-
-  constructor(
-    private readonly cwd: string,
-    private readonly client: AgentName,
-    _graph: PackageGraph,
-  ) {}
-
-  supports(pkg: WorkspacePackage): boolean {
-    return pkg instanceof NpmPackage;
-  }
-
-  async isPackagePublished(pkg: NpmPackage): Promise<boolean> {
-    const cacheKey = `${pkg.id}@${pkg.version}`;
-    let info = this.#versionMap.get(cacheKey);
-    if (!info) {
-      const run = async () => {
-        const registry = pkg.manifest.publishConfig?.registry;
-        const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
-        if (registry) args.push("--registry", registry);
-
-        const result = await x(this.client === "pnpm" ? "pnpm" : "npm", args, {
-          nodeOptions: {
-            cwd: this.cwd,
-          },
-        });
-        if (result.exitCode === 0) return true;
-
-        if (isMissingRegistryEntry(result.stderr) || isMissingRegistryEntry(result.stdout))
-          return false;
-
-        throw execFailure(
-          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
-          result,
-        );
-      };
-
-      info = run();
-      this.#versionMap.set(cacheKey, info);
-    }
-
-    return info;
-  }
-
-  async publish(
-    pkg: NpmPackage,
-    { packageStore }: { store: PlanStore; packageStore: PackagePlanStore },
-  ) {
-    const distTag = packageStore.npm?.distTag;
-
-    // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
-    if (this.client === "bun") {
-      const tarball = "pkg.tgz";
-      const packResult = await x("bun", ["pm", "pack", "--filename", tarball], {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-      if (packResult.exitCode !== 0) {
-        throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
-      }
-
-      const publishArgs = ["publish", tarball];
-      if (distTag) publishArgs.push("--tag", distTag);
-
-      const publishResult = await x("npm", publishArgs, {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-      if (publishResult.exitCode !== 0) {
-        throw execFailure(
-          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-          publishResult,
-        );
-      }
-      return;
-    }
-
-    const args = ["publish"];
-    if (distTag) args.push("--tag", distTag);
-
-    let client: AgentName;
-    if (this.client === "pnpm") {
-      client = "pnpm";
-      args.push("--no-git-checks");
-    } else if (this.client === "yarn") {
-      client = "yarn";
-    } else {
-      client = "npm";
-    }
-
-    const result = await x(client, args, {
-      nodeOptions: {
-        cwd: pkg.path,
-      },
-    });
-    if (result.exitCode !== 0) {
-      throw execFailure(
-        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-        result,
-      );
-    }
-  }
-}
-
-function isMissingRegistryEntry(output: string): boolean {
-  const normalized = output.toLowerCase();
-
-  return (
-    normalized.includes("e404") ||
-    normalized.includes("404") ||
-    normalized.includes("no match") ||
-    normalized.includes("no matching version") ||
-    normalized.includes("not found")
-  );
 }
 
 type DependencySpec =
@@ -291,14 +168,19 @@ export interface NpmPluginOptions {
    */
   onBreakPeerDep?: "set" | "error" | "ignore";
 
-  /** update lockfile after appling publish plan */
+  /** update lockfile after applying a draft @default true */
   updateLockFile?: boolean;
 }
+
+const packageLockSchema = z.object({
+  id: z.string(),
+  distTag: z.string().optional(),
+});
 
 export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
-  updateLockFile = false,
+  updateLockFile = true,
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -312,68 +194,8 @@ export function npm({
     }
   },
 }: NpmPluginOptions = {}): TegamiPlugin {
+  let active = false;
   let client: AgentName;
-
-  function depsPolicy(context: TegamiContext): PlanPolicy {
-    const { graph } = context;
-
-    function needsUpdate(dependent: NpmPackage, spec: DependencySpec, target: string): boolean {
-      if (spec.linked) {
-        const group = graph.getPackageGroup(dependent.id);
-
-        if (group?.options.syncBump && graph.getPackageGroup(spec.linked.id) === group) {
-          // they will always bump together
-          return false;
-        }
-
-        if (spec.protocol === "workspace") {
-          switch (spec.range) {
-            case "":
-            case "*":
-              return true;
-            case "^":
-            case "~":
-              return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
-          }
-        }
-
-        if (spec.protocol === "file") {
-          return true;
-        }
-      }
-
-      // Ignore special syntax like "latest".
-      if (spec.protocol === "file" || !semver.validRange(spec.range)) return false;
-      return !semver.satisfies(target, spec.range);
-    }
-
-    return {
-      id: "npm:deps",
-      onUpdate({ pkg, plan }) {
-        if (!(pkg instanceof NpmPackage)) return;
-
-        for (const dependent of graph.getPackages()) {
-          if (!(dependent instanceof NpmPackage)) continue;
-
-          for (const field of DEP_FIELDS) {
-            const dependencies = dependent.manifest[field];
-            if (!dependencies) continue;
-
-            for (const [k, v] of Object.entries(dependencies)) {
-              const spec = parseDependencySpec(context, dependent, k, v);
-              if (!spec || spec.linked !== pkg) continue;
-              if (!needsUpdate(dependent, spec, plan.bumpVersion(pkg))) continue;
-
-              const bumpType = getBumpDepType({ kind: field, spec, name: k });
-              if (bumpType === false) continue;
-
-              this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
-            }
-          }
-        }
-      },
-    };
-  }
 
   return {
     name: "npm",
@@ -381,31 +203,151 @@ export function npm({
     async init() {
       if (defaultClient) {
         client = defaultClient;
-        return;
+      } else {
+        const result = await detect({
+          cwd: this.cwd,
+        });
+        client = result?.name ?? "npm";
       }
 
-      const result = await detect({
-        cwd: this.cwd,
-      });
-
-      client = result?.name ?? "npm";
+      this.npm = { client };
     },
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));
+      active = this.graph.getPackages().some((pkg) => pkg instanceof NpmPackage);
     },
-    createRegistryClient() {
-      return new NpmRegistryClient(this.cwd, client, this.graph);
+    async publishPreflight({ pkg }) {
+      if (!(pkg instanceof NpmPackage)) return;
+      if (pkg.manifest.private === true) return { publish: false };
+
+      const registry = pkg.manifest.publishConfig?.registry;
+      const base = (registry ?? "https://registry.npmjs.org").replace(/\/$/, "");
+      const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (response.status === 404) return { publish: true };
+      if (!response.ok) {
+        throw new Error(
+          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+        );
+      }
+
+      return { publish: false };
     },
-    initPlan(plan) {
-      plan.addPolicy(depsPolicy(this));
+    initPublishLock({ lock, draft }) {
+      for (const [id, pkg] of draft.getPackageDrafts()) {
+        if (!pkg.npm) continue;
+
+        lock.write("npm:packages", {
+          id,
+          distTag: pkg.npm.distTag,
+        } satisfies z.input<typeof packageLockSchema>);
+      }
     },
-    async applyPlan(draft) {
+    initPublishPlan({ lock, plan }) {
+      let data: unknown;
+
+      while ((data = lock.read("npm:packages"))) {
+        const parsed = packageLockSchema.safeParse(data).data;
+        if (!parsed) continue;
+        const packagePlan = plan.packages.get(parsed.id);
+        if (!packagePlan) continue;
+
+        packagePlan.npm = {
+          distTag: parsed.distTag,
+        };
+      }
+    },
+    async publish({ pkg, plan }) {
+      if (!(pkg instanceof NpmPackage)) return;
+
+      const packagePlan = plan.packages.get(pkg.id)!;
+      const distTag = packagePlan.npm?.distTag;
+
+      // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
+      if (client === "bun") {
+        const tarballPath = path.resolve(pkg.path, "pkg.tgz");
+        const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
+          nodeOptions: {
+            cwd: pkg.path,
+          },
+        });
+        if (packResult.exitCode !== 0) {
+          return {
+            type: "failed",
+            error: execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult).message,
+          };
+        }
+
+        const publishArgs = ["publish", tarballPath];
+        if (distTag) publishArgs.push("--tag", distTag);
+
+        const publishResult = await x("npm", publishArgs, {
+          nodeOptions: {
+            cwd: pkg.path,
+          },
+        });
+        if (publishResult.exitCode !== 0) {
+          return {
+            type: "failed",
+            error: execFailure(
+              `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+              publishResult,
+            ).message,
+          };
+        }
+        return {
+          type: "published",
+        };
+      }
+
+      let command: AgentName;
+      const args = ["publish"];
+      if (distTag) args.push("--tag", distTag);
+
+      if (client === "pnpm") {
+        command = "pnpm";
+        args.push("--no-git-checks");
+      } else if (client === "yarn") {
+        command = "yarn";
+      } else {
+        command = "npm";
+      }
+
+      const result = await x(command, args, {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+
+      if (result.exitCode !== 0) {
+        return {
+          type: "failed",
+          error: execFailure(
+            `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+            result,
+          ).message,
+        };
+      }
+
+      return {
+        type: "published",
+      };
+    },
+    initDraft(plan) {
+      if (!active) return;
+      plan.addPolicy(depsPolicy(this, getBumpDepType));
+    },
+    async applyDraft(draft) {
+      if (!active) return;
+
       const { graph } = this;
       const writes: Awaitable<void>[] = [];
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof NpmPackage)) continue;
-        const plan = draft.getPackagePlan(pkg.id);
+        const plan = draft.getPackageDraft(pkg.id);
         if (plan) {
           pkg.manifest.version = plan.bumpVersion(pkg);
         }
@@ -455,8 +397,8 @@ export function npm({
       await Promise.all(writes);
     },
     cli: {
-      async publishPlanApplied() {
-        if (!updateLockFile) return;
+      async draftApplied() {
+        if (!active || !updateLockFile) return;
 
         let args: string[];
         if (client === "npm") {
@@ -478,6 +420,67 @@ export function npm({
           throw execFailure("Failed to update lockfile.", result);
         }
       },
+    },
+  };
+}
+
+function depsPolicy(
+  context: TegamiContext,
+  getBumpDepType: NonNullable<NpmPluginOptions["bumpDep"]>,
+): DraftPolicy {
+  const { graph } = context;
+
+  function needsUpdate(spec: DependencySpec, target: string): boolean {
+    if (spec.linked && spec.protocol === "workspace") {
+      switch (spec.range) {
+        case "":
+        case "*":
+          return true;
+        case "^":
+        case "~":
+          return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
+      }
+    }
+
+    if (spec.linked && spec.protocol === "file") {
+      return true;
+    }
+
+    // Ignore special syntax like "latest".
+    if (spec.protocol === "file" || !semver.validRange(spec.range)) return false;
+    return !semver.satisfies(target, spec.range);
+  }
+
+  return {
+    id: "npm:deps",
+    onUpdate({ pkg, packageDraft: plan }) {
+      if (!(pkg instanceof NpmPackage)) return;
+      const group = graph.getPackageGroup(pkg.id);
+
+      for (const dependent of graph.getPackages()) {
+        if (!(dependent instanceof NpmPackage)) continue;
+
+        for (const field of DEP_FIELDS) {
+          const dependencies = dependent.manifest[field];
+          if (!dependencies) continue;
+
+          for (const [k, v] of Object.entries(dependencies)) {
+            const spec = parseDependencySpec(context, dependent, k, v);
+            if (!spec || spec.linked !== pkg) continue;
+            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
+              // they will always bump together
+              continue;
+            }
+
+            if (!needsUpdate(spec, plan.bumpVersion(pkg))) continue;
+
+            const bumpType = getBumpDepType({ kind: field, spec, name: k });
+            if (bumpType === false) continue;
+
+            this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
+          }
+        }
+      }
     },
   };
 }

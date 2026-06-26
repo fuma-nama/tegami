@@ -34,4 +34,4 @@ Rules:
 - Include YAML frontmatter with `packages`
 - Include at least one `#`, `##`, or `###` heading in the body
 - Write user-facing release notes under each heading
-- Do not edit `.tegami/publish-plan` or package `CHANGELOG.md` files directly
+- Do not edit the publish lock file (`.tegami/publish-lock.yaml`) or package `CHANGELOG.md` files directly

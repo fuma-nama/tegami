@@ -3,10 +3,13 @@ import { formatPackageVersion } from "../utils/semver";
 
 export function simpleGenerator(): LogGenerator {
   return {
-    generate({ changelogs, version, packageName, plan }) {
-      const lines = [`## ${formatPackageVersion(packageName, version, plan.npm?.distTag)}`, ""];
+    generate({ pkg, packageDraft }) {
+      const lines = [
+        `## ${formatPackageVersion(pkg.name, pkg.version, packageDraft.npm?.distTag)}`,
+        "",
+      ];
 
-      for (const entry of changelogs) {
+      for (const entry of packageDraft.changelogs ?? []) {
         let sectionDepth = 4;
         if (entry.subject) lines.push(`### ${entry.subject}`, "");
         else sectionDepth--;

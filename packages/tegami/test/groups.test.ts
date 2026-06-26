@@ -5,10 +5,10 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { git } from "../src/plugins/git";
-import type { PackagePublishResult, PublishResult } from "../src/publish";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
 import { getPendingPackageIds } from "./helpers/draft";
+import { publishPlan } from "./helpers/plan";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -75,14 +75,14 @@ Useful release note.
     }).draft();
 
     expect({
-      coreDistTag: draft.getPackagePlan("npm:@acme/core")?.npm?.distTag,
-      uiDistTag: draft.getPackagePlan("npm:@acme/ui")?.npm?.distTag,
+      coreDistTag: draft.getPackageDraft("npm:@acme/core")?.npm?.distTag,
+      uiDistTag: draft.getPackageDraft("npm:@acme/ui")?.npm?.distTag,
     }).toEqual({
       coreDistTag: undefined,
       uiDistTag: "next",
     });
 
-    await draft.applyPlan();
+    await draft.apply();
 
     expect(await readJson(join(cwd, "packages/core/package.json"))).toMatchObject({
       version: "1.1.0-alpha.0",
@@ -125,14 +125,14 @@ Breaking note.
     }).draft();
 
     expect({
-      core: draft.getPackagePlan("npm:@acme/core")?.type,
-      ui: draft.getPackagePlan("npm:@acme/ui")?.type,
+      core: draft.getPackageDraft("npm:@acme/core")?.type,
+      ui: draft.getPackageDraft("npm:@acme/ui")?.type,
     }).toEqual({
       core: "major",
       ui: "major",
     });
 
-    await draft.applyPlan();
+    await draft.apply();
 
     expect(await readJson(join(cwd, "packages/core/package.json"))).toMatchObject({
       version: "2.0.0",
@@ -153,11 +153,12 @@ Breaking note.
         "@acme/ui": { group: "acme" },
       },
     });
-
-    const result = publishResult({
+    const core = context.graph.get("test:@acme/core")!;
+    const ui = context.graph.get("test:@acme/ui")!;
+    const plan = publishPlan(context.graph, {
       packages: [
-        packageResult({ name: "@acme/core", id: "test:@acme/core" }),
-        packageResult({ name: "@acme/ui", id: "test:@acme/ui" }),
+        { pkg: core, git: { tag: "acme@1.0.1" } },
+        { pkg: ui, git: { tag: "acme@1.0.1" } },
       ],
     });
 
@@ -173,18 +174,36 @@ Breaking note.
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    await plugin.afterPublishAll?.call(context, result);
+    await plugin.afterPublishAll?.call(context, { plan });
 
-    if (result.state !== "created") throw new Error("must be created");
-
-    expect(result.packages.map((pkg) => pkg.gitTag)).toEqual(["acme@1.0.1", "acme@1.0.1"]);
     expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "tag")).toHaveLength(1);
+  });
+
+  test("clears package group references when members or groups are removed", () => {
+    const graph = new PackageGraph([
+      workspacePackage("@acme/core", "/repo/packages/core"),
+      workspacePackage("@acme/ui", "/repo/packages/ui"),
+    ]);
+    graph.registerGroup("acme", {});
+    graph.registerGroup("next", {});
+
+    graph.addGroupMember("acme", "test:@acme/core");
+    graph.removeGroupMember("acme", "test:@acme/core");
+    graph.addGroupMember("next", "test:@acme/core");
+
+    expect(graph.getPackageGroup("test:@acme/core")?.name).toBe("next");
+    expect(graph.getGroup("acme")?.packages).toEqual([]);
+
+    graph.addGroupMember("next", "test:@acme/ui");
+    graph.unregisterGroup("next");
+
+    expect(graph.getGroup("next")).toBeUndefined();
+    expect(graph.getPackageGroup("test:@acme/core")).toBeUndefined();
+    expect(graph.getPackageGroup("test:@acme/ui")).toBeUndefined();
   });
 });
 
-function createGroupContext(
-  options: TegamiContext["options"],
-): TegamiContext & { publishOptions: Record<string, never> } {
+function createGroupContext(options: TegamiContext["options"]): TegamiContext {
   const graph = new PackageGraph([
     workspacePackage("@acme/core", "/repo/packages/core"),
     workspacePackage("@acme/ui", "/repo/packages/ui"),
@@ -207,13 +226,11 @@ function createGroupContext(
 
   return {
     cwd: "/repo",
-    changelogDir: ".tegami",
-    planPath: "/repo/.tegami/publish-plan",
+    changelogDir: "/repo/.tegami",
+    lockPath: "/repo/.tegami/publish-lock.yaml",
     options,
     plugins: [],
-    publishOptions: {},
     graph,
-    getRegistryClient: registryClient,
   };
 }
 
@@ -296,34 +313,6 @@ class TestPackage extends WorkspacePackage {
   async write(): Promise<void> {}
 }
 
-function publishResult(overrides: Partial<PublishResult> = {}): PublishResult {
-  return {
-    _rawPlan: {
-      version: "0.0.0",
-      id: "tegami-test",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      changelogs: {},
-      packages: {},
-    },
-    state: "created",
-    packages: [packageResult()],
-    ...overrides,
-  };
-}
-
-function packageResult(overrides: Partial<PackagePublishResult> = {}): PackagePublishResult {
-  const name = overrides.name ?? "@acme/core";
-  return {
-    id: overrides.id ?? `test:${name}`,
-    name,
-    version: "1.0.1",
-    npm: { distTag: "latest" },
-    changelogs: [],
-    state: "success",
-    ...overrides,
-  };
-}
-
 type ExecResult = Awaited<ReturnType<typeof x>>;
 
 function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x> {
@@ -333,15 +322,4 @@ function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x
     stderr: "",
     ...overrides,
   } as unknown as ReturnType<typeof x>;
-}
-
-function registryClient() {
-  return {
-    id: "test",
-    supports: () => true,
-    async isPackagePublished() {
-      return false;
-    },
-    async publish() {},
-  };
 }

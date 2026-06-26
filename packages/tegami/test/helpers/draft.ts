@@ -1,17 +1,17 @@
 import type { PackageGraph } from "../../src/graph";
-import type { DraftPlan, PackagePlan } from "../../src/plans/draft";
+import type { Draft, PackageDraft } from "../../src/plans/draft";
 
-export function getPendingPackageIds(draft: DraftPlan, graph: PackageGraph): string[] {
+export function getPendingPackageIds(draft: Draft, graph: PackageGraph): string[] {
   return graph
     .getPackages()
     .filter((pkg) => {
-      const plan = draft.getPackagePlan(pkg.id);
+      const plan = draft.getPackageDraft(pkg.id);
       return plan && plan.bumpVersion(pkg) !== pkg.version;
     })
     .map((pkg) => pkg.id);
 }
 
-export function normalizePackagePlan(plan: PackagePlan | undefined) {
+export function normalizePackagePlan(plan: PackageDraft | undefined) {
   if (!plan) return undefined;
 
   const { changelogs, ...rest } = plan;

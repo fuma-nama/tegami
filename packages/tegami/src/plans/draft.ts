@@ -9,21 +9,19 @@ import {
   type ParsedReplayCondition,
   type ChangelogEntry,
 } from "../changelog/parse";
-import { createPlanStore, readPlanStore } from "./store";
+import { PublishLock } from "./lock";
 import type { Awaitable } from "../types";
 import { handlePluginError } from "../utils/error";
 import { groupPolicy } from "./policy";
-import { publishPlanStatus, assertPublishPlanFinished } from "./checks";
 import type { ChangelogPackageConfig } from "../changelog/shared";
 import * as semver from "semver";
+import z from "zod";
 
-export interface PackagePlan {
+export interface PackageDraft {
   type?: BumpType;
-  bumpReasons?: Set<string>;
-
-  changelogs?: ChangelogEntry[];
   prerelease?: string;
-  publish?: boolean;
+  bumpReasons?: Set<string>;
+  changelogs?: ChangelogEntry[];
 
   npm?: {
     /** npm dist-tag used when publishing. */
@@ -34,74 +32,80 @@ export interface PackagePlan {
   bumpVersion: (pkg: WorkspacePackage) => string;
 }
 
-export class DraftPlan {
+export const changelogStoreSchema = z.object({
+  v: z.literal("0.0.0"),
+  filename: z.string(),
+  content: z.string(),
+});
+
+export const packageStoreSchema = z.object({
+  id: z.string(),
+  updated: z.boolean(),
+  changelogIds: z.array(z.string()).optional(),
+});
+
+/** a draft describes all operations to perform before the actual publishing, such as version bumps. */
+export class Draft {
   #applied = false;
-  // package id -> plan
-  private readonly packages = new Map<string, PackagePlan>();
-  // id -> changelog
+  /** package id -> draft */
+  private readonly packages = new Map<string, PackageDraft>();
+  /** id -> changelog */
   private readonly changelogs = new Map<string, ChangelogEntry>();
-  private readonly policies: PlanPolicy[] = [];
+  private readonly policies: DraftPolicy[] = [];
 
   constructor(private readonly context: TegamiContext) {
     this.policies.push(groupPolicy(context));
   }
 
-  getPackagePlans() {
+  getPackageDrafts() {
     return this.packages;
   }
 
-  getPackagePlan(id: string) {
+  getPackageDraft(id: string) {
     return this.packages.get(id);
   }
 
   bumpPackage(pkg: WorkspacePackage, { type, reason }: { type: BumpType; reason?: string }) {
-    return this.dispatchPackage(pkg, (plan) => {
-      plan.type = plan.type ? maxBump(plan.type, type) : type;
+    return this.dispatchPackage(pkg, (draft) => {
+      draft.type = draft.type ? maxBump(draft.type, type) : type;
 
       if (reason) {
-        plan.bumpReasons ??= new Set();
-        plan.bumpReasons.add(reason);
+        draft.bumpReasons ??= new Set();
+        draft.bumpReasons.add(reason);
       }
     });
   }
 
   dispatchPackage(
     pkg: WorkspacePackage,
-    dispatch: (plan: PackagePlan) => void,
-    onUpdate?: (plan: PackagePlan) => void,
-  ): PackagePlan {
-    const plan = this.getOrInitPackage(pkg);
-    const prevVersion = plan.bumpVersion(pkg);
-    dispatch(plan);
-    if (prevVersion !== plan.bumpVersion(pkg)) {
-      onUpdate?.(plan);
+    dispatch: (draft: PackageDraft) => void,
+    onUpdate?: (draft: PackageDraft) => void,
+  ): PackageDraft {
+    const packageDraft = this.getOrInitPackage(pkg);
+    const prevVersion = packageDraft.bumpVersion(pkg);
+    dispatch(packageDraft);
+    if (prevVersion !== packageDraft.bumpVersion(pkg)) {
+      onUpdate?.(packageDraft);
 
       for (const policy of this.policies) {
-        policy.onUpdate?.call(this, { plan, pkg });
+        policy.onUpdate?.call(this, { packageDraft, pkg });
       }
     }
-    return plan;
+    return packageDraft;
   }
 
-  private getOrInitPackage(pkg: WorkspacePackage): PackagePlan {
+  getOrInitPackage(pkg: WorkspacePackage): PackageDraft {
     const existing = this.packages.get(pkg.id);
     if (existing) return existing;
 
-    this.packages.set(pkg.id, pkg.initPlan());
+    this.packages.set(pkg.id, pkg.initDraft());
 
     // assign script-level configs
     return this.dispatchPackage(
       pkg,
-      (plan) => {
-        const group = this.context.graph.getPackageGroup(pkg.id);
-        if (group?.options.prerelease) {
-          plan.prerelease = group.options.prerelease;
-        }
-
-        pkg.configurePlan(plan);
-      },
-      (plan) => {
-        const reasons = (plan.bumpReasons ??= new Set());
+      (draft) => pkg.configureDraft(draft, this.context.graph.getPackageGroup(pkg.id)),
+      (draft) => {
+        const reasons = (draft.bumpReasons ??= new Set());
         reasons.add("align with script-level configs");
       },
     );
@@ -109,9 +113,9 @@ export class DraftPlan {
 
   hasPending() {
     const { graph } = this.context;
-    for (const [id, plan] of this.packages) {
+    for (const [id, draft] of this.packages) {
       const pkg = graph.get(id);
-      if (pkg && plan.bumpVersion(pkg) !== pkg.version) return true;
+      if (pkg && draft.bumpVersion(pkg) !== pkg.version) return true;
     }
     return false;
   }
@@ -135,8 +139,8 @@ export class DraftPlan {
     }
 
     for (const [pkg, bumpType] of groupPackages) {
-      const plan = this.bumpPackage(pkg, { type: bumpType });
-      attachChangelog(plan, entry);
+      const pkgDraft = this.bumpPackage(pkg, { type: bumpType });
+      attachChangelog(pkgDraft, entry);
     }
   }
 
@@ -144,12 +148,11 @@ export class DraftPlan {
     return this.changelogs.delete(id);
   }
 
-  /** Apply the publish plan: update package versions, write the plan file, and consume changelog files. */
-  async applyPlan(): Promise<void> {
+  /** Apply version bumps, lock file, and changelog files. */
+  async apply(): Promise<void> {
     if (this.#applied) {
-      throw new Error("This draft has already applied a publish plan.");
+      throw new Error("This draft has already been applied.");
     }
-    await assertPublishPlanFinished(this.context);
     const { graph } = this.context;
     this.#applied = true;
 
@@ -159,39 +162,75 @@ export class DraftPlan {
     }
 
     for (const plugin of this.context.plugins) {
-      await handlePluginError(plugin, "applyPlan", () =>
-        plugin.applyPlan?.call(this.context, this),
+      await handlePluginError(plugin, "applyDraft", () =>
+        plugin.applyDraft?.call(this.context, this),
       );
     }
 
     const updatedChangelogs = this.applyReplays(snapshots);
     const writes: Awaitable<void>[] = [];
 
-    for (const [id, packagePlan] of this.packages) {
+    for (const [id, packageDraft] of this.packages) {
       const pkg = graph.get(id);
       if (!pkg) continue;
-      writes.push(this.appendChangelog(pkg, packagePlan));
+      writes.push(this.appendChangelog(pkg, packageDraft));
     }
 
     for (const entry of this.changelogs.values()) {
       const updated = updatedChangelogs.get(entry.id);
       const filePath = path.join(this.context.changelogDir, entry.filename);
 
-      writes.push(
-        updated ? writeFile(filePath, updated.getRawContent()) : rm(filePath, { force: true }),
+      if (updated) {
+        writes.push(
+          mkdir(this.context.changelogDir, { recursive: true }).then(() =>
+            writeFile(filePath, updated.getRawContent()),
+          ),
+        );
+      } else if (!entry.virtual) {
+        writes.push(rm(filePath, { force: true }));
+      }
+    }
+
+    writes.push(this.writeLockFile(snapshots));
+    await Promise.all(writes);
+  }
+
+  /** write persistent data to publish lock */
+  private async writeLockFile(snapshots: Map<string, { version: string }>) {
+    const lock = new PublishLock();
+    for (const entry of this.getChangelogs()) {
+      lock.write("core:changelogs", {
+        v: "0.0.0",
+        filename: entry.filename,
+        content: entry.getRawContent(),
+      } satisfies z.input<typeof changelogStoreSchema>);
+    }
+    for (const pkg of this.context.graph.getPackages()) {
+      const draft = this.getPackageDraft(pkg.id);
+      const snapshot = snapshots.get(pkg.id);
+
+      lock.write("core:packages", {
+        id: pkg.id,
+        updated:
+          draft !== undefined && (snapshot === undefined || snapshot.version !== pkg.version),
+        changelogIds: draft?.changelogs?.map((entry) => entry.id),
+      } satisfies z.input<typeof packageStoreSchema>);
+    }
+    for (const plugin of this.context.plugins) {
+      await handlePluginError(plugin, "initPublishLock", () =>
+        plugin.initPublishLock?.call(this.context, { lock, draft: this }),
       );
     }
 
-    await Promise.all(writes);
-    await mkdir(dirname(this.context.planPath), { recursive: true });
-    await writeFile(this.context.planPath, createPlanStore(this, this.context));
+    await mkdir(dirname(this.context.lockPath), { recursive: true });
+    await writeFile(this.context.lockPath, lock.serialize());
   }
 
-  addPolicy(policy: PlanPolicy) {
+  addPolicy(policy: DraftPolicy) {
     this.policies.push(policy);
   }
 
-  removePolicy(policy: PlanPolicy) {
+  removePolicy(policy: DraftPolicy) {
     const idx = this.policies.indexOf(policy);
     if (idx !== -1) this.policies.splice(idx, 1);
   }
@@ -209,9 +248,7 @@ export class DraftPlan {
       if (condition.type === "on-exit-prerelease") {
         return graph.getByName(condition.name).some((pkg) => {
           const previous = snapshots.get(pkg.id);
-          if (!previous) return false;
-
-          return semver.inc(previous.version, "release") === pkg.version;
+          return previous && semver.inc(previous.version, "release") === pkg.version;
         });
       }
 
@@ -256,17 +293,14 @@ export class DraftPlan {
     return updated;
   }
 
-  private async appendChangelog(pkg: WorkspacePackage, plan: PackagePlan): Promise<void> {
-    if (!plan.changelogs || plan.changelogs.length === 0) return;
+  private async appendChangelog(pkg: WorkspacePackage, draft: PackageDraft): Promise<void> {
+    if (!draft.changelogs || draft.changelogs.length === 0) return;
     const { generator = simpleGenerator() } = this.context.options;
 
     const generated = await generator.generate.call(this.context, {
-      packageId: pkg.id,
-      packageName: pkg.name,
-      version: pkg.version,
-      plan,
-      changelogs: plan.changelogs,
-      unstable_draft: this,
+      pkg,
+      packageDraft: draft,
+      draft: this,
     });
 
     const path = join(pkg.path, "CHANGELOG.md");
@@ -274,56 +308,31 @@ export class DraftPlan {
     await writeFile(path, `${generated.trim()}\n\n${existing}`.trimEnd() + "\n");
   }
 
-  /** {@link applyPlan} but for `await using` syntax */
+  /** {@link apply} but for `await using` syntax */
   async [Symbol.asyncDispose]() {
-    return this.applyPlan();
+    return this.apply();
   }
 }
 
-export interface PlanPolicy {
+export interface DraftPolicy {
   id: string;
-  onUpdate?: (this: DraftPlan, opts: { plan: PackagePlan; pkg: WorkspacePackage }) => void;
+  onUpdate?: (this: Draft, opts: { packageDraft: PackageDraft; pkg: WorkspacePackage }) => void;
 }
 
-export type CleanupResult =
-  | {
-      state: "removed";
-    }
-  | {
-      state: "skipped";
-      reason: "missing" | "pending";
-    };
-
-export async function cleanupPublishPlan(context: TegamiContext): Promise<CleanupResult> {
-  const store = await readPlanStore(context);
-  if (!store) {
-    return { state: "skipped", reason: "missing" };
-  }
-
-  const status = await publishPlanStatus(store, context);
-  if (status.state !== "success") {
-    return { state: "skipped", reason: "pending" };
-  }
-
-  await rm(context.planPath, { force: true });
-  return { state: "removed" };
-}
-
-export async function createDraftPlan(
+export async function createDraft(
   changelogs: ChangelogEntry[],
   context: TegamiContext,
-): Promise<DraftPlan> {
-  let draft = new DraftPlan(context);
+): Promise<Draft> {
+  let draft = new Draft(context);
 
   for (const plugin of context.plugins) {
-    const result = await handlePluginError(plugin, "initPlan", () =>
-      plugin.initPlan?.call(context, draft),
+    const result = await handlePluginError(plugin, "initDraft", () =>
+      plugin.initDraft?.call(context, draft),
     );
     if (result) draft = result;
   }
 
   for (const pkg of context.graph.getPackages()) {
-    // @ts-expect-error -- detect config changes
     draft.getOrInitPackage(pkg);
   }
 
@@ -334,9 +343,9 @@ export async function createDraftPlan(
   return draft;
 }
 
-function attachChangelog(plan: PackagePlan, entry: ChangelogEntry) {
-  if (plan.changelogs?.some((item) => item.id === entry.id)) return;
+function attachChangelog(draft: PackageDraft, entry: ChangelogEntry) {
+  if (draft.changelogs?.some((item) => item.id === entry.id)) return;
 
-  plan.changelogs ??= [];
-  plan.changelogs.push(entry);
+  draft.changelogs ??= [];
+  draft.changelogs.push(entry);
 }
