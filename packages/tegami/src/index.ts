@@ -6,8 +6,6 @@ import { readChangelogEntries } from "./changelog/parse";
 import type { TegamiOptions } from "./types";
 import { PackageGraph } from "./graph";
 import {
-  cleanupPublishLock,
-  type CleanupResult,
   PublishOptions,
   PublishPlan,
   initPublishPlan,
@@ -15,6 +13,7 @@ import {
   runPublishPlan,
 } from "./plans/publish";
 import { publishPlanStatus } from "./plans/checks";
+import { rm } from "node:fs/promises";
 
 export type { GenerateChangelogOptions, GeneratedChangelog } from "./changelog/generate";
 export type {
@@ -29,7 +28,6 @@ export type {
 export type { PublishLock } from "./plans/lock";
 export type { Draft, PackageDraft, DraftPolicy } from "./plans/draft";
 export type {
-  CleanupResult,
   PackagePublishPlan,
   PackagePublishResult,
   PublishOptions,
@@ -44,8 +42,22 @@ export interface Tegami {
   draft(): Promise<Draft>;
   /** Publish packages from the publish lock. */
   publish(options?: PublishOptions): Promise<PublishPlan | "skipped">;
+  /**
+   * Check publish status.
+   *
+   * Prefer `publish()` over this if you are publishing packages, it will also check the publish status.
+   */
+  publishStatus(): Promise<"pending" | "success" | "idle">;
   /** Remove the publish lock file after publishing has finished successfully. */
-  cleanup(): Promise<CleanupResult>;
+  cleanup(): Promise<
+    | {
+        state: "removed";
+      }
+    | {
+        state: "skipped";
+        reason: "no-plan" | "pending";
+      }
+  >;
 
   /** Internal APIs, do not use it unless you know what you are doing */
   _internal: {
@@ -62,18 +74,6 @@ export function tegami<const Groups extends string = string>(
   const $context = init();
   async function init() {
     return createTegamiContext(options);
-  }
-  async function prepublish(context: TegamiContext, publishOptions: PublishOptions) {
-    const plan = await initPublishPlan(context, publishOptions);
-    if (!plan) return "skipped";
-
-    await runPreflights(context, plan);
-
-    if ((await publishPlanStatus(plan, context)) === "success") {
-      return "skipped";
-    }
-
-    return plan;
   }
 
   return {
@@ -94,10 +94,24 @@ export function tegami<const Groups extends string = string>(
       const changelogs = await readChangelogEntries(context);
       return createDraft(changelogs, context);
     },
+    async publishStatus() {
+      const context = await $context;
+      const plan = await initPublishPlan(context, {});
+      if (!plan) return "idle";
+
+      await runPreflights(context, plan);
+      return publishPlanStatus(plan, context);
+    },
     async publish(publishOptions = {}) {
       const context = await $context;
-      const plan = await prepublish(context, publishOptions);
-      if (plan === "skipped") return "skipped";
+      const plan = await initPublishPlan(context, publishOptions);
+      if (!plan) return "skipped";
+
+      await runPreflights(context, plan);
+
+      if ((await publishPlanStatus(plan, context)) === "success") {
+        return "skipped";
+      }
 
       await runPublishPlan(context, plan);
 
@@ -111,7 +125,20 @@ export function tegami<const Groups extends string = string>(
     },
 
     async cleanup() {
-      return cleanupPublishLock(await $context);
+      const context = await $context;
+      const plan = await initPublishPlan(context, {});
+      if (!plan) {
+        return { state: "skipped", reason: "no-plan" };
+      }
+
+      await runPreflights(context, plan);
+      const status = await publishPlanStatus(plan, context);
+      if (status !== "success") {
+        return { state: "skipped", reason: "pending" };
+      }
+
+      await rm(context.lockPath, { force: true });
+      return { state: "removed" };
     },
   };
 }

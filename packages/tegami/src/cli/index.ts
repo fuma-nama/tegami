@@ -58,6 +58,16 @@ export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
       }),
     );
 
+  program
+    .command("check-publish")
+    .description("exit with code 1 if no publishing needed, otherwise 0")
+    .action(() =>
+      runAction(tegami, async () => {
+        const status = await tegami.publishStatus();
+        process.exit(status === "pending" ? 0 : 1);
+      }),
+    );
+
   const programPr = program.command("pr");
 
   programPr
@@ -169,21 +179,27 @@ async function versionPackages(
     return false;
   }
 
-  const planEntries: string[] = [];
+  if ((await tegami.publishStatus()) === "pending") {
+    throw new Error(
+      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
+    );
+  }
+
+  const lines: string[] = [];
   for (const pkg of context.graph.getPackages()) {
     const plan = draft.getPackageDraft(pkg.id);
     if (!plan || plan.bumpVersion(pkg) === pkg.version) continue;
 
-    planEntries.push(
+    lines.push(
       `${pkg.id}: ${pkg.version} → ${plan.bumpVersion(pkg)} (${plan.changelogs?.length ?? 0} changelogs)`,
     );
     if (plan.bumpReasons)
       for (const reason of plan.bumpReasons) {
-        planEntries.push(`  - ${reason}`);
+        lines.push(`  - ${reason}`);
       }
   }
 
-  note(planEntries.join("\n"), "Release plan");
+  note(lines.join("\n"), "Release plan");
 
   const s = spinner();
   s.start("Updating package versions");
@@ -289,7 +305,7 @@ async function runCleanup(tegami: Tegami): Promise<void> {
     return;
   }
 
-  if (result.reason === "missing") {
+  if (result.reason === "no-plan") {
     outro(`No publish lock found at ${lockPath}.`);
     return;
   }

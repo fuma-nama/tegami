@@ -15,7 +15,6 @@ import type { Tegami } from "..";
 import { changelogFilename, generateReplays } from "../changelog/generate";
 import type { PackageGroup, PackageGraph, WorkspacePackage } from "../graph";
 import type { TegamiContext } from "../context";
-import { assertPublishPlanFinished } from "../plans/checks";
 import { isCI } from "../utils/constants";
 import { CancelledError } from "../utils/error";
 import { getChangedPackages } from "../utils/git-changes";
@@ -24,7 +23,11 @@ import { type ChangelogPackageConfig, renderChangelog } from "../changelog/share
 
 export async function runChangelogTui(tegami: Tegami): Promise<void> {
   const context = await tegami._internal.context();
-  await assertPublishPlanFinished(context);
+  if ((await tegami.publishStatus()) === "pending") {
+    throw new Error(
+      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
+    );
+  }
 
   intro("Create changelogs");
   let selectedPackages: string[] = [];

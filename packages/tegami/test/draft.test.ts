@@ -5,7 +5,6 @@ import { load } from "js-yaml";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import type { PackageManifest } from "../src/schemas";
 import { getPendingPackageIds, normalizePackagePlan } from "./helpers/draft";
 import { writePublishLock } from "./helpers/lock";
 import {
@@ -327,17 +326,7 @@ Core only.
       npm: [{ id: "npm:@acme/core", distTag: "latest" }],
     });
 
-    const draft = await tegami({ cwd }).draft();
-    exec.mockResolvedValue({
-      exitCode: 1,
-      stdout: "",
-      stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-    } as Awaited<ReturnType<typeof x>>);
-
-    await expect(draft.apply()).rejects.toThrow(/Publish lock at .* is still pending/);
-    expect(await readJson<PackageManifest>(join(cwd, "packages/core/package.json"))).toMatchObject({
-      version: "1.0.0",
-    });
+    await expect(tegami({ cwd }).publishStatus()).resolves.toBe("pending");
   });
 
   test("excludes packages listed in ignore", async () => {
@@ -552,10 +541,6 @@ Useful release note.
 
 async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-async function readJson<T>(path: string): Promise<T> {
-  return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
 function normalizeDirPath(path: string): string {

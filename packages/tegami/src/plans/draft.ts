@@ -13,7 +13,6 @@ import { PublishLock } from "./lock";
 import type { Awaitable } from "../types";
 import { handlePluginError } from "../utils/error";
 import { groupPolicy } from "./policy";
-import { assertPublishPlanFinished } from "./checks";
 import type { ChangelogPackageConfig } from "../changelog/shared";
 import * as semver from "semver";
 import z from "zod";
@@ -154,7 +153,6 @@ export class Draft {
     if (this.#applied) {
       throw new Error("This draft has already been applied.");
     }
-    await assertPublishPlanFinished(this.context);
     const { graph } = this.context;
     this.#applied = true;
 

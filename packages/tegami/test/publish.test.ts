@@ -5,12 +5,7 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { createTegamiContext } from "../src/context";
-import {
-  cleanupPublishLock,
-  initPublishPlan,
-  runPreflights,
-  runPublishPlan,
-} from "../src/plans/publish";
+import { initPublishPlan, runPreflights, runPublishPlan } from "../src/plans/publish";
 import { writePublishLock } from "./helpers/lock";
 import {
   fetchMock,
@@ -242,13 +237,9 @@ describe("cleanup publish plan", () => {
 
     mockRegistryPublished();
 
-    const context = await createTegamiContext({
-      cwd,
-      lockPath: lockPath,
-      npm: { client: "npm" },
-    });
-
-    await expect(cleanupPublishLock(context)).resolves.toEqual({
+    await expect(
+      tegami({ cwd, lockPath: lockPath, npm: { client: "npm" } }).cleanup(),
+    ).resolves.toEqual({
       state: "removed",
     });
     await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
@@ -257,12 +248,7 @@ describe("cleanup publish plan", () => {
   test("skips cleanup when the publish plan is still pending", async () => {
     const { cwd, lockPath } = await createPublishFixture();
 
-    const context = await createTegamiContext({
-      cwd,
-      lockPath: lockPath,
-    });
-
-    await expect(cleanupPublishLock(context)).resolves.toEqual({
+    await expect(tegami({ cwd, lockPath: lockPath }).cleanup()).resolves.toEqual({
       state: "skipped",
       reason: "pending",
     });
@@ -274,11 +260,9 @@ describe("cleanup publish plan", () => {
     tempDirs.push(cwd);
     const lockPath = join(cwd, ".tegami/publish-lock.yaml");
 
-    const context = await createTegamiContext({ cwd, lockPath: lockPath });
-
-    await expect(cleanupPublishLock(context)).resolves.toEqual({
+    await expect(tegami({ cwd, lockPath: lockPath }).cleanup()).resolves.toEqual({
       state: "skipped",
-      reason: "missing",
+      reason: "no-plan",
     });
   });
 

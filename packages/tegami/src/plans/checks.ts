@@ -1,6 +1,6 @@
 import type { TegamiContext } from "../context";
 import { handlePluginError } from "../utils/error";
-import { PublishPlan, initPublishPlan, runPreflights } from "./publish";
+import type { PublishPlan } from "./publish";
 
 export type PublishPlanStatus = "success" | "pending";
 
@@ -30,19 +30,5 @@ export async function publishPlanStatus(
   } catch (e) {
     if (e === "pending") return "pending";
     throw e;
-  }
-}
-
-export async function assertPublishPlanFinished(context: TegamiContext): Promise<void> {
-  const plan = await initPublishPlan(context, {});
-  if (!plan) return;
-
-  await runPreflights(context, plan);
-  const status = await publishPlanStatus(plan, context);
-
-  if (status === "pending") {
-    throw new Error(
-      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
-    );
   }
 }

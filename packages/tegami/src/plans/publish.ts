@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import { ChangelogEntry, parseChangelogFile } from "../changelog/parse";
 import { TegamiContext } from "../context";
-import { publishPlanStatus } from "./checks";
 import { changelogStoreSchema, packageStoreSchema } from "./draft";
 import { parsePublishLock, PublishLock } from "./lock";
 import { PublishPreflight } from "../types";
@@ -91,31 +90,6 @@ export async function initPublishPlan(
   }
 
   return plan;
-}
-
-export type CleanupResult =
-  | {
-      state: "removed";
-    }
-  | {
-      state: "skipped";
-      reason: "missing" | "pending";
-    };
-
-export async function cleanupPublishLock(context: TegamiContext): Promise<CleanupResult> {
-  const plan = await initPublishPlan(context, {});
-  if (!plan) {
-    return { state: "skipped", reason: "missing" };
-  }
-
-  await runPreflights(context, plan);
-  const status = await publishPlanStatus(plan, context);
-  if (status !== "success") {
-    return { state: "skipped", reason: "pending" };
-  }
-
-  await fs.rm(context.lockPath, { force: true });
-  return { state: "removed" };
 }
 
 function resolvePublishTargets(plan: PublishPlan): string[] {
