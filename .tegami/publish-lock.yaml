@@ -1,30 +1,14 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n### Redesign GitHub plugin options\n\nGitHub release and Version Packages PR settings are now top-level options:\n\n- `eagerRelease` → `release: { eager: true }`\n- `onCreateRelease` → `release.create`\n- `onCreateGroupedRelease` → `release.createGrouped`\n- `onCreateVersionPullRequest` → `versionPr.create`\n- `cli.versionPr` → `versionPr` (use `forceCreate: true` to enable locally)\n\nSet `release: false` to disable GitHub release creation.\n"
-    filename: 2026-06-26-b3k8rwpf.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix failing checks for Git tags\n\nFixed a bug that causes publish plan status checking to fail.\n"
+    filename: 2026-06-26-mquuj71p.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n### Add `check-publish` CLI command\n\n`tegami check-publish` checks whether a publish lock has packages waiting to be published. It exits `0` when publishing is needed and `1` when it is not, so CI workflows can skip unnecessary steps without actually trying to publish packages.\n\n```bash\nif tegami check-publish; then\n  # other commands\nfi\n```\n"
-    filename: 2026-06-26-c4p8blsh.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Use HTTP APIs instead of CLI tools\n\nGitHub releases, pull requests, and comments now use the GitHub REST API instead of the `gh` CLI. npm publish preflight checks the registry over HTTP instead of running `npm view` or `pnpm view`.\n\nGit operations and package publishing still use their respective CLI tools.\n"
-    filename: 2026-06-26-h9w4rtvb.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Lock files update by default\n\n`updateLockFile` now defaults to `true` for the npm and Cargo providers. Lockfiles are refreshed automatically after versioning unless you set `updateLockFile: false`.\n"
-    filename: 2026-06-26-k7x2mnpq.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## v0.2 redesign\n\nTegami 0.2 separates versioning from publishing and renames several core types.\n\n### Publish lock replaces the publish plan file\n\n`tegami version` now writes `.tegami/publish-lock.yaml` instead of a JSON publish plan file.\n\n- Config option `planPath` is now `lockPath` (default: `.tegami/publish-lock.yaml`).\n- The lock uses YAML namespaces (`core:packages`, `core:changelogs`, `npm:packages`, …) instead of a single JSON document.\n- Packages must have `updated: true` in the lock to be published. New packages added after versioning are excluded until the next release cycle.\n\n### Draft and publish plan API\n\n| v0.1                          | v0.2                                                                 |\n| ----------------------------- | -------------------------------------------------------------------- |\n| `DraftPlan`                   | `Draft`                                                              |\n| `PackagePlan`                 | `PackageDraft`                                                       |\n| `createDraftPlan()`           | `createDraft()`                                                      |\n| `draft.getPackagePlans()`     | `draft.getPackageDrafts()`                                           |\n| JSON `PlanStore` on disk      | `PublishLock` YAML on disk + in-memory `PublishPlan` at publish time |\n| `publish()` → `PublishResult` | `publish()` → `PublishPlan \\| \"skipped\"`                             |\n| `cleanupPublishPlan()`        | `cleanupPublishLock()`                                               |\n\n`PublishPlan` is built in memory when you call `publish()`. It is not written to disk.\n\n### Plugin hook renames\n\n| v0.1                     | v0.2                                                    |\n| ------------------------ | ------------------------------------------------------- |\n| `initPlan`               | `initDraft`                                             |\n| `applyPlan`              | `applyDraft`                                            |\n| `cli.publishPlanCreated` | `cli.draftCreated`                                      |\n| `cli.publishPlanApplied` | `cli.draftApplied`                                      |\n| `createRegistryClient`   | removed — use `publishPreflight` / `publish` on plugins |\n| `RegistryClient`         | removed                                                 |\n\nNew hooks:\n\n- `initPublishLock` — write plugin data into the publish lock when a draft is applied.\n- `initPublishPlan` — enrich the in-memory publish plan from the lock (e.g. git tags, npm dist-tags).\n- `publishPreflight` — check registries and declare publish order before publishing.\n- `resolvePlanStatus` — report whether post-publish work (git tags, GitHub releases) is complete.\n\n`resolvePlanStatus`, `afterPublish`, and `afterPublishAll` now receive a `PublishPlan` instead of `PublishResult` / `PlanStore`.\n\n### LogGenerator\n\nCustom changelog generators now receive `{ pkg, packageDraft, draft }` instead of `{ packageId, packageName, version, changelogs, plan, unstable_draft }`.\n\n### Package options\n\n`packages.<name>.publish` was removed from Tegami config. Control npm publishing with `private: true` or `publishConfig` in `package.json` instead.\n\n### GitHub plugin\n\nGitHub release and Version Packages PR options moved to the top level:\n\n- `eagerRelease` → `release: { eager: true }`\n- `onCreateRelease` → `release.create`\n- `onCreateGroupedRelease` → `release.createGrouped`\n- `onCreateVersionPullRequest` → `versionPr.create`\n- `cli.versionPr` → `versionPr` (use `forceCreate: true` to enable locally)\n\nRelease callbacks now receive `{ tag, pkg, plan }` (or grouped equivalents) instead of `PackagePublishResult`. Set `release: false` to disable GitHub releases.\n"
-    filename: 2026-06-26-mqttnmwz.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support `conventionalCommits` option\n\nWhen enabled, it generates changelogs from commits when you run `tegami version`.\n"
-    filename: 2026-06-26-mquruzlx.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix lifecycle hooks for Bun\n\nTegami used `bun pm pack` workaround for Bun, but it doesn't run lifecycle hooks. Tegami now runs the hooks same as other setups.\n"
+    filename: 2026-06-26-mquul60o.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-06-26-b3k8rwpf.md
-      - 2026-06-26-c4p8blsh.md
-      - 2026-06-26-h9w4rtvb.md
-      - 2026-06-26-k7x2mnpq.md
-      - 2026-06-26-mqttnmwz.md
-      - 2026-06-26-mquruzlx.md
+      - 2026-06-26-mquuj71p.md
+      - 2026-06-26-mquul60o.md
     id: npm:tegami
     updated: true
   - id: npm:@repo/typescript-config
