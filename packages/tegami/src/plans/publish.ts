@@ -97,7 +97,7 @@ function resolvePublishTargets(plan: PublishPlan): string[] {
 
   function scan(id: string, stack = new Set<string>()) {
     const preflight = plan.packages.get(id)?.preflight;
-    if (!preflight || preflight.publish === false) return;
+    if (!preflight || !preflight.publish) return;
 
     if (stack.has(id)) {
       throw new Error(`circular reference of deps: ${[...stack, id].join(" -> ")}`);
@@ -224,17 +224,19 @@ export async function runPreflights(context: TegamiContext, plan: PublishPlan): 
   const promises: Promise<void>[] = [];
 
   const runPreflight = async (pkg: WorkspacePackage) => {
-    const out: PublishPreflight = {};
+    const out: PublishPreflight = {
+      publish: true,
+    };
+
     for (const plugin of context.plugins) {
       const res = await handlePluginError(plugin, "publishPreflight", () =>
         plugin.publishPreflight?.call(context, { pkg, plan }),
       );
 
-      if (res?.publish !== undefined) {
-        out.publish = res.publish;
-      }
+      if (res === undefined) continue;
 
-      if (res?.wait) {
+      out.publish = res.publish;
+      if (res.wait) {
         out.wait ??= [];
         out.wait.push(...res.wait);
       }
@@ -267,8 +269,7 @@ export async function publishPlanStatus(
   for (const pkg of plan.packages.values()) {
     if (!pkg.preflight) throw new Error("Should perform preflight before checking plan status.");
 
-    const shouldPublish = pkg.preflight.publish ?? true;
-    if (shouldPublish) return "pending";
+    if (pkg.preflight.publish) return "pending";
   }
 
   try {

@@ -157,8 +157,8 @@ export interface TegamiPlugin {
 export type Awaitable<T> = T | Promise<T>;
 
 export interface PublishPreflight {
-  /** if the package should be published, default to `true`. */
-  publish?: boolean;
+  /** if the package should be published. */
+  publish: boolean;
 
   /**
    * Package ids that must be published before this one, this will automatically disallow circular dependency.

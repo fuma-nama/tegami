@@ -14,6 +14,7 @@ import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
 import z from "zod";
+import type { PackagePublishResult } from "../plans/publish";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -218,22 +219,10 @@ export function npm({
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage)) return;
-      if (pkg.manifest.private === true) return { publish: false };
 
-      const registry = pkg.manifest.publishConfig?.registry;
-      const base = (registry ?? "https://registry.npmjs.org").replace(/\/$/, "");
-      const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
-        headers: { Accept: "application/json" },
-      });
-
-      if (response.status === 404) return { publish: true };
-      if (!response.ok) {
-        throw new Error(
-          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
-        );
-      }
-
-      return { publish: false };
+      return {
+        publish: pkg.manifest.private !== true && !(await isPackagePublished(pkg)),
+      };
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {
@@ -262,78 +251,7 @@ export function npm({
     async publish({ pkg, plan }) {
       if (!(pkg instanceof NpmPackage)) return;
 
-      const packagePlan = plan.packages.get(pkg.id)!;
-      const distTag = packagePlan.npm?.distTag;
-
-      // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
-      if (client === "bun") {
-        const tarballPath = path.resolve(pkg.path, "pkg.tgz");
-        const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
-          nodeOptions: {
-            cwd: pkg.path,
-          },
-        });
-        if (packResult.exitCode !== 0) {
-          return {
-            type: "failed",
-            error: execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult).message,
-          };
-        }
-
-        const publishArgs = ["publish", tarballPath];
-        if (distTag) publishArgs.push("--tag", distTag);
-
-        const publishResult = await x("npm", publishArgs, {
-          nodeOptions: {
-            cwd: pkg.path,
-          },
-        });
-        if (publishResult.exitCode !== 0) {
-          return {
-            type: "failed",
-            error: execFailure(
-              `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-              publishResult,
-            ).message,
-          };
-        }
-        return {
-          type: "published",
-        };
-      }
-
-      let command: AgentName;
-      const args = ["publish"];
-      if (distTag) args.push("--tag", distTag);
-
-      if (client === "pnpm") {
-        command = "pnpm";
-        args.push("--no-git-checks");
-      } else if (client === "yarn") {
-        command = "yarn";
-      } else {
-        command = "npm";
-      }
-
-      const result = await x(command, args, {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-
-      if (result.exitCode !== 0) {
-        return {
-          type: "failed",
-          error: execFailure(
-            `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-            result,
-          ).message,
-        };
-      }
-
-      return {
-        type: "published",
-      };
+      return publish(client, pkg, plan.packages.get(pkg.id)?.npm?.distTag);
     },
     initDraft(plan) {
       if (!active) return;
@@ -483,6 +401,118 @@ function depsPolicy(
       }
     },
   };
+}
+
+async function publish(
+  client: AgentName,
+  pkg: NpmPackage,
+  distTag?: string,
+): Promise<PackagePublishResult> {
+  // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
+  if (client === "bun") {
+    // `npm publish tarball.tgz` does not run lifecycle scripts, we must run it to align with default behaviours
+    for (const script of ["prepublishOnly", "prepack", "prepare"]) {
+      if (!pkg.manifest.scripts?.[script]) continue;
+
+      const result = await x("bun", ["run", script], {
+        nodeOptions: {
+          cwd: pkg.path,
+        },
+      });
+
+      if (result.exitCode === 0) continue;
+
+      return {
+        type: "failed",
+        error: execFailure(`Failed to run ${script} script for ${pkg.name}@${pkg.version}.`, result)
+          .message,
+      };
+    }
+
+    const tarballPath = path.resolve(pkg.path, "pkg.tgz");
+    const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+    });
+    if (packResult.exitCode !== 0) {
+      return {
+        type: "failed",
+        error: execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult).message,
+      };
+    }
+
+    const publishArgs = ["publish", tarballPath];
+    if (distTag) publishArgs.push("--tag", distTag);
+
+    const publishResult = await x("npm", publishArgs, {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+    });
+    if (publishResult.exitCode !== 0) {
+      return {
+        type: "failed",
+        error: execFailure(
+          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+          publishResult,
+        ).message,
+      };
+    }
+    return {
+      type: "published",
+    };
+  }
+
+  let command: AgentName;
+  const args = ["publish"];
+  if (distTag) args.push("--tag", distTag);
+
+  if (client === "pnpm") {
+    command = "pnpm";
+    args.push("--no-git-checks");
+  } else if (client === "yarn") {
+    command = "yarn";
+  } else {
+    command = "npm";
+  }
+
+  const result = await x(command, args, {
+    nodeOptions: {
+      cwd: pkg.path,
+    },
+  });
+
+  if (result.exitCode !== 0) {
+    return {
+      type: "failed",
+      error: execFailure(
+        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+        result,
+      ).message,
+    };
+  }
+
+  return {
+    type: "published",
+  };
+}
+
+async function isPackagePublished(pkg: NpmPackage): Promise<boolean> {
+  const registry = pkg.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
+  const base = registry.replace(/\/$/, "");
+  const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    throw new Error(
+      `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+    );
+  }
+
+  return true;
 }
 
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {

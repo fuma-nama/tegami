@@ -6,7 +6,7 @@ import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../s
 import * as githubClient from "../src/plugins/github/api";
 import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
-import type { TegamiPlugin } from "../src/types";
+import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 
 vi.mock("tinyexec", () => ({
@@ -146,6 +146,20 @@ describe("github release plugin", () => {
         plan: releasePlan(context, [{}]),
       }),
     ).resolves.toBe("pending");
+  });
+
+  test("ignores missing releases when npm preflight is complete", async () => {
+    releaseExistsByTag.mockResolvedValue(false);
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext();
+
+    await expect(
+      plugin.resolvePlanStatus?.call(context, {
+        plan: releasePlan(context, [{ preflight: { publish: false } }]),
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(releaseExistsByTag).not.toHaveBeenCalled();
   });
 
   test("creates releases eagerly when another package failed", async () => {
@@ -702,6 +716,7 @@ function releasePlan(
     name?: string;
     npm?: { distTag?: string };
     git?: { tag: string };
+    preflight?: PublishPreflight;
     publishResult?: PackagePublishResult;
     changelogs?: ChangelogEntry[];
   }>,
@@ -719,6 +734,7 @@ function releasePlan(
       updated: true,
       git: "git" in entry ? entry.git : { tag: `${name}@${pkg.version}` },
       npm: entry.npm ?? { distTag: "latest" },
+      preflight: entry.preflight ?? { publish: true },
       publishResult: entry.publishResult ?? { type: "published" },
     });
   }

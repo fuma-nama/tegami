@@ -38,6 +38,7 @@ export const packageManifestSchema = z.looseObject({
       tag: z.string().optional(),
     })
     .optional(),
+  scripts: z.record(z.string(), z.string()).optional(),
   workspaces: z.array(z.string()).optional(),
   dependencies: stringRecordSchema.optional(),
   devDependencies: stringRecordSchema.optional(),

@@ -2,7 +2,7 @@ import { x } from "tinyexec";
 import type { TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { isCI } from "../utils/constants";
-import { PublishPlan } from "../plans/publish";
+import type { PackagePublishPlan, PublishPlan } from "../plans/publish";
 
 export interface GitPluginOptions {
   /** Set to false to skip creating git tags after all packages publish successfully. */
@@ -20,14 +20,14 @@ export interface GitPluginOptions {
 export function git(options: GitPluginOptions = {}): TegamiPlugin {
   const { createTags = true, pushTags = isCI() } = options;
 
-  function getPendingTags(plan: PublishPlan) {
+  function getPendingTags(plan: PublishPlan, filterPackage?: (pkg: PackagePublishPlan) => boolean) {
     const pendingTags = new Set<string>();
     const dryRun = plan.options.dryRun ?? false;
 
     if (dryRun || !createTags) return pendingTags;
 
     for (const pkg of plan.packages.values()) {
-      if (pkg.publishResult!.type !== "published") continue;
+      if (filterPackage && !filterPackage(pkg)) continue;
 
       const tag = pkg.git?.tag;
       if (tag) pendingTags.add(tag);
@@ -73,7 +73,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
       }
     },
     async resolvePlanStatus({ plan }) {
-      const pendingTags = getPendingTags(plan);
+      const pendingTags = getPendingTags(plan, (pkg) => pkg.preflight!.publish);
       if (pendingTags.size === 0) return;
 
       try {
@@ -90,7 +90,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
     async afterPublishAll({ plan }) {
       const { cwd } = this;
       const createdTags: string[] = [];
-      const pendingTags = getPendingTags(plan);
+      const pendingTags = getPendingTags(plan, (pkg) => pkg.publishResult!.type === "published");
       if (pendingTags.size === 0) return;
 
       await Promise.all(

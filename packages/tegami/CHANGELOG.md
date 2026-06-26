@@ -1,3 +1,13 @@
+## tegami@0.2.1
+
+### Fix failing checks for Git tags
+
+Fixed a bug that causes publish plan status checking to fail.
+
+### Fix lifecycle hooks for Bun
+
+Tegami used `bun pm pack` workaround for Bun, but it doesn't run lifecycle hooks. Tegami now runs the hooks same as other setups.
+
 ## tegami@0.2.0
 
 ### Redesign GitHub plugin options

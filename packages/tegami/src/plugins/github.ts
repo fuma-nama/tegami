@@ -178,11 +178,15 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     async resolvePlanStatus({ plan }) {
       const { repo, token } = this.github!;
       if (!repo || !token || releaseOptions === false) return;
+      const requiredTags = new Set<string>();
 
-      const tags = groupPackagesByTag(this, plan);
+      for (const pkg of plan.packages.values()) {
+        if (pkg.preflight!.publish && pkg.git) requiredTags.add(pkg.git.tag);
+      }
+
       try {
         await Promise.all(
-          Array.from(tags.keys(), async (tag) => {
+          Array.from(requiredTags, async (tag) => {
             if (!(await releaseExistsByTag(repo, tag, token))) throw "pending";
           }),
         );
@@ -199,14 +203,22 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         create,
         createGrouped,
       } = releaseOptions === true ? {} : releaseOptions;
-      if (!eager) {
-        for (const pkg of plan.packages.values()) {
-          if (pkg.publishResult!.type === "failed") return;
-        }
+
+      const groups = new Map<string, WorkspacePackage[]>();
+      for (const [id, packagePlan] of plan.packages) {
+        const pkg = this.graph.get(id)!;
+        if (!eager && packagePlan.publishResult!.type === "failed") return;
+
+        const tag = packagePlan.git?.tag;
+        if (!tag) continue;
+
+        const group = groups.get(tag);
+        if (group) group.push(pkg);
+        else groups.set(tag, [pkg]);
       }
 
       await Promise.all(
-        Array.from(groupPackagesByTag(this, plan), async ([tag, packages]) => {
+        Array.from(groups, async ([tag, packages]) => {
           let hasFailed = false;
           let hasPublished = false;
           for (const member of packages) {
@@ -344,20 +356,6 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
   };
 
   return [git(options), plugin];
-}
-
-function groupPackagesByTag({ graph }: TegamiContext, plan: PublishPlan) {
-  const groups = new Map<string, WorkspacePackage[]>();
-  for (const [id, packagePlan] of plan.packages) {
-    const pkg = graph.get(id)!;
-    const tag = packagePlan.git?.tag;
-    if (!tag) continue;
-
-    const group = groups.get(tag);
-    if (group) group.push(pkg);
-    else groups.set(tag, [pkg]);
-  }
-  return groups;
 }
 
 async function hasGitChanges(cwd: string): Promise<boolean> {
