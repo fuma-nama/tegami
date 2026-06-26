@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -12,7 +12,6 @@ import {
   fetchMock,
   installRegistryFetchMock,
   mockRegistryMissing,
-  mockRegistryPublished,
   npmPackageVersionUrl,
   uninstallRegistryFetchMock,
 } from "./helpers/registry-fetch";
@@ -141,19 +140,25 @@ async function createTestContext() {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-registry-"));
   tempDirs.push(cwd);
 
-  const context = await createTegamiContext({
+  await mkdir(join(cwd, "packages/core"), { recursive: true });
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+  await writeFile(
+    join(cwd, "packages/core/package.json"),
+    `${JSON.stringify(
+      {
+        name: "@acme/core",
+        version: "1.0.1",
+        publishConfig: { registry: "https://registry.example.test" },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  return createTegamiContext({
     cwd,
     npm: { client: "npm" },
   });
-  context.graph.add(
-    new NpmPackage(join(cwd, "packages/core"), {
-      name: "@acme/core",
-      version: "1.0.1",
-      publishConfig: { registry: "https://registry.example.test" },
-    }),
-  );
-
-  return context;
 }
 
 async function loadPlan(
@@ -177,17 +182,24 @@ async function createContext(
 ) {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-registry-client-"));
   tempDirs.push(cwd);
+  await mkdir(join(cwd, "packages/core"), { recursive: true });
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+  await writeFile(
+    join(cwd, "packages/core/package.json"),
+    `${JSON.stringify(
+      {
+        name: "@acme/core",
+        version,
+        ...(registry ? { publishConfig: { registry } } : {}),
+      },
+      null,
+      2,
+    )}\n`,
+  );
   const context = await createTegamiContext({
     cwd,
     npm: { client },
   });
-  context.graph.add(
-    new NpmPackage(join(cwd, "packages/core"), {
-      name: "@acme/core",
-      version,
-      ...(registry ? { publishConfig: { registry } } : {}),
-    }),
-  );
   await writePublishLock(context.cwd, {
     packages: [{ id: "npm:@acme/core", updated: true }],
     npm: [{ id: "npm:@acme/core", distTag: "latest" }],

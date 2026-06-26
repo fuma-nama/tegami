@@ -140,7 +140,7 @@ describe("draft publish plans", () => {
       ]),
     );
     expect(rawPlan["npm:packages"]).toEqual(
-      expect.arrayContaining([{ distTag: "alpha", id: "npm:@acme/core" }, { id: "npm:@acme/ui" }]),
+      expect.arrayContaining([{ distTag: "alpha", id: "npm:@acme/core" }]),
     );
   });
 

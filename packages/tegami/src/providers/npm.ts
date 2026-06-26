@@ -194,68 +194,8 @@ export function npm({
     }
   },
 }: NpmPluginOptions = {}): TegamiPlugin {
+  let active = false;
   let client: AgentName;
-
-  function depsPolicy(context: TegamiContext): DraftPolicy {
-    const { graph } = context;
-
-    function needsUpdate(dependent: NpmPackage, spec: DependencySpec, target: string): boolean {
-      if (spec.linked) {
-        const group = graph.getPackageGroup(dependent.id);
-
-        if (group?.options.syncBump && graph.getPackageGroup(spec.linked.id) === group) {
-          // they will always bump together
-          return false;
-        }
-
-        if (spec.protocol === "workspace") {
-          switch (spec.range) {
-            case "":
-            case "*":
-              return true;
-            case "^":
-            case "~":
-              return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
-          }
-        }
-
-        if (spec.protocol === "file") {
-          return true;
-        }
-      }
-
-      // Ignore special syntax like "latest".
-      if (spec.protocol === "file" || !semver.validRange(spec.range)) return false;
-      return !semver.satisfies(target, spec.range);
-    }
-
-    return {
-      id: "npm:deps",
-      onUpdate({ pkg, packageDraft: plan }) {
-        if (!(pkg instanceof NpmPackage)) return;
-
-        for (const dependent of graph.getPackages()) {
-          if (!(dependent instanceof NpmPackage)) continue;
-
-          for (const field of DEP_FIELDS) {
-            const dependencies = dependent.manifest[field];
-            if (!dependencies) continue;
-
-            for (const [k, v] of Object.entries(dependencies)) {
-              const spec = parseDependencySpec(context, dependent, k, v);
-              if (!spec || spec.linked !== pkg) continue;
-              if (!needsUpdate(dependent, spec, plan.bumpVersion(pkg))) continue;
-
-              const bumpType = getBumpDepType({ kind: field, spec, name: k });
-              if (bumpType === false) continue;
-
-              this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
-            }
-          }
-        }
-      },
-    };
-  }
 
   return {
     name: "npm",
@@ -274,6 +214,7 @@ export function npm({
     },
     async resolve() {
       await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));
+      active = this.graph.getPackages().some((pkg) => pkg instanceof NpmPackage);
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage)) return;
@@ -296,9 +237,11 @@ export function npm({
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {
+        if (!pkg.npm) continue;
+
         lock.write("npm:packages", {
           id,
-          distTag: pkg.npm?.distTag,
+          distTag: pkg.npm.distTag,
         } satisfies z.input<typeof packageLockSchema>);
       }
     },
@@ -393,9 +336,12 @@ export function npm({
       };
     },
     initDraft(plan) {
-      plan.addPolicy(depsPolicy(this));
+      if (!active) return;
+      plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async applyDraft(draft) {
+      if (!active) return;
+
       const { graph } = this;
       const writes: Awaitable<void>[] = [];
 
@@ -452,7 +398,7 @@ export function npm({
     },
     cli: {
       async draftApplied() {
-        if (!updateLockFile) return;
+        if (!active || !updateLockFile) return;
 
         let args: string[];
         if (client === "npm") {
@@ -474,6 +420,67 @@ export function npm({
           throw execFailure("Failed to update lockfile.", result);
         }
       },
+    },
+  };
+}
+
+function depsPolicy(
+  context: TegamiContext,
+  getBumpDepType: NonNullable<NpmPluginOptions["bumpDep"]>,
+): DraftPolicy {
+  const { graph } = context;
+
+  function needsUpdate(spec: DependencySpec, target: string): boolean {
+    if (spec.linked && spec.protocol === "workspace") {
+      switch (spec.range) {
+        case "":
+        case "*":
+          return true;
+        case "^":
+        case "~":
+          return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
+      }
+    }
+
+    if (spec.linked && spec.protocol === "file") {
+      return true;
+    }
+
+    // Ignore special syntax like "latest".
+    if (spec.protocol === "file" || !semver.validRange(spec.range)) return false;
+    return !semver.satisfies(target, spec.range);
+  }
+
+  return {
+    id: "npm:deps",
+    onUpdate({ pkg, packageDraft: plan }) {
+      if (!(pkg instanceof NpmPackage)) return;
+      const group = graph.getPackageGroup(pkg.id);
+
+      for (const dependent of graph.getPackages()) {
+        if (!(dependent instanceof NpmPackage)) continue;
+
+        for (const field of DEP_FIELDS) {
+          const dependencies = dependent.manifest[field];
+          if (!dependencies) continue;
+
+          for (const [k, v] of Object.entries(dependencies)) {
+            const spec = parseDependencySpec(context, dependent, k, v);
+            if (!spec || spec.linked !== pkg) continue;
+            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
+              // they will always bump together
+              continue;
+            }
+
+            if (!needsUpdate(spec, plan.bumpVersion(pkg))) continue;
+
+            const bumpType = getBumpDepType({ kind: field, spec, name: k });
+            if (bumpType === false) continue;
+
+            this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
+          }
+        }
+      }
     },
   };
 }

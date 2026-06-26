@@ -1,8 +1,10 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createTegamiContext } from "../src/context";
-import { NpmPackage } from "../src/providers/npm";
 import {
   fetchMock,
   installRegistryFetchMock,
@@ -21,6 +23,7 @@ vi.mock("tinyexec", () => ({
 
 const detectPackageManager = vi.mocked(detect);
 const exec = vi.mocked(x);
+const tempDirs: string[] = [];
 
 beforeEach(() => {
   detectPackageManager.mockReset();
@@ -29,18 +32,19 @@ beforeEach(() => {
   mockRegistryPublished(JSON.stringify({ version: "1.0.0" }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   uninstallRegistryFetchMock();
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
 describe("tegami context", () => {
   test("uses an explicit npm client without detecting", async () => {
+    const cwd = await npmWorkspace();
     const context = await createTegamiContext({
-      cwd: "/repo",
+      cwd,
       npm: { client: "npm" },
     });
-    const pkg = npmPackage();
-    context.graph.add(pkg);
+    const pkg = context.graph.get("npm:@acme/core")!;
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
     await npmPlugin.publishPreflight?.call(context, {
@@ -52,6 +56,7 @@ describe("tegami context", () => {
       headers: { Accept: "application/json" },
     });
     expect(detectPackageManager).not.toHaveBeenCalled();
+    expect(context.npm).toEqual({ client: "npm" });
   });
 
   test("detects pnpm when creating a project context", async () => {
@@ -60,11 +65,11 @@ describe("tegami context", () => {
       agent: "pnpm",
     });
 
+    const cwd = await npmWorkspace();
     const context = await createTegamiContext({
-      cwd: "/repo",
+      cwd,
     });
-    const pkg = npmPackage();
-    context.graph.add(pkg);
+    const pkg = context.graph.get("npm:@acme/core")!;
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
     await npmPlugin.publishPreflight?.call(context, {
@@ -77,16 +82,17 @@ describe("tegami context", () => {
     });
     expect(detectPackageManager).toHaveBeenCalledTimes(1);
     expect(detectPackageManager).toHaveBeenCalledWith({
-      cwd: "/repo",
+      cwd,
     });
+    expect(context.npm).toEqual({ client: "pnpm" });
   });
 
   test("defaults npm client when package manager detection fails", async () => {
+    const cwd = await npmWorkspace();
     const context = await createTegamiContext({
-      cwd: "/repo",
+      cwd,
     });
-    const pkg = npmPackage();
-    context.graph.add(pkg);
+    const pkg = context.graph.get("npm:@acme/core")!;
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
     await npmPlugin.publishPreflight?.call(context, {
@@ -97,6 +103,7 @@ describe("tegami context", () => {
     expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
       headers: { Accept: "application/json" },
     });
+    expect(context.npm).toEqual({ client: "npm" });
   });
 
   test("defaults the publish lock path", async () => {
@@ -138,6 +145,16 @@ describe("tegami context", () => {
   });
 });
 
+async function npmWorkspace() {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-context-npm-"));
+  tempDirs.push(cwd);
+  await writeFile(
+    join(cwd, "package.json"),
+    `${JSON.stringify({ name: "@acme/core", version: "1.0.0" }, null, 2)}\n`,
+  );
+  return cwd;
+}
+
 function emptyPlan() {
   return {
     options: {},
@@ -151,11 +168,4 @@ function plugin(name: string, enforce?: TegamiPlugin["enforce"]): TegamiPlugin {
     name,
     enforce,
   };
-}
-
-function npmPackage(): NpmPackage {
-  return new NpmPackage("/repo/packages/core", {
-    name: "@acme/core",
-    version: "1.0.0",
-  });
 }

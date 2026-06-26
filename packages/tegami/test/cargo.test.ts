@@ -7,11 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
-import {
-  installRegistryFetchMock,
-  mockRegistryMissing,
-  uninstallRegistryFetchMock,
-} from "./helpers/registry-fetch";
+import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
 
 initSync();
 
@@ -37,6 +33,37 @@ afterEach(async () => {
 });
 
 describe("cargo packages", () => {
+  test("skips cargo lockfile update on npm-only workspaces", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-inactive-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "package.json"),
+      `${JSON.stringify({ name: "root", version: "1.0.0" }, null, 2)}\n`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["root"]
+---
+
+## Change
+
+Note.
+`,
+    );
+
+    exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
+      ReturnType<typeof x>
+    >);
+    await tegami({ cwd })
+      .draft()
+      .then((draft) => draft.apply());
+
+    expect(exec.mock.calls.some(([command]) => command === "cargo")).toBe(false);
+  });
+
   test("resolves npm packages and cargo crates into one graph", async () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);

@@ -81,6 +81,8 @@ export function cargo({
   updateLockFile = true,
   bumpDep: getBumpDepType,
 }: CargoPluginOptions = {}): TegamiPlugin {
+  let active = false;
+
   return {
     name: "cargo",
     enforce: "pre",
@@ -89,8 +91,10 @@ export function cargo({
     },
     async resolve() {
       await discoverCargoPackages(this.cwd, (pkg) => this.graph.add(pkg));
+      active = this.graph.getPackages().some((pkg) => pkg instanceof CargoPackage);
     },
     initDraft(plan) {
+      if (!active) return;
       plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async publishPreflight({ pkg }) {
@@ -138,6 +142,8 @@ export function cargo({
       };
     },
     async applyDraft(draft) {
+      if (!active) return;
+
       const { graph } = this;
       const writes: Awaitable<void>[] = [];
 
@@ -190,7 +196,7 @@ export function cargo({
     },
     cli: {
       async draftApplied() {
-        if (!updateLockFile) return;
+        if (!active || !updateLockFile) return;
         const result = await x("cargo", ["update", "--workspace"], {
           nodeOptions: { cwd: this.cwd },
         });
