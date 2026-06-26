@@ -12,6 +12,14 @@ import {
   runPublishPlan,
 } from "../src/plans/publish";
 import { writePublishLock } from "./helpers/lock";
+import {
+  fetchMock,
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  mockRegistryPublished,
+  npmPackageVersionUrl,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -22,10 +30,13 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  installRegistryFetchMock();
+  mockRegistryMissing();
   mockPendingPlan();
 });
 
 afterEach(async () => {
+  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
@@ -40,23 +51,11 @@ describe("publish plans", () => {
     const result = plan.packages.get("npm:@acme/core");
 
     expect(result?.publishResult).toEqual({ type: "published" });
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith(
-      "pnpm",
-      [
-        "view",
-        "@acme/core@1.0.1",
-        "version",
-        "--json",
-        "--registry",
-        "https://registry.example.test",
-      ],
-      {
-        nodeOptions: {
-          cwd,
-        },
-      },
+    expect(fetchMock).toHaveBeenCalledWith(
+      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
+      { headers: { Accept: "application/json" } },
     );
+    expect(exec).not.toHaveBeenCalled();
   });
 
   test("skips publish when the plan is already finished", async () => {
@@ -64,7 +63,7 @@ describe("publish plans", () => {
       registry: "https://registry.example.test",
     });
 
-    exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
+    mockRegistryPublished();
 
     await expect(
       tegami({
@@ -74,23 +73,11 @@ describe("publish plans", () => {
       }).publish({ dryRun: false }),
     ).resolves.toBe("skipped");
 
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith(
-      "npm",
-      [
-        "view",
-        "@acme/core@1.0.1",
-        "version",
-        "--json",
-        "--registry",
-        "https://registry.example.test",
-      ],
-      {
-        nodeOptions: {
-          cwd,
-        },
-      },
+    expect(fetchMock).toHaveBeenCalledWith(
+      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
+      { headers: { Accept: "application/json" } },
     );
+    expect(exec).not.toHaveBeenCalled();
   });
 
   test("derives package changelogs from top-level plan changelogs", async () => {
@@ -145,13 +132,6 @@ Some description.
     const { cwd, lockPath } = await createMultiPackagePublishFixture();
 
     exec.mockImplementation((_command, args = [], options = {}) => {
-      if (args.at(0) === "view") {
-        return commandResult({
-          exitCode: 1,
-          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-        });
-      }
-
       if (args.at(0) === "publish") {
         const cwd = options.nodeOptions?.cwd;
         if (typeof cwd === "string" && normalizeDirPath(cwd).endsWith("packages/ui")) {
@@ -178,13 +158,6 @@ Some description.
     const { cwd, packagePath, lockPath } = await createPublishFixture();
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "view") {
-        return commandResult({
-          exitCode: 1,
-          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-        });
-      }
-
       if (args.at(0) === "publish") {
         return commandResult();
       }
@@ -197,19 +170,12 @@ Some description.
     const result = plan.packages.get("npm:@acme/core");
 
     expect(result?.publishResult).toEqual({ type: "published" });
-    expect(exec).toHaveBeenNthCalledWith(
-      1,
-      "pnpm",
-      ["view", "@acme/core@1.0.1", "version", "--json"],
-      {
-        nodeOptions: {
-          cwd,
-        },
-      },
-    );
-    expect(exec.mock.calls[1]?.[0]).toBe("pnpm");
-    expect(exec.mock.calls[1]?.[1]).toEqual(["publish", "--tag", "latest", "--no-git-checks"]);
-    expect(normalizeDirPath(String(exec.mock.calls[1]?.[2]?.nodeOptions?.cwd))).toBe(
+    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.1"), {
+      headers: { Accept: "application/json" },
+    });
+    expect(exec.mock.calls[0]?.[0]).toBe("pnpm");
+    expect(exec.mock.calls[0]?.[1]).toEqual(["publish", "--tag", "latest", "--no-git-checks"]);
+    expect(normalizeDirPath(String(exec.mock.calls[0]?.[2]?.nodeOptions?.cwd))).toBe(
       normalizeDirPath(packagePath),
     );
   });
@@ -232,13 +198,6 @@ Included again on 2.0.0.
     );
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "view") {
-        return commandResult({
-          exitCode: 1,
-          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-        });
-      }
-
       if (args.at(0) === "publish") {
         return commandResult();
       }
@@ -281,7 +240,7 @@ describe("cleanup publish plan", () => {
       registry: "https://registry.example.test",
     });
 
-    exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
+    mockRegistryPublished();
 
     const context = await createTegamiContext({
       cwd,
@@ -328,7 +287,7 @@ describe("cleanup publish plan", () => {
       registry: "https://registry.example.test",
     });
 
-    exec.mockResolvedValue(execResult({ exitCode: 0, stdout: '"1.0.1"\n' }));
+    mockRegistryPublished();
 
     await expect(
       tegami({ cwd, lockPath: lockPath, npm: { client: "npm" } }).cleanup(),

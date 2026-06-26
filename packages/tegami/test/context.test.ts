@@ -1,8 +1,15 @@
 import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createTegamiContext } from "../src/context";
 import { NpmPackage } from "../src/providers/npm";
+import {
+  fetchMock,
+  installRegistryFetchMock,
+  mockRegistryPublished,
+  npmPackageVersionUrl,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 import type { TegamiPlugin } from "../src/types";
 
 vi.mock("package-manager-detector", () => ({
@@ -18,11 +25,12 @@ const exec = vi.mocked(x);
 beforeEach(() => {
   detectPackageManager.mockReset();
   exec.mockReset();
-  exec.mockResolvedValue({
-    exitCode: 0,
-    stdout: '"1.0.0"\n',
-    stderr: "",
-  } as Awaited<ReturnType<typeof x>>);
+  installRegistryFetchMock();
+  mockRegistryPublished(JSON.stringify({ version: "1.0.0" }));
+});
+
+afterEach(() => {
+  uninstallRegistryFetchMock();
 });
 
 describe("tegami context", () => {
@@ -40,10 +48,8 @@ describe("tegami context", () => {
       plan: emptyPlan(),
     });
 
-    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
-      nodeOptions: {
-        cwd: "/repo",
-      },
+    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
+      headers: { Accept: "application/json" },
     });
     expect(detectPackageManager).not.toHaveBeenCalled();
   });
@@ -66,10 +72,8 @@ describe("tegami context", () => {
       plan: emptyPlan(),
     });
 
-    expect(exec).toHaveBeenCalledWith("pnpm", ["view", "@acme/core@1.0.0", "version", "--json"], {
-      nodeOptions: {
-        cwd: "/repo",
-      },
+    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
+      headers: { Accept: "application/json" },
     });
     expect(detectPackageManager).toHaveBeenCalledTimes(1);
     expect(detectPackageManager).toHaveBeenCalledWith({
@@ -90,10 +94,8 @@ describe("tegami context", () => {
       plan: emptyPlan(),
     });
 
-    expect(exec).toHaveBeenCalledWith("npm", ["view", "@acme/core@1.0.0", "version", "--json"], {
-      nodeOptions: {
-        cwd: "/repo",
-      },
+    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
+      headers: { Accept: "application/json" },
     });
   });
 

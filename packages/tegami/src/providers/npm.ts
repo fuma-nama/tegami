@@ -59,18 +59,6 @@ export class NpmPackage extends WorkspacePackage {
   }
 }
 
-function isMissingRegistryEntry(output: string): boolean {
-  const normalized = output.toLowerCase();
-
-  return (
-    normalized.includes("e404") ||
-    normalized.includes("404") ||
-    normalized.includes("no match") ||
-    normalized.includes("no matching version") ||
-    normalized.includes("not found")
-  );
-}
-
 type DependencySpec =
   | {
       protocol: "npm";
@@ -180,7 +168,7 @@ export interface NpmPluginOptions {
    */
   onBreakPeerDep?: "set" | "error" | "ignore";
 
-  /** update lockfile after applying a draft */
+  /** update lockfile after applying a draft @default true */
   updateLockFile?: boolean;
 }
 
@@ -192,7 +180,7 @@ const packageLockSchema = z.object({
 export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
-  updateLockFile = false,
+  updateLockFile = true,
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -207,27 +195,6 @@ export function npm({
   },
 }: NpmPluginOptions = {}): TegamiPlugin {
   let client: AgentName;
-
-  async function isPackagePublished(context: TegamiContext, pkg: NpmPackage): Promise<boolean> {
-    const registry = pkg.manifest.publishConfig?.registry;
-    const args = ["view", `${pkg.name}@${pkg.version}`, "version", "--json"];
-    if (registry) args.push("--registry", registry);
-
-    const result = await x(client === "pnpm" ? "pnpm" : "npm", args, {
-      nodeOptions: {
-        cwd: context.cwd,
-      },
-    });
-    if (result.exitCode === 0) return true;
-
-    if (isMissingRegistryEntry(result.stderr) || isMissingRegistryEntry(result.stdout))
-      return false;
-
-    throw execFailure(
-      `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
-      result,
-    );
-  }
 
   function depsPolicy(context: TegamiContext): DraftPolicy {
     const { graph } = context;
@@ -310,10 +277,22 @@ export function npm({
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage)) return;
+      if (pkg.manifest.private === true) return { publish: false };
 
-      return {
-        publish: pkg.manifest.private !== true && !(await isPackagePublished(this, pkg)),
-      };
+      const registry = pkg.manifest.publishConfig?.registry;
+      const base = (registry ?? "https://registry.npmjs.org").replace(/\/$/, "");
+      const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (response.status === 404) return { publish: true };
+      if (!response.ok) {
+        throw new Error(
+          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+        );
+      }
+
+      return { publish: false };
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {

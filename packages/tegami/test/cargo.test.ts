@@ -7,6 +7,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
+import {
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 initSync();
 
@@ -22,6 +27,8 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  installRegistryFetchMock();
+  mockRegistryMissing();
 });
 
 afterEach(async () => {
@@ -150,21 +157,9 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        status: 404,
-        text: async () => "not found",
-      })),
+      vi.fn(async () => new Response("not found", { status: 404 })),
     );
-    exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "view") {
-        return commandResult({
-          exitCode: 1,
-          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-        });
-      }
-
-      return commandResult();
-    });
+    exec.mockImplementation(() => commandResult());
 
     const result = await tegami({ cwd, npm: { client: "npm" } }).publish();
 
@@ -186,11 +181,6 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
         cwd: normalizeDirPath(String(options?.nodeOptions?.cwd)),
       })),
     ).toEqual([
-      {
-        command: "npm",
-        args: ["view", "@acme/js@1.1.0", "version", "--json"],
-        cwd,
-      },
       {
         command: "npm",
         args: ["publish"],

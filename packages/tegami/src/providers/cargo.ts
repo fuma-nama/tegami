@@ -66,7 +66,7 @@ export interface CargoPluginOptions {
   /**
    * Update lock file after versioning.
    *
-   * @default false
+   * @default true
    */
   updateLockFile?: boolean;
 
@@ -78,68 +78,9 @@ export interface CargoPluginOptions {
 }
 
 export function cargo({
-  updateLockFile = false,
-  bumpDep: getBumpDepType = ({ kind }) => {
-    switch (kind) {
-      case "dependencies":
-        return "patch";
-      case "build-dependencies":
-      case "dev-dependencies":
-        return false;
-    }
-  },
+  updateLockFile = true,
+  bumpDep: getBumpDepType,
 }: CargoPluginOptions = {}): TegamiPlugin {
-  function updateRange(range: string, next: string): string | false {
-    // Ignore special syntax like "latest".
-    if (!semver.validRange(range)) return false;
-    const semverRange = new semver.Range(range);
-    if (semverRange.test(next)) return false;
-
-    return next;
-  }
-
-  async function isPackagePublished(pkg: CargoPackage): Promise<boolean> {
-    const response = await fetch(
-      `https://crates.io/api/v1/crates/${encodeURIComponent(pkg.name)}/${pkg.version}`,
-    );
-
-    if (response.status === 200) return true;
-    if (response.status === 404) return false;
-
-    throw new Error(
-      `Unable to validate ${pkg.name}@${pkg.version} against crates.io: ${await response.text()}`,
-    );
-  }
-
-  function depsPolicy({ graph }: TegamiContext): DraftPolicy {
-    return {
-      id: "cargo:deps",
-      onUpdate({ pkg, packageDraft: plan }) {
-        for (const other of graph.getPackages()) {
-          if (!(other instanceof CargoPackage)) continue;
-
-          for (const { table, kind } of dependencyTables(other.manifest, "")) {
-            for (const [rawName, rawSpec] of Object.entries(table)) {
-              const spec = parseSpec(rawSpec);
-              if (!spec) continue;
-
-              const packageName = spec.package ?? rawName;
-              if (pkg.id !== `cargo:${packageName}`) continue;
-
-              const result = updateRange(spec.version, plan.bumpVersion(pkg));
-              if (result === false) continue;
-
-              const bumpType = getBumpDepType({ kind, name: packageName, version: spec.version });
-              if (bumpType === false) continue;
-
-              this.bumpPackage(other, { type: bumpType, reason: `update dependency "${rawName}"` });
-            }
-          }
-        }
-      },
-    };
-  }
-
   return {
     name: "cargo",
     enforce: "pre",
@@ -150,7 +91,7 @@ export function cargo({
       await discoverCargoPackages(this.cwd, (pkg) => this.graph.add(pkg));
     },
     initDraft(plan) {
-      plan.addPolicy(depsPolicy(this));
+      plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof CargoPackage)) return;
@@ -171,7 +112,8 @@ export function cargo({
       }
 
       return {
-        publish: pkg.packageInfo.publish !== false && !(await isPackagePublished(pkg)),
+        publish:
+          pkg.packageInfo.publish !== false && !(await isPackagePublished(pkg.name, pkg.version)),
         wait,
       };
     },
@@ -214,21 +156,29 @@ export function cargo({
         for (const { table, path: tablePath } of dependencyTables(pkg.manifest, "")) {
           for (const [rawName, rawSpec] of Object.entries(table)) {
             const spec = parseSpec(rawSpec);
-            if (!spec) continue;
+            // Ignore invalid range
+            if (!spec || !semver.validRange(spec.version)) continue;
 
             const packageName = spec.package ?? rawName;
             const linked = graph.get(`cargo:${packageName}`);
             if (!linked || !(linked instanceof CargoPackage)) continue;
+            if (semver.satisfies(linked.version, spec.version)) continue;
 
-            const result = updateRange(spec.version, linked.version);
-            if (result === false) continue;
+            let updatedRange: string;
+            if (spec.version.startsWith("^")) {
+              updatedRange = `^${linked.version}`;
+            } else if (spec.version.startsWith("~")) {
+              updatedRange = `~${linked.version}`;
+            } else {
+              updatedRange = linked.version;
+            }
 
-            table[rawName] = spec.setVersion(result);
+            table[rawName] = spec.setVersion(updatedRange);
             pkg.patch(
               typeof rawSpec === "string"
                 ? `${tablePath}.${rawName}`
                 : `${tablePath}.${rawName}.version`,
-              result,
+              updatedRange,
             );
           }
         }
@@ -251,6 +201,66 @@ export function cargo({
       },
     },
   };
+}
+
+function depsPolicy(
+  { graph }: TegamiContext,
+  getBumpDepType: CargoPluginOptions["bumpDep"] = ({ kind }) => {
+    switch (kind) {
+      case "dependencies":
+        return "patch";
+      case "build-dependencies":
+      case "dev-dependencies":
+        return false;
+    }
+  },
+): DraftPolicy {
+  return {
+    id: "cargo:deps",
+    onUpdate({ pkg, packageDraft: plan }) {
+      if (!(pkg instanceof CargoPackage)) return;
+      const group = graph.getPackageGroup(pkg.id);
+
+      for (const dependent of graph.getPackages()) {
+        if (!(dependent instanceof CargoPackage)) continue;
+
+        for (const { table, kind } of dependencyTables(dependent.manifest, "")) {
+          for (const [rawName, rawSpec] of Object.entries(table)) {
+            const spec = parseSpec(rawSpec);
+            if (!spec || !semver.validRange(spec.version)) continue;
+            if (pkg.id !== `cargo:${spec.package ?? rawName}`) continue;
+
+            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
+              // they will always bump together
+              continue;
+            }
+
+            if (semver.satisfies(plan.bumpVersion(pkg), spec.version)) continue;
+
+            const bumpType = getBumpDepType({ kind, name: pkg.name, version: spec.version });
+            if (bumpType === false) continue;
+
+            this.bumpPackage(dependent, {
+              type: bumpType,
+              reason: `update dependency "${rawName}"`,
+            });
+          }
+        }
+      }
+    },
+  };
+}
+
+async function isPackagePublished(name: string, version: string) {
+  const response = await fetch(
+    `https://crates.io/api/v1/crates/${encodeURIComponent(name)}/${version}`,
+  );
+
+  if (response.status === 200) return true;
+  if (response.status === 404) return false;
+  throw new Error(
+    `Unable to validate ${name}@${version} against crates.io: ${await response.text()}`,
+  );
 }
 
 async function discoverCargoPackages(cwd: string, add: (pkg: CargoPackage) => void): Promise<void> {

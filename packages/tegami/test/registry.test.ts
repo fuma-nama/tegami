@@ -8,6 +8,14 @@ import { publishPlanStatus } from "../src/plans/checks";
 import { initPublishPlan, runPreflights } from "../src/plans/publish";
 import { NpmPackage } from "../src/providers/npm";
 import { writePublishLock } from "./helpers/lock";
+import {
+  fetchMock,
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  mockRegistryPublished,
+  npmPackageVersionUrl,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -18,9 +26,12 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  installRegistryFetchMock();
+  mockRegistryMissing();
 });
 
 afterEach(async () => {
+  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
@@ -28,26 +39,15 @@ describe("npm registry preflight", () => {
   test("reads the registry from the graph during preflight", async () => {
     const context = await createContext("pnpm", "https://registry.example.test");
 
-    exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
+    );
 
     await loadPlan(context);
 
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith(
-      "pnpm",
-      [
-        "view",
-        "@acme/core@1.0.1",
-        "version",
-        "--json",
-        "--registry",
-        "https://registry.example.test",
-      ],
-      {
-        nodeOptions: {
-          cwd: context.cwd,
-        },
-      },
+    expect(fetchMock).toHaveBeenCalledWith(
+      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
+      { headers: { Accept: "application/json" } },
     );
   });
 
@@ -57,12 +57,7 @@ describe("npm registry preflight", () => {
     if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    exec.mockResolvedValue(
-      execResult({
-        exitCode: 1,
-        stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-      }),
-    );
+    fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
 
     await expect(
       npmPlugin.publishPreflight?.call(context, { pkg, plan: await loadPlan(context) }),
@@ -94,20 +89,17 @@ describe("npm registry preflight", () => {
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
     const tarballPath = join(pkg.path, "pkg.tgz");
 
-    exec
-      .mockResolvedValueOnce(execResult())
-      .mockResolvedValueOnce(execResult())
-      .mockResolvedValueOnce(execResult());
+    exec.mockResolvedValueOnce(execResult()).mockResolvedValueOnce(execResult());
     const plan = await loadPlan(context);
 
     await npmPlugin.publish?.call(context, { pkg, plan });
 
-    expect(exec).toHaveBeenNthCalledWith(2, "bun", ["pm", "pack", "--filename", tarballPath], {
+    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--filename", tarballPath], {
       nodeOptions: {
         cwd: pkg.path,
       },
     });
-    expect(exec).toHaveBeenNthCalledWith(3, "npm", ["publish", tarballPath, "--tag", "latest"], {
+    expect(exec).toHaveBeenNthCalledWith(2, "npm", ["publish", tarballPath, "--tag", "latest"], {
       nodeOptions: {
         cwd: pkg.path,
       },
@@ -124,36 +116,21 @@ describe("publish plan status", () => {
 
   test("returns success when publishable packages are on the registry", async () => {
     const context = await createTestContext();
-    exec.mockResolvedValue(execResult({ stdout: '"1.0.1"\n' }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
+    );
     const plan = await loadPlan(context);
 
     await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
-    expect(exec).toHaveBeenCalledWith(
-      "npm",
-      [
-        "view",
-        "@acme/core@1.0.1",
-        "version",
-        "--json",
-        "--registry",
-        "https://registry.example.test",
-      ],
-      {
-        nodeOptions: {
-          cwd: context.cwd,
-        },
-      },
+    expect(fetchMock).toHaveBeenCalledWith(
+      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
+      { headers: { Accept: "application/json" } },
     );
   });
 
   test("returns pending when a publishable package is missing from the registry", async () => {
     const context = await createTestContext();
-    exec.mockResolvedValue(
-      execResult({
-        exitCode: 1,
-        stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
-      }),
-    );
+    fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
     const plan = await loadPlan(context);
 
     await expect(publishPlanStatus(plan, context)).resolves.toBe("pending");

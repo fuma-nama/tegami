@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ChangelogEntry } from "../src/changelog/parse";
 import { Draft } from "../src/plans/draft";
 import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../src/plans/publish";
+import * as githubClient from "../src/plugins/github/api";
 import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { TegamiPlugin } from "../src/types";
@@ -12,17 +13,34 @@ vi.mock("tinyexec", () => ({
   x: vi.fn(),
 }));
 
+vi.mock("../src/plugins/github/api", () => ({
+  getReleaseByTag: vi.fn(),
+  createRelease: vi.fn(),
+  findOpenPullRequest: vi.fn(),
+  updatePullRequest: vi.fn(),
+  createPullRequest: vi.fn(),
+}));
+
 const exec = vi.mocked(x);
+const getReleaseByTag = vi.mocked(githubClient.getReleaseByTag);
+const createGitHubRelease = vi.mocked(githubClient.createRelease);
+const findOpenPullRequest = vi.mocked(githubClient.findOpenPullRequest);
+const updatePullRequest = vi.mocked(githubClient.updatePullRequest);
+const createPullRequest = vi.mocked(githubClient.createPullRequest);
 
 beforeEach(() => {
   exec.mockReset();
-  exec.mockImplementation((command, args = []) => {
-    if (command === "gh" && args[0] === "release" && args[1] === "view") {
-      return commandResult({ exitCode: 1, stderr: "release not found\n" });
-    }
-
-    return commandResult();
-  });
+  exec.mockImplementation(() => commandResult());
+  getReleaseByTag.mockReset();
+  getReleaseByTag.mockResolvedValue(null);
+  createGitHubRelease.mockReset();
+  createGitHubRelease.mockResolvedValue(undefined);
+  findOpenPullRequest.mockReset();
+  findOpenPullRequest.mockResolvedValue(undefined);
+  updatePullRequest.mockReset();
+  updatePullRequest.mockResolvedValue(undefined);
+  createPullRequest.mockReset();
+  createPullRequest.mockResolvedValue(undefined);
 });
 
 describe("github release plugin", () => {
@@ -47,28 +65,18 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(exec).toHaveBeenCalledTimes(2);
-    expect(ghReleaseViewCall()?.[1]).toEqual(["release", "view", "@acme/core@1.0.1"]);
-    expect(ghReleaseCreateCall()?.[1]).toEqual([
-      "release",
-      "create",
-      "@acme/core@1.0.1",
-      "--title",
-      "Release 1.0.1",
-      "--notes",
-      "Notes for @acme/core",
-      "--prerelease",
-    ]);
+    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", undefined);
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "@acme/core@1.0.1",
+      title: "Release 1.0.1",
+      notes: "Notes for @acme/core",
+      prerelease: true,
+      token: undefined,
+    });
   });
 
   test("skips GitHub release creation when the release already exists", async () => {
-    exec.mockImplementation((command, args = []) => {
-      if (command === "gh" && args[0] === "release" && args[1] === "view") {
-        return commandResult({ stdout: "title: Existing\n" });
-      }
-
-      return commandResult();
-    });
+    getReleaseByTag.mockResolvedValue({ id: 1 });
 
     const plugin = githubPlugin({ repo: "acme/repo" });
 
@@ -81,15 +89,8 @@ describe("github release plugin", () => {
       plan: releasePlan(context, [{}]),
     });
 
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(ghReleaseViewCall()?.[1]).toEqual([
-      "release",
-      "view",
-      "@acme/core@1.0.1",
-      "--repo",
-      "acme/repo",
-    ]);
-    expect(ghReleaseCreateCall()).toBeUndefined();
+    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", undefined);
+    expect(createGitHubRelease).not.toHaveBeenCalled();
   });
 
   test("does not create releases when any package failed", async () => {
@@ -104,7 +105,8 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(exec).not.toHaveBeenCalled();
+    expect(getReleaseByTag).not.toHaveBeenCalled();
+    expect(createGitHubRelease).not.toHaveBeenCalled();
   });
 
   test("uses changelog entries for default notes", async () => {
@@ -124,22 +126,13 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(ghReleaseCreateCall()).toMatchInlineSnapshot(`
-      [
-        "gh",
-        [
-          "release",
-          "create",
-          "@acme/core@1.0.1",
-          "--title",
-          "@acme/core@1.0.1",
-          "--notes",
-          "### Add proxy server
-
-      Some description.",
-        ],
-      ]
-    `);
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "@acme/core@1.0.1",
+      title: "@acme/core@1.0.1",
+      notes: "### Add proxy server\n\nSome description.",
+      prerelease: false,
+      token: undefined,
+    });
   });
 
   test("links changelog entry commits in default release notes", async () => {
@@ -148,10 +141,6 @@ describe("github release plugin", () => {
         return commandResult({
           stdout: "abc1234567890abcdef1234567890abcdef123456\n",
         });
-      }
-
-      if (command === "gh" && args[0] === "release" && args[1] === "view") {
-        return commandResult({ exitCode: 1, stderr: "release not found\n" });
       }
 
       return commandResult();
@@ -177,17 +166,14 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(ghReleaseCreateCall()?.[1]).toEqual([
-      "release",
-      "create",
-      "@acme/core@1.0.1",
-      "--title",
-      "@acme/core@1.0.1",
-      "--notes",
-      "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
-      "--repo",
-      "acme/repo",
-    ]);
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "@acme/core@1.0.1",
+      title: "@acme/core@1.0.1",
+      notes:
+        "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
+      prerelease: false,
+      token: undefined,
+    });
   });
 
   test("marks semver prerelease versions as GitHub prerelease by default", async () => {
@@ -205,16 +191,13 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(ghReleaseCreateCall()?.[1]).toEqual([
-      "release",
-      "create",
-      "@acme/core@1.0.1-beta.0",
-      "--title",
-      "@acme/core@1.0.1-beta.0",
-      "--notes",
-      "Published @acme/core@1.0.1-beta.0.",
-      "--prerelease",
-    ]);
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "@acme/core@1.0.1-beta.0",
+      title: "@acme/core@1.0.1-beta.0",
+      notes: "Published @acme/core@1.0.1-beta.0.",
+      prerelease: true,
+      token: undefined,
+    });
   });
 
   test("summarizes all packages sharing a git tag in release notes", async () => {
@@ -233,16 +216,14 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(exec).toHaveBeenCalledTimes(3);
-    expect(ghReleaseCreateCall()?.[1]).toEqual([
-      "release",
-      "create",
-      "acme@1.0.1",
-      "--title",
-      "acme@1.0.1",
-      "--notes",
-      "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
-    ]);
+    expect(getReleaseByTag).toHaveBeenCalledTimes(1);
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "acme@1.0.1",
+      title: "acme@1.0.1",
+      notes: "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
+      prerelease: false,
+      token: undefined,
+    });
   });
 
   test("uses onCreateGroupedRelease for packages sharing a git tag", async () => {
@@ -268,15 +249,13 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(ghReleaseCreateCall()?.[1]).toEqual([
-      "release",
-      "create",
-      "acme@1.0.1",
-      "--title",
-      "Group release @acme/core",
-      "--notes",
-      "@acme/core, @acme/ui",
-    ]);
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "acme@1.0.1",
+      title: "Group release @acme/core",
+      notes: "@acme/core, @acme/ui",
+      prerelease: false,
+      token: undefined,
+    });
   });
 });
 
@@ -332,19 +311,18 @@ describe("github version pull request", () => {
           return commandResult();
         }
 
-        if (command === "gh" && args[0] === "pr" && args[1] === "list") {
-          return commandResult({ stdout: '[{"number":42}]\n' });
-        }
-
-        if (command === "gh") {
-          return commandResult();
-        }
-
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
+      findOpenPullRequest.mockResolvedValue(42);
 
       await runVersionPullRequest(plugin, context, draft);
 
+      expect(updatePullRequest).toHaveBeenCalledWith("acme/repo", 42, {
+        title: "Version Packages",
+        body: expect.stringContaining("Merge this PR to publish the versioned packages."),
+        token: undefined,
+      });
+      expect(createPullRequest).not.toHaveBeenCalled();
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
           {
@@ -395,47 +373,6 @@ describe("github version pull request", () => {
             ],
             "command": "git",
             "cwd": "/repo",
-            "throwOnError": undefined,
-          },
-          {
-            "args": [
-              "pr",
-              "list",
-              "--head",
-              "tegami/version-packages",
-              "--state",
-              "open",
-              "--json",
-              "number",
-            ],
-            "command": "gh",
-            "cwd": undefined,
-            "throwOnError": undefined,
-          },
-          {
-            "args": [
-              "pr",
-              "edit",
-              "42",
-              "--title",
-              "Version Packages",
-              "--body",
-              "## Summary
-
-        Merge this PR to publish the versioned packages.
-
-        - **@acme/core**: 1.0.0 → 1.1.0
-
-        ## Changelogs
-        ### \`change.md\`
-
-        #### Add feature
-
-        Description.
-        ",
-            ],
-            "command": "gh",
-            "cwd": undefined,
             "throwOnError": undefined,
           },
         ]
@@ -464,19 +401,18 @@ describe("github version pull request", () => {
           return commandResult();
         }
 
-        if (command === "gh" && args[0] === "pr" && args[1] === "list") {
-          return commandResult({ stdout: "[]\n" });
-        }
-
-        if (command === "gh") {
-          return commandResult();
-        }
-
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
       await runVersionPullRequest(plugin, context, draft);
 
+      expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
+        title: "Version Packages",
+        body: expect.stringContaining("Merge this PR to publish the versioned packages."),
+        head: "tegami/version-packages",
+        base: "main",
+        token: undefined,
+      });
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
           {
@@ -527,50 +463,6 @@ describe("github version pull request", () => {
             ],
             "command": "git",
             "cwd": "/repo",
-            "throwOnError": undefined,
-          },
-          {
-            "args": [
-              "pr",
-              "list",
-              "--head",
-              "tegami/version-packages",
-              "--state",
-              "open",
-              "--json",
-              "number",
-            ],
-            "command": "gh",
-            "cwd": undefined,
-            "throwOnError": undefined,
-          },
-          {
-            "args": [
-              "pr",
-              "create",
-              "--title",
-              "Version Packages",
-              "--body",
-              "## Summary
-
-        Merge this PR to publish the versioned packages.
-
-        - **@acme/core**: 1.0.0 → 1.1.0
-
-        ## Changelogs
-        ### \`change.md\`
-
-        #### Add feature
-
-        Description.
-        ",
-              "--head",
-              "tegami/version-packages",
-              "--base",
-              "main",
-            ],
-            "command": "gh",
-            "cwd": undefined,
             "throwOnError": undefined,
           },
         ]
@@ -614,8 +506,8 @@ describe("github version pull request", () => {
           return commandResult({ stdout: " M package.json\n" });
         }
 
-        if (command === "git" || command === "gh") {
-          return commandResult(command === "gh" && args[1] === "list" ? { stdout: "[]\n" } : {});
+        if (command === "git") {
+          return commandResult();
         }
 
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
@@ -623,7 +515,7 @@ describe("github version pull request", () => {
 
       await runVersionPullRequest(plugin, context, versionDraft(context));
 
-      expect(exec).toHaveBeenCalled();
+      expect(createPullRequest).toHaveBeenCalled();
     } finally {
       if (previousCi === undefined) delete process.env.CI;
       else process.env.CI = previousCi;
@@ -645,6 +537,7 @@ function publishContext(packages: TestPackage[] = [testPackage()]): TegamiContex
     options: {},
     plugins: [],
     graph: new PackageGraph(packages),
+    github: { repo: "acme/repo" },
   };
 }
 
@@ -746,18 +639,6 @@ function testChangelogEntry(overrides: Partial<ChangelogEntry> = {}): ChangelogE
     getRawContent: () => "",
     ...overrides,
   };
-}
-
-function ghReleaseViewCall() {
-  return exec.mock.calls.find(
-    (call) => call[0] === "gh" && call[1]?.[0] === "release" && call[1]?.[1] === "view",
-  );
-}
-
-function ghReleaseCreateCall() {
-  return exec.mock.calls.find(
-    (call) => call[0] === "gh" && call[1]?.[0] === "release" && call[1]?.[1] === "create",
-  );
 }
 
 type ExecResult = Awaited<ReturnType<typeof x>>;

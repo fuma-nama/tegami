@@ -11,6 +11,13 @@ import { git, type GitPluginOptions } from "./git";
 import { isCI } from "../utils/constants";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
+import {
+  createPullRequest,
+  createRelease as createGitHubRelease,
+  findOpenPullRequest,
+  getReleaseByTag,
+  updatePullRequest,
+} from "./github/api";
 
 interface GithubRelease {
   /** Release title */
@@ -244,34 +251,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
                 : await createRelease(this, tag, plan, packages[0]!);
             if (!release) return;
 
-            const viewArgs: string[] = ["release", "view", tag];
-            if (repo) viewArgs.push("--repo", repo);
+            const token = this.github?.token;
+            if (!repo) return;
 
-            const existing = await x("gh", viewArgs);
-            if (existing.exitCode === 0) return;
+            if (await getReleaseByTag(repo, tag, token)) return;
 
-            const args: string[] = [
-              "release",
-              "create",
+            await createGitHubRelease(repo, {
               tag,
-              "--title",
-              release.title,
-              "--notes",
-              release.notes,
-            ];
-
-            if (repo) {
-              args.push("--repo", repo);
-            }
-
-            if (release.prerelease) {
-              args.push("--prerelease");
-            }
-
-            const ghOut = await x("gh", args);
-            if (ghOut.exitCode !== 0) {
-              throw execFailure(`Failed to create GitHub release for ${tag}.`, ghOut);
-            }
+              title: release.title,
+              notes: release.notes,
+              prerelease: release.prerelease,
+              token,
+            });
           }),
         );
       },
@@ -341,37 +332,27 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             );
           }
 
-          const openPr = await findOpenPullRequest(branch, repo);
+          const token = this.github?.token;
+          if (!repo) return;
+
+          const openPr = await findOpenPullRequest(repo, branch, token);
 
           if (openPr !== undefined) {
-            const editArgs = ["pr", "edit", String(openPr), "--title", pr.title, "--body", pr.body];
-            if (repo) editArgs.push("--repo", repo);
-
-            const editResult = await x("gh", editArgs);
-            if (editResult.exitCode !== 0) {
-              throw execFailure("Failed to update the version pull request.", editResult);
-            }
+            await updatePullRequest(repo, openPr, {
+              title: pr.title,
+              body: pr.body,
+              token,
+            });
             return;
           }
 
-          const args = [
-            "pr",
-            "create",
-            "--title",
-            pr.title,
-            "--body",
-            pr.body,
-            "--head",
-            branch,
-            "--base",
+          await createPullRequest(repo, {
+            title: pr.title,
+            body: pr.body,
+            head: branch,
             base,
-          ];
-          if (repo) args.push("--repo", repo);
-
-          const prResult = await x("gh", args);
-          if (prResult.exitCode !== 0) {
-            throw execFailure("Failed to create the version pull request.", prResult);
-          }
+            token,
+          });
         },
       },
     },
@@ -386,22 +367,6 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
   });
 
   return result.stdout.trim().length > 0;
-}
-
-async function findOpenPullRequest(
-  branch: string,
-  repo: string | undefined,
-): Promise<number | undefined> {
-  const args = ["pr", "list", "--head", branch, "--state", "open", "--json", "number"];
-  if (repo) args.push("--repo", repo);
-
-  const result = await x("gh", args);
-  if (result.exitCode !== 0) {
-    throw execFailure("Failed to check for an existing version pull request.", result);
-  }
-
-  const pullRequests = JSON.parse(result.stdout) as Array<{ number: number }>;
-  return pullRequests[0]?.number;
 }
 
 function formatCommitLink(commit: string, repo?: string): string {
