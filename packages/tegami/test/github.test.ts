@@ -14,7 +14,7 @@ vi.mock("tinyexec", () => ({
 }));
 
 vi.mock("../src/plugins/github/api", () => ({
-  getReleaseByTag: vi.fn(),
+  releaseExistsByTag: vi.fn(),
   createRelease: vi.fn(),
   findOpenPullRequest: vi.fn(),
   updatePullRequest: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock("../src/plugins/github/api", () => ({
 }));
 
 const exec = vi.mocked(x);
-const getReleaseByTag = vi.mocked(githubClient.getReleaseByTag);
+const releaseExistsByTag = vi.mocked(githubClient.releaseExistsByTag);
 const createGitHubRelease = vi.mocked(githubClient.createRelease);
 const findOpenPullRequest = vi.mocked(githubClient.findOpenPullRequest);
 const updatePullRequest = vi.mocked(githubClient.updatePullRequest);
@@ -31,8 +31,8 @@ const createPullRequest = vi.mocked(githubClient.createPullRequest);
 beforeEach(() => {
   exec.mockReset();
   exec.mockImplementation(() => commandResult());
-  getReleaseByTag.mockReset();
-  getReleaseByTag.mockResolvedValue(null);
+  releaseExistsByTag.mockReset();
+  releaseExistsByTag.mockResolvedValue(false);
   createGitHubRelease.mockReset();
   createGitHubRelease.mockResolvedValue(undefined);
   findOpenPullRequest.mockReset();
@@ -47,13 +47,15 @@ describe("github release plugin", () => {
   test("creates GitHub releases for successful published packages", async () => {
     const plugin = githubPlugin({
       repo: "acme/repo",
-      onCreateRelease({ pkg, plan }) {
-        const packagePlan = plan.packages.get(pkg.id);
-        return {
-          prerelease: packagePlan?.npm?.distTag !== "latest",
-          title: `Release ${pkg.version}`,
-          notes: `Notes for ${pkg.name}`,
-        };
+      release: {
+        create({ pkg, plan }) {
+          const packagePlan = plan.packages.get(pkg.id);
+          return {
+            prerelease: packagePlan?.npm?.distTag !== "latest",
+            title: `Release ${pkg.version}`,
+            notes: `Notes for ${pkg.name}`,
+          };
+        },
       },
     });
 
@@ -65,7 +67,7 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
     expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
       tag: "@acme/core@1.0.1",
       title: "Release 1.0.1",
@@ -76,7 +78,7 @@ describe("github release plugin", () => {
   });
 
   test("skips GitHub release creation when the release already exists", async () => {
-    getReleaseByTag.mockResolvedValue({ id: 1 });
+    releaseExistsByTag.mockResolvedValue(true);
 
     const plugin = githubPlugin({ repo: "acme/repo" });
 
@@ -89,12 +91,12 @@ describe("github release plugin", () => {
       plan: releasePlan(context, [{}]),
     });
 
-    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
     expect(createGitHubRelease).not.toHaveBeenCalled();
   });
 
   test("skips default release note work when the release already exists", async () => {
-    getReleaseByTag.mockResolvedValue({ id: 1 });
+    releaseExistsByTag.mockResolvedValue(true);
     exec.mockImplementation((command, args = []) => {
       if (command === "git" && args[0] === "log") {
         throw new Error("git log should not run for an existing release");
@@ -122,6 +124,47 @@ describe("github release plugin", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  test("does not create releases when release is disabled", async () => {
+    const plugin = githubPlugin({ repo: "acme/repo", release: false });
+    const context = publishContext();
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [{}]),
+    });
+
+    expect(releaseExistsByTag).not.toHaveBeenCalled();
+    expect(createGitHubRelease).not.toHaveBeenCalled();
+  });
+
+  test("returns pending from resolvePlanStatus when a release is missing", async () => {
+    releaseExistsByTag.mockResolvedValue(false);
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext();
+
+    await expect(
+      plugin.resolvePlanStatus?.call(context, {
+        plan: releasePlan(context, [{}]),
+      }),
+    ).resolves.toBe("pending");
+  });
+
+  test("creates releases eagerly when another package failed", async () => {
+    const plugin = githubPlugin({
+      repo: "acme/repo",
+      release: { eager: true },
+    });
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {},
+        { name: "@acme/ui", publishResult: { type: "failed", error: "publish failed" } },
+      ]),
+    });
+
+    expect(createGitHubRelease).toHaveBeenCalledTimes(1);
+  });
+
   test("does not create releases when any package failed", async () => {
     const plugin = githubPlugin();
 
@@ -134,7 +177,7 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(getReleaseByTag).not.toHaveBeenCalled();
+    expect(releaseExistsByTag).not.toHaveBeenCalled();
     expect(createGitHubRelease).not.toHaveBeenCalled();
   });
 
@@ -245,7 +288,7 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(getReleaseByTag).toHaveBeenCalledTimes(1);
+    expect(releaseExistsByTag).toHaveBeenCalledTimes(1);
     expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
       tag: "acme@1.0.1",
       title: "acme@1.0.1",
@@ -283,17 +326,19 @@ describe("github release plugin", () => {
     expect(createGitHubRelease).toHaveBeenCalledTimes(2);
   });
 
-  test("uses onCreateGroupedRelease for packages sharing a git tag", async () => {
+  test("uses release.createGrouped for packages sharing a git tag", async () => {
     const plugin = githubPlugin({
       repo: "acme/repo",
-      onCreateGroupedRelease({ packages }) {
-        return {
-          title: `Group release ${packages[0]!.name}`,
-          notes: packages.map((pkg) => pkg.name).join(", "),
-        };
-      },
-      onCreateRelease() {
-        throw new Error("onCreateRelease should not be called for grouped releases");
+      release: {
+        createGrouped({ packages }) {
+          return {
+            title: `Group release ${packages[0]!.name}`,
+            notes: packages.map((pkg) => pkg.name).join(", "),
+          };
+        },
+        create() {
+          throw new Error("release.create should not be called for grouped releases");
+        },
       },
     });
 
@@ -552,9 +597,7 @@ describe("github version pull request", () => {
     try {
       const plugin = githubPlugin({
         repo: "acme/repo",
-        cli: {
-          versionPr: true,
-        },
+        versionPr: { forceCreate: true },
       });
       const context = publishContext();
 

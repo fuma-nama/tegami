@@ -20,23 +20,24 @@ async function githubRequest(
   return fetch(`https://api.github.com${path}`, { ...init, headers });
 }
 
-export async function getReleaseByTag(
+export async function releaseExistsByTag(
   repo: string,
   tag: string,
   token?: string,
-): Promise<{ id: number } | null> {
+): Promise<boolean> {
   const { owner, repo: name } = parseGitHubRepo(repo);
   const response = await githubRequest(
     `/repos/${owner}/${name}/releases/tags/${encodeURIComponent(tag)}`,
     token,
+    { method: "HEAD" },
   );
 
-  if (response.status === 404) return null;
+  if (response.status === 404) return false;
   if (!response.ok) {
     throw new Error(`Failed to get GitHub release for ${tag}.`);
   }
 
-  return response.json() as Promise<{ id: number }>;
+  return true;
 }
 
 export async function createRelease(

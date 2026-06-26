@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { findIssueCommentByPrefix, updateIssueComment } from "../src/plugins/github/api";
+import {
+  findIssueCommentByPrefix,
+  releaseExistsByTag,
+  updateIssueComment,
+} from "../src/plugins/github/api";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -9,6 +13,18 @@ afterEach(() => {
 });
 
 describe("github api", () => {
+  test("checks release existence with HEAD", async () => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    await expect(releaseExistsByTag("acme/repo", "v1.0.0", "token")).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/acme/repo/releases/tags/v1.0.0",
+      expect.objectContaining({ method: "HEAD" }),
+    );
+  });
+
   test("stops listing comments once the matching marker is found", async () => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockResolvedValue(

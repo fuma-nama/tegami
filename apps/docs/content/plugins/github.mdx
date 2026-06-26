@@ -44,25 +44,55 @@ Configure the PR behavior:
 ```ts
 github({
   repo: "your-org/your-repo",
-  cli: {
-    // enabled in CI, off locally
-    versionPr: {
-      branch: "tegami/version-packages",
-      base: "main",
-    },
+  versionPr: {
+    branch: "tegami/version-packages",
+    base: "main",
   },
 });
 ```
 
-| Setting  | Default                   | Description                    |
-| -------- | ------------------------- | ------------------------------ |
-| `branch` | `tegami/version-packages` | Head branch for the version PR |
-| `base`   | `main`                    | Base branch for the version PR |
+| Setting       | Default                   | Description                                      |
+| ------------- | ------------------------- | ------------------------------------------------ |
+| `branch`      | `tegami/version-packages` | Head branch for the version PR                   |
+| `base`        | `main`                    | Base branch for the version PR                   |
+| `forceCreate` | `false`                   | Create the PR outside CI as well                 |
+| `create`      | —                         | Override the PR title and body before it is sent |
 
-Set `versionPr: false` to disable PR creation. Set `versionPr: true` to always create the PR, including locally.
+Set `versionPr: false` to disable PR creation. Set `versionPr: { forceCreate: true }` to always create the PR, including locally.
 
 ## GitHub releases
 
 After a successful publish, the plugin creates a GitHub release for each git tag. Release notes come from the changelog sections attached to each package.
 
 For grouped tags (`syncGitTag`), one release covers all packages in the group.
+
+Set `release: false` to disable GitHub release creation.
+
+```ts
+github({
+  repo: "your-org/your-repo",
+  release: {
+    // create a release as soon as a tag succeeds, without waiting for the whole plan
+    eager: false,
+    create({ tag, pkg, plan }) {
+      return {
+        title: tag,
+        notes: `Released ${pkg.name}`,
+        prerelease: false,
+      };
+    },
+    createGrouped({ tag, packages, plan }) {
+      return {
+        title: tag,
+        notes: packages.map((pkg) => pkg.name).join("\n"),
+      };
+    },
+  },
+});
+```
+
+| Setting         | Default | Description                                                       |
+| --------------- | ------- | ----------------------------------------------------------------- |
+| `eager`         | `false` | Create releases without waiting for every package in the plan     |
+| `create`        | —       | Override release details for a single package                     |
+| `createGrouped` | —       | Override release details when multiple packages share one git tag |

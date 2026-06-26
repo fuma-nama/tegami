@@ -26,10 +26,8 @@ const paper = tegami({
   plugins: [
     github({
       repo: "your-org/your-repo",
-      cli: {
-        versionPr: {
-          base: "main",
-        },
+      versionPr: {
+        base: "main",
       },
     }),
   ],
