@@ -8,10 +8,10 @@ import type { TegamiContext } from "../context";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { WorkspacePackage } from "../graph";
+import { PackageGroup, WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
 import type { BumpType } from "../utils/semver";
-import type { DraftPolicy } from "../plans/draft";
+import type { DraftPolicy, PackageDraft } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
 import z from "zod";
 import type { PackagePublishResult } from "../plans/publish";
@@ -50,13 +50,26 @@ export class NpmPackage extends WorkspacePackage {
 
   initDraft() {
     const defaults = super.initDraft();
-
-    if (this.manifest.publishConfig?.tag) {
-      defaults.npm ??= {};
-      defaults.npm.distTag ??= this.manifest.publishConfig.tag;
-    }
+    defaults.npm = {
+      distTag: this.manifest.publishConfig?.tag,
+    };
 
     return defaults;
+  }
+
+  configureDraft(draft: PackageDraft, group?: PackageGroup): void {
+    super.configureDraft(draft, group);
+
+    const { distTag = group?.options?.npm?.distTag } = this.getPackageOptions().npm ?? {};
+
+    if (distTag) {
+      draft.npm ??= {};
+      draft.npm.distTag = distTag;
+    } else if (draft.prerelease) {
+      draft.npm ??= {};
+      // `npm publish` requires tag for prerelease versions
+      draft.npm.distTag ??= draft.prerelease;
+    }
   }
 }
 

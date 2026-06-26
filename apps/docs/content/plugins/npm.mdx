@@ -54,6 +54,8 @@ npm({
 
 It allows to override `distTag` for npm publish, otherwise, it will read from your `publishConfig` in `package.json`.
 
+When publishing prerelease versions, npm 11+ requires an explicit dist-tag. Tegami infers one from your `prerelease` config (for example, `1.0.0-alpha.0` → `alpha`) when no tag is configured.
+
 ```ts
 tegami({
   packages: {

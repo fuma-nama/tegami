@@ -35,17 +35,9 @@ export abstract class WorkspacePackage {
 
   /** configure an initial draft to match script-level configs. */
   configureDraft(draft: PackageDraft, group?: PackageGroup): void {
-    const groupOptions = group?.options;
-    const {
-      prerelease = groupOptions?.prerelease,
-      npm: { distTag = groupOptions?.npm?.distTag } = {},
-    } = this.opts;
+    const { prerelease = group?.options?.prerelease } = this.opts;
 
     if (prerelease !== undefined) draft.prerelease = prerelease;
-    if (distTag) {
-      draft.npm ??= {};
-      draft.npm.distTag = distTag;
-    }
   }
 }
 

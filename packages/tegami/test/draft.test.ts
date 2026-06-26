@@ -80,6 +80,9 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md",
           ],
+          "npm": {
+            "distTag": undefined,
+          },
           "type": "major",
         },
       }

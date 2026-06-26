@@ -78,7 +78,7 @@ Useful release note.
       coreDistTag: draft.getPackageDraft("npm:@acme/core")?.npm?.distTag,
       uiDistTag: draft.getPackageDraft("npm:@acme/ui")?.npm?.distTag,
     }).toEqual({
-      coreDistTag: undefined,
+      coreDistTag: "alpha",
       uiDistTag: "next",
     });
 
