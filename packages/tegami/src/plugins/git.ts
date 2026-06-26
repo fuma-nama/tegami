@@ -73,7 +73,7 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
       }
     },
     async resolvePlanStatus({ plan }) {
-      const pendingTags = getPendingTags(plan, (pkg) => pkg.preflight!.publish ?? true);
+      const pendingTags = getPendingTags(plan, (pkg) => pkg.preflight!.publish);
       if (pendingTags.size === 0) return;
 
       try {

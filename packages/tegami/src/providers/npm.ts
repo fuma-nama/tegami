@@ -219,22 +219,10 @@ export function npm({
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage)) return;
-      if (pkg.manifest.private === true) return { publish: false };
 
-      const registry = pkg.manifest.publishConfig?.registry;
-      const base = (registry ?? "https://registry.npmjs.org").replace(/\/$/, "");
-      const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
-        headers: { Accept: "application/json" },
-      });
-
-      if (response.status === 404) return { publish: true };
-      if (!response.ok) {
-        throw new Error(
-          `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
-        );
-      }
-
-      return { publish: false };
+      return {
+        publish: pkg.manifest.private !== true && !(await isPackagePublished(pkg)),
+      };
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {
@@ -508,6 +496,23 @@ async function publish(
   return {
     type: "published",
   };
+}
+
+async function isPackagePublished(pkg: NpmPackage): Promise<boolean> {
+  const registry = pkg.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
+  const base = registry.replace(/\/$/, "");
+  const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    throw new Error(
+      `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+    );
+  }
+
+  return true;
 }
 
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
