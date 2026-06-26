@@ -1,13 +1,24 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { tegami } from "../src";
 import type { TegamiPlugin } from "../src/types";
+import {
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 const tempDirs: string[] = [];
 
+beforeEach(() => {
+  installRegistryFetchMock();
+  mockRegistryMissing();
+});
+
 afterEach(async () => {
+  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 

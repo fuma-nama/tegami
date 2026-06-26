@@ -107,6 +107,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     cli: cliOptions = {},
   } = options;
 
+  let renderer: ChangelogRenderer | undefined;
+  function getRenderer(context: TegamiContext): ChangelogRenderer {
+    renderer ??= createChangelogRenderer(context);
+    return renderer;
+  }
+
   async function createRelease(
     context: TegamiContext,
     tag: string,
@@ -120,7 +126,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     return {
       title:
         release.title ?? formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
-      notes: release.notes ?? (await defaultNotes(context, pkg, packagePlan)),
+      notes: release.notes ?? (await defaultNotes(getRenderer(context), pkg, packagePlan)),
       prerelease: release.prerelease ?? getPrerelease(pkg.version) !== null,
     };
   }
@@ -135,7 +141,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     if (release === false) return;
     return {
       title: release.title ?? tag,
-      notes: release.notes ?? (await defaultGroupedNotes(context, plan, packages)),
+      notes: release.notes ?? (await defaultGroupedNotes(getRenderer(context), plan, packages)),
       prerelease: release.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
     };
   }
@@ -210,8 +216,10 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         };
       },
       async afterPublishAll({ plan }) {
-        const repo = this.github?.repo;
+        const { repo, token } = this.github ?? {};
         const groups = new Map<string, WorkspacePackage[]>();
+
+        if (!repo || !token) return;
 
         for (const [id, packagePlan] of plan.packages) {
           if (!eagerRelease && packagePlan.publishResult!.type === "failed") {
@@ -244,17 +252,13 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             }
 
             if (hasFailed || !hasPublished) return;
+            if (await getReleaseByTag(repo, tag, token)) return;
 
             const release =
               packages.length > 1
                 ? await createGroupedRelease(this, tag, plan, packages)
                 : await createRelease(this, tag, plan, packages[0]!);
             if (!release) return;
-
-            const token = this.github?.token;
-            if (!repo) return;
-
-            if (await getReleaseByTag(repo, tag, token)) return;
 
             await createGitHubRelease(repo, {
               tag,
@@ -369,56 +373,60 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
   return result.stdout.trim().length > 0;
 }
 
-function formatCommitLink(commit: string, repo?: string): string {
-  const short = commit.slice(0, 7);
-  if (!repo) return `\`${short}\``;
+type ChangelogRenderer = (entry: ChangelogEntry) => Promise<string>;
 
-  return `[${short}](https://github.com/${repo}/commit/${commit})`;
-}
+function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
+  const cache = new Map<string, Promise<string | undefined>>();
 
-async function resolveChangelogEntryCommit(
-  context: TegamiContext,
-  filename: string,
-): Promise<string | undefined> {
-  const relativePath = relative(context.cwd, join(context.changelogDir, filename));
-  const result = await x(
-    "git",
-    ["log", "--diff-filter=A", "-1", "--format=%H", "--", relativePath],
-    {
-      nodeOptions: { cwd: context.cwd },
-    },
-  );
+  async function resolveFileCommit(filename: string): Promise<string | undefined> {
+    const relativePath = relative(context.cwd, join(context.changelogDir, filename));
+    const result = await x(
+      "git",
+      ["log", "--diff-filter=A", "-1", "--format=%H", "--", relativePath],
+      {
+        nodeOptions: { cwd: context.cwd },
+      },
+    );
 
-  if (result.exitCode !== 0) return;
-  return result.stdout.trim() || undefined;
-}
-
-async function renderChangelogEntryNotes(
-  context: TegamiContext,
-  entry: ChangelogEntry,
-): Promise<string> {
-  const repo = context.github?.repo;
-  const commit = await resolveChangelogEntryCommit(context, entry.filename);
-  const commitSuffix = commit ? ` (${formatCommitLink(commit, repo)})` : "";
-  const lines: string[] = [];
-
-  for (const section of entry.sections) {
-    lines.push(`### ${section.title}${commitSuffix}`, "");
-    if (section.content) lines.push(section.content, "");
+    if (result.exitCode !== 0) return;
+    return result.stdout.trim() || undefined;
   }
 
-  return lines.join("\n").trim();
+  function formatCommitLink(commit: string): string {
+    const short = commit.slice(0, 7);
+    const repo = context.github?.repo;
+    if (!repo) return `\`${short}\``;
+
+    return `[${short}](https://github.com/${repo}/commit/${commit})`;
+  }
+
+  return async (entry) => {
+    let commitPromise = cache.get(entry.filename);
+    if (!commitPromise) {
+      commitPromise = resolveFileCommit(entry.filename);
+      cache.set(entry.filename, commitPromise);
+    }
+
+    const commit = await commitPromise;
+    const commitSuffix = commit ? ` (${formatCommitLink(commit)})` : "";
+    const lines: string[] = [];
+
+    for (const section of entry.sections) {
+      lines.push(`### ${section.title}${commitSuffix}`, "");
+      if (section.content) lines.push(section.content, "");
+    }
+
+    return lines.join("\n").trim();
+  };
 }
 
 async function defaultNotes(
-  context: TegamiContext,
+  renderer: ChangelogRenderer,
   pkg: WorkspacePackage,
   packagePlan?: PackagePublishPlan,
 ): Promise<string> {
   if (packagePlan && packagePlan.changelogs.length > 0) {
-    const notes = await Promise.all(
-      packagePlan.changelogs.map(async (entry) => renderChangelogEntryNotes(context, entry)),
-    );
+    const notes = await Promise.all(packagePlan.changelogs.map(renderer));
 
     return notes.join("\n\n");
   }
@@ -427,7 +435,7 @@ async function defaultNotes(
 }
 
 async function defaultGroupedNotes(
-  context: TegamiContext,
+  renderer: ChangelogRenderer,
   plan: PublishPlan,
   packages: WorkspacePackage[],
 ): Promise<string> {
@@ -451,9 +459,7 @@ async function defaultGroupedNotes(
   ];
 
   if (changelogs.size > 0) {
-    const notes = await Promise.all(
-      Array.from(changelogs.values(), (entry) => renderChangelogEntryNotes(context, entry)),
-    );
+    const notes = await Promise.all(Array.from(changelogs.values(), renderer));
 
     sections.push("", notes.join("\n\n"));
   }

@@ -170,7 +170,6 @@ export async function findIssueCommentByPrefix(
   token?: string,
 ): Promise<number | undefined> {
   const { owner, repo: name } = parseGitHubRepo(repo);
-  const comments: Array<{ id: number; body: string }> = [];
   let page = 1;
 
   while (true) {
@@ -186,24 +185,30 @@ export async function findIssueCommentByPrefix(
     const batch = (await response.json()) as Array<{ id: number; body: string }>;
     if (batch.length === 0) break;
 
-    comments.push(...batch);
+    const comment = batch.find((comment) => comment.body.startsWith(prefix));
+    if (comment) return comment.id;
+
     if (batch.length < 100) break;
     page += 1;
   }
-
-  return comments.find((comment) => comment.body.startsWith(prefix))?.id;
 }
 
 export async function updateIssueComment(
+  repo: string,
   commentId: number,
   body: string,
   token?: string,
 ): Promise<void> {
-  const response = await githubRequest(`/repos/issues/comments/${commentId}`, token, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ body }),
-  });
+  const { owner, repo: name } = parseGitHubRepo(repo);
+  const response = await githubRequest(
+    `/repos/${owner}/${name}/issues/comments/${commentId}`,
+    token,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to update pull request comment.");

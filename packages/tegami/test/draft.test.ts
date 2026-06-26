@@ -8,6 +8,11 @@ import { tegami } from "../src";
 import type { PackageManifest } from "../src/schemas";
 import { getPendingPackageIds, normalizePackagePlan } from "./helpers/draft";
 import { writePublishLock } from "./helpers/lock";
+import {
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  uninstallRegistryFetchMock,
+} from "./helpers/registry-fetch";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -18,9 +23,12 @@ const exec = vi.mocked(x);
 
 beforeEach(() => {
   exec.mockReset();
+  installRegistryFetchMock();
+  mockRegistryMissing();
 });
 
 afterEach(async () => {
+  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 

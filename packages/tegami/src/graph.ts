@@ -151,13 +151,23 @@ export class PackageGraph {
 
   removeGroupMember(group: string, id: string): void {
     const entry = this.groups.get(group);
-    if (!entry) return;
+    const pkg = this.packages.get(id);
+    if (!entry || !pkg || pkg.group !== entry) return;
 
     const index = entry.packages.findIndex((pkg) => pkg.id === id);
     if (index >= 0) entry.packages.splice(index, 1);
+    pkg.group = undefined;
   }
 
   unregisterGroup(name: string): void {
+    const group = this.groups.get(name);
+    if (!group) return;
+
+    for (const pkg of group.packages) {
+      const entry = this.packages.get(pkg.id);
+      if (entry?.group === group) entry.group = undefined;
+    }
+
     this.groups.delete(name);
   }
 }

@@ -444,6 +444,7 @@ packages: ["@acme/core"]
     await postPrComment("### Tegami\n");
 
     expect(updateIssueComment).toHaveBeenCalledWith(
+      "acme/repo",
       12345,
       "<!-- tegami -->\n### Tegami\n",
       undefined,
@@ -462,6 +463,7 @@ packages: ["@acme/core"]
     await postPrComment(preview);
 
     expect(updateIssueComment).toHaveBeenCalledWith(
+      "acme/repo",
       12345,
       "<!-- tegami -->\n### Tegami\n\n`code` and key=value\n",
       undefined,

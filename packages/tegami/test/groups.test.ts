@@ -178,6 +178,29 @@ Breaking note.
 
     expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "tag")).toHaveLength(1);
   });
+
+  test("clears package group references when members or groups are removed", () => {
+    const graph = new PackageGraph([
+      workspacePackage("@acme/core", "/repo/packages/core"),
+      workspacePackage("@acme/ui", "/repo/packages/ui"),
+    ]);
+    graph.registerGroup("acme", {});
+    graph.registerGroup("next", {});
+
+    graph.addGroupMember("acme", "test:@acme/core");
+    graph.removeGroupMember("acme", "test:@acme/core");
+    graph.addGroupMember("next", "test:@acme/core");
+
+    expect(graph.getPackageGroup("test:@acme/core")?.name).toBe("next");
+    expect(graph.getGroup("acme")?.packages).toEqual([]);
+
+    graph.addGroupMember("next", "test:@acme/ui");
+    graph.unregisterGroup("next");
+
+    expect(graph.getGroup("next")).toBeUndefined();
+    expect(graph.getPackageGroup("test:@acme/core")).toBeUndefined();
+    expect(graph.getPackageGroup("test:@acme/ui")).toBeUndefined();
+  });
 });
 
 function createGroupContext(options: TegamiContext["options"]): TegamiContext {

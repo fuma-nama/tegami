@@ -148,7 +148,7 @@ export async function postPrComment(body: string): Promise<void> {
   const existingId = await findIssueCommentByPrefix(repo, pr.number, COMMENT_MARKER, token);
 
   if (existingId) {
-    await updateIssueComment(existingId, markedBody, token);
+    await updateIssueComment(repo, existingId, markedBody, token);
     return;
   }
 

@@ -65,13 +65,13 @@ describe("github release plugin", () => {
       ]),
     });
 
-    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", undefined);
+    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
     expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
       tag: "@acme/core@1.0.1",
       title: "Release 1.0.1",
       notes: "Notes for @acme/core",
       prerelease: true,
-      token: undefined,
+      token: "test-token",
     });
   });
 
@@ -82,15 +82,44 @@ describe("github release plugin", () => {
 
     const context = {
       ...publishContext(),
-      github: { repo: "acme/repo" },
+      github: { repo: "acme/repo", token: "test-token" },
     };
 
     await plugin.afterPublishAll?.call(context, {
       plan: releasePlan(context, [{}]),
     });
 
-    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", undefined);
+    expect(getReleaseByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
     expect(createGitHubRelease).not.toHaveBeenCalled();
+  });
+
+  test("skips default release note work when the release already exists", async () => {
+    getReleaseByTag.mockResolvedValue({ id: 1 });
+    exec.mockImplementation((command, args = []) => {
+      if (command === "git" && args[0] === "log") {
+        throw new Error("git log should not run for an existing release");
+      }
+
+      return commandResult();
+    });
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext();
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {
+          changelogs: [
+            testChangelogEntry({
+              sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
+            }),
+          ],
+        },
+      ]),
+    });
+
+    expect(createGitHubRelease).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   test("does not create releases when any package failed", async () => {
@@ -131,7 +160,7 @@ describe("github release plugin", () => {
       title: "@acme/core@1.0.1",
       notes: "### Add proxy server\n\nSome description.",
       prerelease: false,
-      token: undefined,
+      token: "test-token",
     });
   });
 
@@ -150,7 +179,7 @@ describe("github release plugin", () => {
 
     const context = {
       ...publishContext(),
-      github: { repo: "acme/repo" },
+      github: { repo: "acme/repo", token: "test-token" },
     };
 
     await plugin.afterPublishAll?.call(context, {
@@ -172,7 +201,7 @@ describe("github release plugin", () => {
       notes:
         "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
       prerelease: false,
-      token: undefined,
+      token: "test-token",
     });
   });
 
@@ -196,7 +225,7 @@ describe("github release plugin", () => {
       title: "@acme/core@1.0.1-beta.0",
       notes: "Published @acme/core@1.0.1-beta.0.",
       prerelease: true,
-      token: undefined,
+      token: "test-token",
     });
   });
 
@@ -222,8 +251,36 @@ describe("github release plugin", () => {
       title: "acme@1.0.1",
       notes: "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
       prerelease: false,
-      token: undefined,
+      token: "test-token",
     });
+  });
+
+  test("reuses changelog commit lookups across package releases", async () => {
+    exec.mockImplementation((command, args = []) => {
+      if (command === "git" && args[0] === "log") {
+        return commandResult({
+          stdout: "abc1234567890abcdef1234567890abcdef123456\n",
+        });
+      }
+
+      return commandResult();
+    });
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
+    const sharedChangelog = testChangelogEntry({
+      sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
+    });
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        { name: "@acme/core", changelogs: [sharedChangelog] },
+        { name: "@acme/ui", changelogs: [sharedChangelog] },
+      ]),
+    });
+
+    expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "log")).toHaveLength(1);
+    expect(createGitHubRelease).toHaveBeenCalledTimes(2);
   });
 
   test("uses onCreateGroupedRelease for packages sharing a git tag", async () => {
@@ -254,7 +311,7 @@ describe("github release plugin", () => {
       title: "Group release @acme/core",
       notes: "@acme/core, @acme/ui",
       prerelease: false,
-      token: undefined,
+      token: "test-token",
     });
   });
 });
@@ -320,7 +377,7 @@ describe("github version pull request", () => {
       expect(updatePullRequest).toHaveBeenCalledWith("acme/repo", 42, {
         title: "Version Packages",
         body: expect.stringContaining("Merge this PR to publish the versioned packages."),
-        token: undefined,
+        token: "test-token",
       });
       expect(createPullRequest).not.toHaveBeenCalled();
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
@@ -411,7 +468,7 @@ describe("github version pull request", () => {
         body: expect.stringContaining("Merge this PR to publish the versioned packages."),
         head: "tegami/version-packages",
         base: "main",
-        token: undefined,
+        token: "test-token",
       });
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
@@ -537,7 +594,7 @@ function publishContext(packages: TestPackage[] = [testPackage()]): TegamiContex
     options: {},
     plugins: [],
     graph: new PackageGraph(packages),
-    github: { repo: "acme/repo" },
+    github: { repo: "acme/repo", token: "test-token" },
   };
 }
 
