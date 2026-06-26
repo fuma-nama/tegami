@@ -103,6 +103,36 @@ describe("npm registry preflight", () => {
       },
     });
   });
+
+  test("runs publish lifecycle scripts before packing with bun", async () => {
+    const context = await createContext("bun");
+    const pkg = context.graph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+    pkg.manifest.scripts = {
+      prepublishOnly: "node prepublish.js",
+      prepare: "node prepare.js",
+    };
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
+    const tarballPath = join(pkg.path, "pkg.tgz");
+
+    exec.mockResolvedValue(execResult());
+    const plan = await loadPlan(context);
+
+    await npmPlugin.publish?.call(context, { pkg, plan });
+
+    expect(exec).toHaveBeenNthCalledWith(1, "bun", ["run", "prepublishOnly"], {
+      nodeOptions: { cwd: pkg.path },
+    });
+    expect(exec).toHaveBeenNthCalledWith(2, "bun", ["run", "prepare"], {
+      nodeOptions: { cwd: pkg.path },
+    });
+    expect(exec).toHaveBeenNthCalledWith(3, "bun", ["pm", "pack", "--filename", tarballPath], {
+      nodeOptions: { cwd: pkg.path },
+    });
+    expect(exec).toHaveBeenNthCalledWith(4, "npm", ["publish", tarballPath, "--tag", "latest"], {
+      nodeOptions: { cwd: pkg.path },
+    });
+  });
 });
 
 describe("publish plan status", () => {
