@@ -1,3 +1,107 @@
+## tegami@0.2.0
+
+### Redesign GitHub plugin options
+
+GitHub release and Version Packages PR settings are now top-level options:
+
+- `eagerRelease` → `release: { eager: true }`
+- `onCreateRelease` → `release.create`
+- `onCreateGroupedRelease` → `release.createGrouped`
+- `onCreateVersionPullRequest` → `versionPr.create`
+- `cli.versionPr` → `versionPr` (use `forceCreate: true` to enable locally)
+
+Set `release: false` to disable GitHub release creation.
+
+### Add `check-publish` CLI command
+
+`tegami check-publish` checks whether a publish lock has packages waiting to be published. It exits `0` when publishing is needed and `1` when it is not, so CI workflows can skip unnecessary steps without actually trying to publish packages.
+
+```bash
+if tegami check-publish; then
+  # other commands
+fi
+```
+
+### Use HTTP APIs instead of CLI tools
+
+GitHub releases, pull requests, and comments now use the GitHub REST API instead of the `gh` CLI. npm publish preflight checks the registry over HTTP instead of running `npm view` or `pnpm view`.
+
+Git operations and package publishing still use their respective CLI tools.
+
+### Lock files update by default
+
+`updateLockFile` now defaults to `true` for the npm and Cargo providers. Lockfiles are refreshed automatically after versioning unless you set `updateLockFile: false`.
+
+### v0.2 redesign
+
+Tegami 0.2 separates versioning from publishing and renames several core types.
+
+### Publish lock replaces the publish plan file
+
+`tegami version` now writes `.tegami/publish-lock.yaml` instead of a JSON publish plan file.
+
+- Config option `planPath` is now `lockPath` (default: `.tegami/publish-lock.yaml`).
+- The lock uses YAML namespaces (`core:packages`, `core:changelogs`, `npm:packages`, …) instead of a single JSON document.
+- Packages must have `updated: true` in the lock to be published. New packages added after versioning are excluded until the next release cycle.
+
+### Draft and publish plan API
+
+| v0.1                          | v0.2                                                                 |
+| ----------------------------- | -------------------------------------------------------------------- |
+| `DraftPlan`                   | `Draft`                                                              |
+| `PackagePlan`                 | `PackageDraft`                                                       |
+| `createDraftPlan()`           | `createDraft()`                                                      |
+| `draft.getPackagePlans()`     | `draft.getPackageDrafts()`                                           |
+| JSON `PlanStore` on disk      | `PublishLock` YAML on disk + in-memory `PublishPlan` at publish time |
+| `publish()` → `PublishResult` | `publish()` → `PublishPlan \| "skipped"`                             |
+| `cleanupPublishPlan()`        | `cleanupPublishLock()`                                               |
+
+`PublishPlan` is built in memory when you call `publish()`. It is not written to disk.
+
+### Plugin hook renames
+
+| v0.1                     | v0.2                                                    |
+| ------------------------ | ------------------------------------------------------- |
+| `initPlan`               | `initDraft`                                             |
+| `applyPlan`              | `applyDraft`                                            |
+| `cli.publishPlanCreated` | `cli.draftCreated`                                      |
+| `cli.publishPlanApplied` | `cli.draftApplied`                                      |
+| `createRegistryClient`   | removed — use `publishPreflight` / `publish` on plugins |
+| `RegistryClient`         | removed                                                 |
+
+New hooks:
+
+- `initPublishLock` — write plugin data into the publish lock when a draft is applied.
+- `initPublishPlan` — enrich the in-memory publish plan from the lock (e.g. git tags, npm dist-tags).
+- `publishPreflight` — check registries and declare publish order before publishing.
+- `resolvePlanStatus` — report whether post-publish work (git tags, GitHub releases) is complete.
+
+`resolvePlanStatus`, `afterPublish`, and `afterPublishAll` now receive a `PublishPlan` instead of `PublishResult` / `PlanStore`.
+
+### LogGenerator
+
+Custom changelog generators now receive `{ pkg, packageDraft, draft }` instead of `{ packageId, packageName, version, changelogs, plan, unstable_draft }`.
+
+### Package options
+
+`packages.<name>.publish` was removed from Tegami config. Control npm publishing with `private: true` or `publishConfig` in `package.json` instead.
+
+### GitHub plugin
+
+GitHub release and Version Packages PR options moved to the top level:
+
+- `eagerRelease` → `release: { eager: true }`
+- `onCreateRelease` → `release.create`
+- `onCreateGroupedRelease` → `release.createGrouped`
+- `onCreateVersionPullRequest` → `versionPr.create`
+- `cli.versionPr` → `versionPr` (use `forceCreate: true` to enable locally)
+
+Release callbacks now receive `{ tag, pkg, plan }` (or grouped equivalents) instead of `PackagePublishResult`. Set `release: false` to disable GitHub releases.
+
+### Support `conventionalCommits` option
+
+When enabled, it generates changelogs from commits when you run `tegami version`.
+
 ## tegami@0.1.6
 
 ### Check GitHub release before creating
