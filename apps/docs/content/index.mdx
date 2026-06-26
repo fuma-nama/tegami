@@ -11,15 +11,39 @@ description: Manage changelogs, versioning, and publishing for monorepos.
 
 Tegami (手紙) is a tool that manages changelogs, versioning, and publishing. Describe changes in changelog files, bump your packages, and publish to registries like npm and crates.io.
 
+The key idea of Tegami:
+
+- **It is a script**: you create a Node.js script with Tegami, and use it to bump versions & publish packages, rather than using a CLI tool or GitHub bot. This keeps the setup simple and familiar if you started from a custom workflow.
+- **Plugin first**: Most funtionalities are powered by plugins, this makes Tegami flexible enough to fit in any workflows.
+
 Tegami was mainly created as a better alternative for Changesets, with solutions to some unsolved issues & problems.
 
 - **Cross-registry version management**: support across npm, cargo, and other registries via plugins.
-- **Weird update dependencies bump**: changesets will generate a major bump for `workspace:*` in peer dependencies, but it is not configurable. Tegami allows flexible dependencies bump behaviour, and it detects package groups to avoid unnecessary bumps.
 - **Programmatic API**: allows robust use cases of the tool, such as using the `willPublish()` hook on plugins to build packages only when published.
 
 ## Release cycle
 
-The workflow has three stages. Each stage maps to a CLI command or API method.
+The workflow has three phases:
+
+```mermaid
+flowchart TD
+  subgraph changelogs [Changelogs]
+    A[Describe changes]
+  end
+
+  subgraph version [Version]
+    B[Compute bumps]
+    C[Update manifests]
+    D[Lock release intent]
+  end
+
+  subgraph publish [Publish]
+    E[Ship to registries]
+    F[Tags & releases]
+  end
+
+  A --> B --> C --> D --> E --> F
+```
 
 ### Changelogs [step]
 

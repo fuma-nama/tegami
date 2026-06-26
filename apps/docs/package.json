@@ -10,6 +10,7 @@
     "types:check": "fumadocs-mdx && tsc --noEmit"
   },
   "dependencies": {
+    "beautiful-mermaid": "^1.1.3",
     "fumadocs-core": "^16.10.5",
     "fumadocs-mdx": "^15.0.12",
     "fumadocs-typescript": "^5.2.6",

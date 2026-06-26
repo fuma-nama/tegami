@@ -8,6 +8,7 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import { TypeTable } from "fumadocs-ui/components/type-table";
 import { Image } from "fumapress/image";
 import { imagePlugin } from "fumapress/plugins/image/vercel";
+import { Mermaid } from "./src/mermaid";
 
 export default defineConfig({
   content: docs.toFumadocsSource(),
@@ -40,6 +41,7 @@ export default defineConfig({
         return {
           ...defaultMdxComponents,
           TypeTable,
+          Mermaid,
         };
       },
     }),
