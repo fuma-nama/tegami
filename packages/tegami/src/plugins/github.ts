@@ -135,9 +135,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       const originalVersion = cliOriginalPackageVersions.get(pkg.id) ?? pkg.version;
       if (originalVersion === pkg.version) continue;
 
-      let line = `- **${pkg.name}**: ${originalVersion} → ${pkg.version}`;
-      line += formatNpmDistTag(packageDraft.npm?.distTag);
-      packageLines.push(line);
+      packageLines.push(
+        `| \`${pkg.name}\` | \`${originalVersion}\` | \`${pkg.version}\`${formatNpmDistTag(packageDraft.npm?.distTag)} |`,
+      );
     }
 
     const changelogLines: string[] = [];
@@ -149,13 +149,11 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       }
     }
 
-    const sections = [
-      "## Summary",
-      "",
-      "Merge this PR to publish the versioned packages.",
-      "",
-      ...packageLines,
-    ];
+    const sections = ["## Summary", "", "Merge this PR to publish the versioned packages.", ""];
+
+    if (packageLines.length > 0) {
+      sections.push("| Package | From | To |", "| --- | --- | --- |", ...packageLines);
+    }
 
     if (changelogLines.length > 0) {
       sections.push("", "## Changelogs", ...changelogLines);

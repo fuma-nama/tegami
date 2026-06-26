@@ -524,7 +524,7 @@ describe("github version pull request", () => {
 
       expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
         title: "Version Packages",
-        body: expect.stringContaining("Merge this PR to publish the versioned packages."),
+        body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages",
         base: "main",
         token: "test-token",

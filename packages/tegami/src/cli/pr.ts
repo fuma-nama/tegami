@@ -98,11 +98,12 @@ export async function buildPrPreview(
   }
 
   if (prChangelogs.length > 0) {
-    lines.push("#### Changelogs in this PR", "");
+    lines.push("#### Changelogs in this PR", "", "| Changelog | Title |", "| --- | --- |");
 
     for (const entry of prChangelogs) {
-      const title = entry.sections[0]?.title ?? entry.filename;
-      lines.push(`- \`${entry.filename}\` — ${title}`);
+      for (const section of entry.sections) {
+        lines.push(`| \`${entry.filename}\` | ${section.title} |`);
+      }
     }
 
     lines.push("");

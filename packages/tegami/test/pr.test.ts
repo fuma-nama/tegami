@@ -111,7 +111,7 @@ packages:
     expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` |");
     expect(body).toContain("| `@acme/ui` | patch | `2.0.0` → `2.0.1` |");
     expect(body).toContain("#### Changelogs in this PR");
-    expect(body).toContain("- `2026-06-19-core.md` — Support auto changelogs");
+    expect(body).toContain("| `2026-06-19-core.md` | Support auto changelogs |");
     expect(body).not.toContain("2026-06-19-ui.md");
   });
 
@@ -311,7 +311,7 @@ packages: ["@acme/core"]
     const body = await buildPrPreview(context, draft);
 
     expect(body).toContain("#### Changelogs in this PR");
-    expect(body).toContain("- `2026-06-19-core.md` — Support auto changelogs");
+    expect(body).toContain("| `2026-06-19-core.md` | Support auto changelogs |");
     expect(exec).toHaveBeenCalledWith(
       "git",
       ["diff", "--name-only", "--diff-filter=ACMRD", "base-sha...head-sha", "--", ".tegami/"],
