@@ -84,7 +84,7 @@ export type TegamiPluginOption = TegamiPlugin | TegamiPluginOption[];
 export interface TegamiPlugin {
   name: string;
   enforce?: "pre" | "default" | "post";
-  /** when Tegami initializes */
+  /** When Tegami initializes */
   init?(this: TegamiContext): Awaitable<void>;
   /** Resolve workspace packages and dependency metadata into the shared graph. */
   resolve?(this: TegamiContext): Awaitable<void>;
@@ -132,7 +132,7 @@ export interface TegamiPlugin {
     opts: { pkg: WorkspacePackage },
   ): Awaitable<false | void | undefined>;
 
-  /** Called after a package is published, skipped, or failed. */
+  /** Called after a package is published successfully, or failed. */
   afterPublish?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage; plan: PublishPlan },

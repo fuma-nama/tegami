@@ -5,6 +5,7 @@ import { bumpVersion } from "./utils/semver";
 /** Package discovered in the workspace. */
 export abstract class WorkspacePackage {
   abstract readonly name: string;
+  /** absolute path */
   abstract readonly path: string;
   abstract readonly manager: string;
   abstract readonly version: string;

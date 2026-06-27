@@ -139,6 +139,7 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
     const packagePlan = plan.packages.get(pkg.id);
     if (!packagePlan) return;
     packagePlan.publishResult = publishResult;
+    if (publishResult.type === "skipped") return;
 
     for (const plugin of context.plugins) {
       await handlePluginError(plugin, "afterPublish", () =>
@@ -150,7 +151,7 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
     }
   };
 
-  for (const id of resolvePublishTargets(plan)) {
+  publishLoop: for (const id of resolvePublishTargets(plan)) {
     const pkg = context.graph.get(id)!;
 
     if (dryRun) {
@@ -160,58 +161,38 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
       continue;
     }
 
-    let isSkipped = false;
-
     for (const plugin of context.plugins) {
       const next = await handlePluginError(plugin, "willPublish", () =>
         plugin.willPublish?.call(context, { pkg }),
       );
 
       if (next === false) {
-        isSkipped = true;
-        break;
+        continue publishLoop;
       }
     }
 
-    if (isSkipped) {
-      await onPublishResult(pkg, {
-        type: "skipped",
-      });
-      continue;
-    }
-
-    let published = false;
     for (const plugin of context.plugins) {
       const publishResult = await handlePluginError(plugin, "publish", () =>
         plugin.publish?.call(context, { pkg, plan }),
       );
 
       if (publishResult) {
-        published = true;
         await onPublishResult(pkg, publishResult);
-        break;
+        continue publishLoop;
       }
     }
 
-    if (!published) {
-      await onPublishResult(pkg, {
-        type: "failed",
-        error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
-      });
-    }
+    await onPublishResult(pkg, {
+      type: "failed",
+      error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
+    });
   }
 
-  await Promise.all(
-    Array.from(plan.packages, async ([id, packagePlan]) => {
-      const pkg = context.graph.get(id)!;
-
-      // for packages not listed in publish targets
-      if (!packagePlan.publishResult)
-        await onPublishResult(pkg, {
-          type: "skipped",
-        });
-    }),
-  );
+  for (const packagePlan of plan.packages.values()) {
+    packagePlan.publishResult ??= {
+      type: "skipped",
+    };
+  }
 
   for (const plugin of context.plugins) {
     await handlePluginError(plugin, "afterPublishAll", () =>

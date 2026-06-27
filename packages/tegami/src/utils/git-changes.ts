@@ -1,4 +1,4 @@
-import { isAbsolute, join, normalize, relative } from "node:path";
+import { join, relative } from "node:path";
 import { x } from "tinyexec";
 import type { PackageGraph, WorkspacePackage } from "../graph";
 
@@ -13,12 +13,20 @@ export async function getChangedPackages(
 export async function getChangedFilePaths(cwd: string): Promise<string[]> {
   const files = new Set<string>();
 
-  for (const args of [
-    ["diff", "--name-only"],
-    ["diff", "--cached", "--name-only"],
-  ]) {
-    await addGitOutput(files, cwd, args);
-  }
+  await Promise.all(
+    [
+      ["diff", "--name-only"],
+      ["diff", "--cached", "--name-only"],
+    ].map(async (args) => {
+      const result = await x("git", args, { nodeOptions: { cwd } });
+      if (result.exitCode !== 0) return;
+
+      for (const line of result.stdout.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed) files.add(trimmed);
+      }
+    }),
+  );
 
   return Array.from(files);
 }
@@ -32,8 +40,10 @@ export function resolveChangedPackages(
   const matched = new Map<string, WorkspacePackage>();
 
   for (const file of files) {
+    const fullPath = join(cwd, file);
+
     for (const pkg of packages) {
-      if (isUnderDir(file, pkg.path, cwd)) {
+      if (!relative(pkg.path, fullPath).startsWith("..")) {
         matched.set(pkg.id, pkg);
         break;
       }
@@ -41,21 +51,4 @@ export function resolveChangedPackages(
   }
 
   return [...matched.values()];
-}
-
-function isUnderDir(file: string, dir: string, cwd: string): boolean {
-  const absolute = join(cwd, file);
-  const pkg = normalize(dir);
-  const rel = relative(pkg, absolute);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-async function addGitOutput(files: Set<string>, cwd: string, args: string[]): Promise<void> {
-  const result = await x("git", args, { nodeOptions: { cwd } });
-  if (result.exitCode !== 0) return;
-
-  for (const line of result.stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed) files.add(trimmed);
-  }
 }

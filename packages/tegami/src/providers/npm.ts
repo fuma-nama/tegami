@@ -5,7 +5,7 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
+import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "./npm/schema";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
 import { PackageGroup, WorkspacePackage } from "../graph";
