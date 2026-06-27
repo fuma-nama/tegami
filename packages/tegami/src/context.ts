@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
+import type { PackageOptions, TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
 import { cargo } from "./providers/cargo";
 import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
@@ -63,13 +63,21 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
     graph.registerGroup(name, groupOptions);
   }
 
+  let getPackageOptions: ((pkg: WorkspacePackage) => PackageOptions | undefined) | undefined;
+  if (typeof options.packages === "function") {
+    getPackageOptions = options.packages;
+  } else if (options.packages) {
+    const packages = options.packages;
+    getPackageOptions = (pkg) => packages[pkg.id] ?? packages[pkg.name];
+  }
+
   for (const pkg of graph.getPackages()) {
-    if (ignoreMatchers?.length && ignoreMatchers.some((matcher) => matcher(pkg))) {
+    if (ignoreMatchers && ignoreMatchers.some((matcher) => matcher(pkg))) {
       graph.delete(pkg.id);
       continue;
     }
 
-    const packageOptions = options.packages?.[pkg.id] ?? options.packages?.[pkg.name];
+    const packageOptions = getPackageOptions?.(pkg);
     if (!packageOptions) continue;
 
     pkg.setPackageOptions(packageOptions);

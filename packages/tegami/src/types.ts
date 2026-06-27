@@ -27,8 +27,10 @@ export interface TegamiOptions<Groups extends string = string> {
   lockPath?: string;
   /** Changelog generator used when applying a draft. */
   generator?: LogGenerator;
-  /** Per-package release and publish options keyed by package name. */
-  packages?: Record<string, PackageOptions<NoInfer<Groups>>>;
+  /** Per-package options keyed by package name or a function. */
+  packages?:
+    | Record<string, PackageOptions<NoInfer<Groups>>>
+    | ((pkg: WorkspacePackage) => PackageOptions<NoInfer<Groups>> | undefined);
   plugins?: TegamiPluginOption[];
 
   groups?: Record<Groups, GroupOptions>;
