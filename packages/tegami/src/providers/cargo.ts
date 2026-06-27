@@ -70,6 +70,9 @@ export interface CargoPluginOptions {
    */
   updateLockFile?: boolean;
 
+  /**
+   * Decide how to bump the dependents of a bumped package.
+   */
   bumpDep?: (opts: {
     kind: (typeof DEP_FIELDS)[number];
     name: string;
