@@ -118,7 +118,7 @@ export interface GoPluginOptions {
    */
   updateLockFile?: boolean;
 
-  bumpDep?: (opts: { name: string; version: string }) => BumpType | false;
+  bumpDep?: (opts: { dependent: GoPackage; name: string; version: string }) => BumpType | false;
 }
 
 const packageLockSchema = z.object({
@@ -302,7 +302,7 @@ function depsPolicy(
 
           if (semver.satisfies(plan.bumpVersion(pkg), stripGoVersion(requireVersion))) continue;
 
-          const bumpType = getBumpDepType?.({ name: pkg.name, version: requireVersion });
+          const bumpType = getBumpDepType?.({ name: pkg.name, dependent, version: requireVersion });
           if (bumpType === false) continue;
 
           this.bumpPackage(dependent, {

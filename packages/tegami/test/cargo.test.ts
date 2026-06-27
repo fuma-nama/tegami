@@ -246,6 +246,30 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
 
     await expect(tegami({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
   });
+
+  test("includes cargo crates without a version field in the graph", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-no-version-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "crates/lib"), { recursive: true });
+    await writeFile(
+      join(cwd, "Cargo.toml"),
+      `[workspace]
+members = ["crates/*"]
+`,
+    );
+    await writeFile(
+      join(cwd, "crates/lib/Cargo.toml"),
+      `[package]
+name = "acme_lib"
+`,
+    );
+
+    const graph = await tegami({ cwd })._internal.graph();
+    const pkg = graph.get("cargo:acme_lib");
+
+    expect(pkg).toBeDefined();
+    expect(pkg!.version).toBe("0.0.0");
+  });
 });
 
 async function createMixedWorkspace(): Promise<string> {

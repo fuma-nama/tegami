@@ -74,6 +74,7 @@ export interface CargoPluginOptions {
    * Decide how to bump the dependents of a bumped package.
    */
   bumpDep?: (opts: {
+    dependent: CargoPackage;
     kind: (typeof DEP_FIELDS)[number];
     name: string;
     version: string;
@@ -246,7 +247,12 @@ function depsPolicy(
 
             if (semver.satisfies(plan.bumpVersion(pkg), spec.version)) continue;
 
-            const bumpType = getBumpDepType({ kind, name: pkg.name, version: spec.version });
+            const bumpType = getBumpDepType({
+              kind,
+              dependent,
+              name: pkg.name,
+              version: spec.version,
+            });
             if (bumpType === false) continue;
 
             this.bumpPackage(dependent, {
@@ -321,9 +327,7 @@ function addCargoPackage(
   add: (pkg: CargoPackage) => void,
 ): void {
   const packageInfo = tableValue(manifest.package);
-  const workspacePackage = tableValue(workspaceManifest.workspace)?.package;
   if (!packageInfo?.name) return;
-  if (!packageInfo.version && !tableValue(workspacePackage)?.version) return;
 
   add(new CargoPackage(path, manifest, content, workspaceManifest));
 }

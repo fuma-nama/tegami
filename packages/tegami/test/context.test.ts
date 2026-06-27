@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detect } from "package-manager-detector";
@@ -142,6 +142,23 @@ describe("tegami context", () => {
         "post-b",
       ]
     `);
+  });
+
+  test("includes npm packages without a version field in the graph", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-context-no-version-"));
+    tempDirs.push(cwd);
+    await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+    await mkdir(join(cwd, "packages/lib"), { recursive: true });
+    await writeFile(
+      join(cwd, "packages/lib/package.json"),
+      `${JSON.stringify({ name: "@acme/lib" }, null, 2)}\n`,
+    );
+
+    const context = await createTegamiContext({ cwd });
+    const pkg = context.graph.get("npm:@acme/lib");
+
+    expect(pkg).toBeDefined();
+    expect(pkg!.version).toBe("0.0.0");
   });
 });
 

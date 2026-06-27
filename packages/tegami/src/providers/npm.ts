@@ -166,6 +166,7 @@ export interface NpmPluginOptions {
    * Decide how to bump the dependents of a bumped package.
    */
   bumpDep?: (opts: {
+    dependent: NpmPackage;
     kind: (typeof DEP_FIELDS)[number];
     name: string;
     spec: DependencySpec;
@@ -405,7 +406,7 @@ function depsPolicy(
 
             if (!needsUpdate(spec, plan.bumpVersion(pkg))) continue;
 
-            const bumpType = getBumpDepType({ kind: field, spec, name: k });
+            const bumpType = getBumpDepType({ kind: field, dependent, spec, name: k });
             if (bumpType === false) continue;
 
             this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
@@ -553,12 +554,12 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
     ),
   );
 
-  if (rootManifest?.version) {
+  if (rootManifest?.name) {
     add(new NpmPackage(cwd, rootManifest));
   }
 
   for (const entry of manifests) {
-    if (!entry?.manifest.version) continue;
+    if (!entry) continue;
     add(new NpmPackage(entry.path, entry.manifest));
   }
 }
