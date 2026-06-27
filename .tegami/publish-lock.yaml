@@ -1,15 +1,49 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix failing checks for Git tags\n\nFixed a bug that causes publish plan status checking to fail.\n"
-    filename: 2026-06-26-mquuj71p.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Generate dist tag for npm in prerelease mode\n\n`npm publish` now requires `tag` for prerelease versions.\n"
+    filename: 2026-06-27-mqv6tiot.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix lifecycle hooks for Bun\n\nTegami used `bun pm pack` workaround for Bun, but it doesn't run lifecycle hooks. Tegami now runs the hooks same as other setups.\n"
-    filename: 2026-06-26-mquul60o.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Plugin `afterPublish` no longer fired for skipped packages\n\nThe `afterPublish` hook of plugins will no longer be fired for skipped packages.\n"
+    filename: 2026-06-27-mqwcpkfe.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Add support for Golang\n\nExperimental plugin available at `/plugins/go`.\n"
+    filename: 2026-06-27-mqwfcq94.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: major\n---\n\n## Ready for v1\n\nThis marks all existing APIs as stable & safe to use.\n"
+    filename: 2026-06-27-mqwfe2p2.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support function `packages` option\n\nThe `packages` option can now return package options dynamically.\n"
+    filename: 2026-06-27-mqwidtwo.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: major\n---\n\n## Include packages without `version`\n\nPreviously, packages without a version field defined in `package.json` or `Cargo.toml` will be ignored from graph, now those packages will be included.\n\nThis may add unwanted packages into versioning, please update your `ignore` config if needed.\n"
+    filename: 2026-06-27-mqwix8n1.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix prerelease tag switching\n\nSwitch prerelease tag without triggering another bump.\n"
+    filename: 2026-06-27-mqwjetwh.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n    replay:\n      - 'exit prerelease: tegami'\n---\n\n## Auto replay when prerelease is configured\n\nNo longer need to write replay conditions manually.\n"
+    filename: 2026-06-28-mqwk3fdh.md
     v: 0.0.0
 core:packages:
+  - id: npm:root
+    updated: false
+  - id: npm:docs
+    updated: false
   - changelogIds:
-      - 2026-06-26-mquuj71p.md
-      - 2026-06-26-mquul60o.md
+      - 2026-06-27-mqv6tiot.md
+      - 2026-06-27-mqwcpkfe.md
+      - 2026-06-27-mqwfcq94.md
+      - 2026-06-27-mqwfe2p2.md
+      - 2026-06-27-mqwidtwo.md
+      - 2026-06-27-mqwix8n1.md
+      - 2026-06-27-mqwjetwh.md
+      - 2026-06-28-mqwk3fdh.md
     id: npm:tegami
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
+npm:packages:
+  - id: npm:root
+  - id: npm:docs
+  - distTag: beta
+    id: npm:tegami
+  - id: npm:@repo/typescript-config

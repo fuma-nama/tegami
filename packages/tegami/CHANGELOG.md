@@ -1,3 +1,39 @@
+## tegami@1.0.0-beta.0 (beta)
+
+### Generate dist tag for npm in prerelease mode
+
+`npm publish` now requires `tag` for prerelease versions.
+
+### Plugin `afterPublish` no longer fired for skipped packages
+
+The `afterPublish` hook of plugins will no longer be fired for skipped packages.
+
+### Add support for Golang
+
+Experimental plugin available at `/plugins/go`.
+
+### Ready for v1
+
+This marks all existing APIs as stable & safe to use.
+
+### Support function `packages` option
+
+The `packages` option can now return package options dynamically.
+
+### Include packages without `version`
+
+Previously, packages without a version field defined in `package.json` or `Cargo.toml` will be ignored from graph, now those packages will be included.
+
+This may add unwanted packages into versioning, please update your `ignore` config if needed.
+
+### Fix prerelease tag switching
+
+Switch prerelease tag without triggering another bump.
+
+### Auto replay when prerelease is configured
+
+No longer need to write replay conditions manually.
+
 ## tegami@0.2.1
 
 ### Fix failing checks for Git tags
