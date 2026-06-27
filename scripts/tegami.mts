@@ -12,6 +12,11 @@ const paper = tegami({
       },
     }),
   ],
+  packages: {
+    tegami: {
+      prerelease: "beta",
+    },
+  },
 });
 
 await createCli(paper).parseAsync();
