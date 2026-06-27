@@ -3,18 +3,24 @@ title: Introduction
 description: Manage changelogs, versioning, and publishing for monorepos.
 ---
 
-<Callout type="warn" title="In Beta">
-  This project is still in beta, the API is unstable and may contains bugs, use it at your own risk.
-</Callout>
+![Banner](/banner.png)
 
 ## Introduction
 
-Tegami (手紙) is a tool that manages changelogs, versioning, and publishing. Describe changes in changelog files, bump your packages, and publish to registries like npm and crates.io.
+**Tegami (手紙)** is a tool to manage changelogs, versioning, and publishing.
 
-The key idea of Tegami:
+### Why Tegami?
+
+Previously, to release packages, you have to manually update package versions, workspace dependency ranges, write changelogs, then create a GitHub releases or post to other channels.
+
+With CI, you might roll your own script to automate all processes. **Tegami** is built on this idea: a tool to automate all above into a Node.js script.
+
+The key ideas of Tegami:
 
 - **It is a script**: you create a Node.js script with Tegami, and use it to bump versions & publish packages, rather than using a CLI tool or GitHub bot. This keeps the setup simple and familiar if you started from a custom workflow.
 - **Plugin first**: Most funtionalities are powered by plugins, this makes Tegami flexible enough to fit in any workflows.
+
+### Compared to Alternatives
 
 Tegami was mainly created as a better alternative for Changesets, with solutions to some unsolved issues & problems.
 
@@ -26,28 +32,32 @@ Tegami was mainly created as a better alternative for Changesets, with solutions
 The workflow has three phases:
 
 ```mermaid
-flowchart TD
-  subgraph changelogs [Changelogs]
-    A[Describe changes]
+flowchart LR
+  subgraph Changelogs
+    direction TB
+    A1[Markdown Files]
+    A2[Conventional Commits]
   end
 
-  subgraph version [Version]
+  subgraph Version
+    direction TB
     B[Compute bumps]
     C[Update manifests]
     D[Lock release intent]
   end
 
-  subgraph publish [Publish]
+  subgraph Publish
+    direction TB
     E[Ship to registries]
     F[Tags & releases]
   end
 
-  A --> B --> C --> D --> E --> F
+  Changelogs --> Version --> Publish
 ```
 
 ### Changelogs [step]
 
-Create changelog files under `.tegami/` directory. Each file lists which packages changed and how.
+Describe your changes using Markdown files under `.tegami/` directory, or [conventional commits](https://conventionalcommits.org/en/v1.0.0).
 
 ### Version [step]
 
