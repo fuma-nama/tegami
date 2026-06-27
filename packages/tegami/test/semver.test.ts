@@ -24,6 +24,8 @@ describe("semver helpers", () => {
   test("does not bump when prerelease config matches without a bump type", () => {
     expect(bumpVersion("1.2.3-alpha.1", undefined, "alpha")).toBe("1.2.3-alpha.1");
     expect(bumpVersion("1.1.0-alpha.2", undefined, "alpha")).toBe("1.1.0-alpha.2");
+
+    expect(bumpVersion("1.1.0-alpha.2", undefined, "beta")).toBe("1.1.0-beta.0");
   });
 
   test("rejects invalid versions", () => {
