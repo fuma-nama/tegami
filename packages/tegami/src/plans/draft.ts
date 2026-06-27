@@ -244,6 +244,20 @@ export class Draft {
     const updated = new Map<string, ChangelogEntry>();
     const { graph } = this.context;
 
+    const defaultReplays = (name: string) => {
+      const replay: string[] = [];
+
+      for (const pkg of graph.getByName(name)) {
+        const draft = this.packages.get(pkg.id);
+
+        if (draft?.prerelease) {
+          replay.push(`exit prerelease: ${pkg.id}`);
+        }
+      }
+
+      return replay;
+    };
+
     const isMatch = (condition: ParsedReplayCondition) => {
       if (condition.type === "on-exit-prerelease") {
         return graph.getByName(condition.name).some((pkg) => {
@@ -260,9 +274,14 @@ export class Draft {
       const matchedNames = new Set<string>();
 
       for (const [name, config] of entry.packages) {
-        if (!config.replay || config.replay.length === 0) continue;
+        let replay = config.replay;
+        if (config.type) {
+          replay ??= defaultReplays(name);
+        }
 
-        const replay = config.replay.filter((item) => {
+        if (!replay || replay.length === 0) continue;
+
+        replay = replay.filter((item) => {
           const condition = parseReplayCondition(item);
           if (condition && isMatch(condition)) {
             matchedNames.add(name);

@@ -7,8 +7,6 @@ import {
 } from "../utils/conventional-commit";
 import { execFailure } from "../utils/error";
 import { type ChangelogPackageConfig, renderChangelog } from "./shared";
-import type { PackageGraph } from "../graph";
-import * as semver from "semver";
 
 export interface GenerateFromCommitsOptions {
   /** Start revision. Defaults to the latest reachable git tag, or all history if none exists. */
@@ -55,9 +53,8 @@ export async function generateFromCommits(
     }
 
     const packageBumpMap = Object.fromEntries(packageNames.map((name) => [name, bumpType]));
-    const packages = generateReplays(context.graph, packageBumpMap);
     const content = renderChangelog(
-      { packages },
+      { packages: packageBumpMap },
       changes
         .map((change) => {
           const heading = "#".repeat(bumpDepth(change.type));
@@ -70,7 +67,7 @@ export async function generateFromCommits(
     return {
       filename: changelogFilename(index),
       content,
-      packages,
+      packages: packageBumpMap,
       changes,
     };
   });
@@ -135,38 +132,6 @@ async function latestTag(cwd: string): Promise<string | undefined> {
 
   if (result.exitCode !== 0) return;
   return result.stdout.trim() || undefined;
-}
-
-export function generateReplays(graph: PackageGraph, base: Record<string, BumpType>) {
-  const packages: Record<string, ChangelogPackageConfig | BumpType> = {
-    ...base,
-  };
-
-  for (const [ref, type] of Object.entries(base)) {
-    const resolved = graph.getByName(ref);
-
-    for (const pkg of resolved) {
-      const plan = pkg.initDraft();
-      pkg.configureDraft(plan, graph.getPackageGroup(pkg.id));
-
-      const prerelease = semver.prerelease(pkg.version)?.[0];
-      const targetPrerelease = plan.prerelease;
-
-      if (
-        // entering prerelease
-        (targetPrerelease && !prerelease) ||
-        // during prerelease
-        (targetPrerelease && prerelease && targetPrerelease === prerelease)
-      ) {
-        packages[pkg.id] = {
-          type,
-          replay: [`exit prerelease: ${pkg.name}`],
-        };
-      }
-    }
-  }
-
-  return packages;
 }
 
 export function changelogFilename(disambiguator = 0): string {

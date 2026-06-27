@@ -12,7 +12,7 @@ import {
   spinner,
 } from "@clack/prompts";
 import type { Tegami } from "..";
-import { changelogFilename, generateFromCommits, generateReplays } from "../changelog/generate";
+import { changelogFilename, generateFromCommits } from "../changelog/generate";
 import type { PackageGroup, PackageGraph, WorkspacePackage } from "../graph";
 import type { TegamiContext } from "../context";
 import { isCI } from "../utils/constants";
@@ -70,10 +70,13 @@ export async function runChangelogTui(tegami: Tegami): Promise<void> {
   });
   if (isCancel(message)) throw new CancelledError();
 
-  const packages = generateReplays(context.graph, packageBumpMap);
   const filename = changelogFilename();
   await persistChangelogs(context, [
-    { filename, content: renderChangelog({ packages }, `## ${message.trim()}`), packages },
+    {
+      filename,
+      content: renderChangelog({ packages: packageBumpMap }, `## ${message.trim()}`),
+      packages: packageBumpMap,
+    },
   ]);
 }
 

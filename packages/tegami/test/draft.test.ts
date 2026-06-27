@@ -461,6 +461,58 @@ More features.
     expect(changelog).toContain("## Minor release");
   });
 
+  test("auto-adds exit prerelease replay during apply for prerelease packages", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-auto-replay-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/tegami"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/tegami/package.json"), {
+      name: "tegami",
+      version: "1.0.0-beta.0",
+    });
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages:
+  npm:tegami: patch
+---
+
+## Beta fix
+
+Fixed something during beta.
+`,
+    );
+
+    const paper = tegami({
+      cwd,
+      packages: {
+        tegami: { prerelease: "beta" },
+      },
+    });
+    const draft = await paper.draft();
+
+    expect(draft.getPackageDraft("npm:tegami")?.type).toBe("patch");
+    await draft.apply();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.0.0-beta.1",
+    });
+    const keptChangelog = await readFile(join(cwd, ".tegami/change.md"), "utf8");
+    expect(keptChangelog).toContain("exit prerelease: npm:tegami");
+    expect(keptChangelog).not.toContain("type:");
+    expect(await readFile(join(cwd, "packages/tegami/CHANGELOG.md"), "utf8")).toContain(
+      "## Beta fix",
+    );
+  });
+
   test("discovers packages with nested workspace globs", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-"));
     tempDirs.push(cwd);
