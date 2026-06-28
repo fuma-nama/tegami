@@ -105,12 +105,6 @@ importers:
       js-yaml:
         specifier: ^5.1.0
         version: 5.1.0
-      mdast-util-from-markdown:
-        specifier: ^2.0.3
-        version: 2.0.3
-      mdast-util-to-markdown:
-        specifier: ^2.1.2
-        version: 2.1.2
       package-manager-detector:
         specifier: ^1.6.0
         version: 1.6.0
@@ -130,9 +124,6 @@ importers:
       '@repo/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
-      '@types/mdast':
-        specifier: ^4.0.4
-        version: 4.0.4
       '@types/node':
         specifier: ^26.0.0
         version: 26.0.0

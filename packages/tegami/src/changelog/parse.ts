@@ -1,8 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { Heading, Root, RootContent } from "mdast";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { toMarkdown } from "mdast-util-to-markdown";
 import { dump } from "js-yaml";
 import { maxBump, type BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
@@ -56,21 +53,20 @@ export function parseChangelogFile(filename: string, content: string): Changelog
   const { success, data } = changelogFrontmatterSchema.safeParse(parsed.data);
   if (!success || !data.packages) return;
 
-  const tree = fromMarkdown(parsed.content);
   let headingBump: BumpType | undefined;
   const packages = new Map<string, ChangelogPackageConfig>();
   const sections: ChangelogEntry["sections"] = [];
 
-  for (const section of getHeadingSections(tree)) {
-    const sectionBumpType = headingToBump(section.heading.depth);
+  for (const section of parseMarkdownSections(parsed.content)) {
+    const sectionBumpType = headingToBump(section.depth);
     if (sectionBumpType) {
       headingBump = headingBump ? maxBump(headingBump, sectionBumpType) : sectionBumpType;
     }
 
     sections.push({
-      depth: section.heading.depth,
-      title: sectionToMarkdown(section.heading.children),
-      content: sectionToMarkdown(section.children),
+      depth: section.depth,
+      title: section.title,
+      content: section.content,
     });
   }
 
@@ -147,41 +143,72 @@ export function parseReplayCondition(condition: string): ParsedReplayCondition |
   };
 }
 
-interface HeadingSection {
-  heading: Heading;
-  children: RootContent[];
+interface RawMarkdownSection {
+  depth: number;
+  title: string;
+  contentLines: string[];
 }
 
-function getHeadingSections(tree: Root): HeadingSection[] {
-  const sections: HeadingSection[] = [];
-  let current: HeadingSection | undefined;
+interface MarkdownSection {
+  depth: number;
+  title: string;
+  content: string;
+}
 
-  for (const child of tree.children) {
-    if (child.type === "heading") {
-      current = { heading: child, children: [] };
-      sections.push(current);
-      continue;
+function parseMarkdownSections(markdown: string): MarkdownSection[] {
+  const sections: MarkdownSection[] = [];
+  const lines = markdown.split(/\r\n|\r|\n/);
+  let current: RawMarkdownSection | undefined;
+  let fence: string | undefined;
+
+  for (const line of lines) {
+    const fenceMarker = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMarker) {
+      const marker = fenceMarker[1]!;
+
+      if (!fence) {
+        fence = marker;
+      } else if (marker[0] === fence[0] && marker.length >= fence.length) {
+        fence = undefined;
+      }
     }
 
-    current?.children.push(child);
+    if (!fence) {
+      const heading = parseHeading(line);
+      if (heading) {
+        if (current) sections.push(toMarkdownSection(current));
+        current = { ...heading, contentLines: [] };
+        continue;
+      }
+    }
+
+    current?.contentLines.push(line);
   }
 
+  if (current) sections.push(toMarkdownSection(current));
   return sections;
 }
 
-function sectionToMarkdown(children: RootContent[]): string {
-  if (children.length === 0) return "";
+function parseHeading(line: string): Omit<MarkdownSection, "content"> | undefined {
+  const match = line.match(/^ {0,3}(#{1,6})(?:[ \t]+|$)(.*)$/);
+  if (!match) return;
 
-  return toMarkdown(
-    {
-      type: "root",
-      children,
-    },
-    {
-      bullet: "-",
-      fence: "`",
-    },
-  ).trim();
+  return {
+    depth: match[1]!.length,
+    title: stripClosingHeadingSequence(match[2]!).trim(),
+  };
+}
+
+function stripClosingHeadingSequence(value: string): string {
+  return value.replace(/[ \t]+#{1,}[ \t]*$/, "");
+}
+
+function toMarkdownSection(section: RawMarkdownSection): MarkdownSection {
+  return {
+    depth: section.depth,
+    title: section.title,
+    content: section.contentLines.join("\n").trim(),
+  };
 }
 
 function headingToBump(depth: number): BumpType | undefined {

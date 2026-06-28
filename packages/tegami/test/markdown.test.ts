@@ -158,6 +158,64 @@ Notes.
       },
     });
   });
+
+  test("ignores headings inside fenced code blocks", () => {
+    const entry = parseChangelogFile(
+      "change.md",
+      `---
+packages:
+  npm:tegami: patch
+---
+
+### Add generated changelog examples
+
+\`\`\`md
+### Not a release section
+
+This stays in the code block.
+\`\`\`
+
+Still the first section.
+`,
+    );
+
+    expect(normalizeEntry(entry)?.sections).toEqual([
+      {
+        depth: 3,
+        title: "Add generated changelog examples",
+        content:
+          "```md\n### Not a release section\n\nThis stays in the code block.\n```\n\nStill the first section.",
+      },
+    ]);
+  });
+
+  test("parses indented headings and strips closing hash sequences", () => {
+    const entry = parseChangelogFile(
+      "change.md",
+      `---
+packages:
+  npm:tegami: null
+---
+
+   ## Add changelog parser ##
+
+    # This is indented code, not a heading.
+`,
+    );
+
+    expect(normalizeEntry(entry)?.packages).toEqual({
+      "npm:tegami": {
+        type: "minor",
+      },
+    });
+    expect(normalizeEntry(entry)?.sections).toEqual([
+      {
+        depth: 2,
+        title: "Add changelog parser",
+        content: "# This is indented code, not a heading.",
+      },
+    ]);
+  });
 });
 
 describe("parseReplayCondition", () => {
