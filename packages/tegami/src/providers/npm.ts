@@ -37,8 +37,8 @@ export class NpmPackage extends WorkspacePackage {
     return this.manifest.name;
   }
 
-  get version(): string {
-    return this.manifest.version ?? "0.0.0";
+  get version(): string | undefined {
+    return this.manifest.version;
   }
 
   async write(): Promise<void> {
@@ -235,7 +235,10 @@ export function npm({
       if (!(pkg instanceof NpmPackage)) return;
 
       return {
-        publish: pkg.manifest.private !== true && !(await isPackagePublished(pkg)),
+        publish:
+          pkg.version !== undefined &&
+          pkg.manifest.private !== true &&
+          !(await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry)),
       };
     },
     initPublishLock({ lock, draft }) {
@@ -279,10 +282,8 @@ export function npm({
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof NpmPackage)) continue;
-        const plan = draft.getPackageDraft(pkg.id);
-        if (plan) {
-          pkg.manifest.version = plan.bumpVersion(pkg);
-        }
+        const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
+        if (bumped) pkg.manifest.version = bumped;
       }
 
       for (const pkg of graph.getPackages()) {
@@ -299,7 +300,7 @@ export function npm({
               continue;
             // Ignore special syntax like "latest"
             if (!semver.validRange(spec.range)) continue;
-            if (semver.satisfies(spec.linked.version, spec.range)) continue;
+            if (!spec.linked.version || semver.satisfies(spec.linked.version, spec.range)) continue;
 
             let updatedRange: string;
             const isPeer = field === "peerDependencies";
@@ -404,7 +405,8 @@ function depsPolicy(
               continue;
             }
 
-            if (!needsUpdate(spec, plan.bumpVersion(pkg))) continue;
+            const bumped = plan.bumpVersion(pkg);
+            if (!bumped || !needsUpdate(spec, bumped)) continue;
 
             const bumpType = getBumpDepType({ kind: field, dependent, spec, name: k });
             if (bumpType === false) continue;
@@ -512,17 +514,20 @@ async function publish(
   };
 }
 
-async function isPackagePublished(pkg: NpmPackage): Promise<boolean> {
-  const registry = pkg.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
+async function isPackagePublished(
+  name: string,
+  version: string,
+  registry = "https://registry.npmjs.org",
+): Promise<boolean> {
   const base = registry.replace(/\/$/, "");
-  const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
+  const response = await fetch(`${base}/${name}/${version}`, {
     headers: { Accept: "application/json" },
   });
 
   if (response.status === 404) return false;
   if (!response.ok) {
     throw new Error(
-      `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+      `Unable to validate ${name}@${version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
     );
   }
 

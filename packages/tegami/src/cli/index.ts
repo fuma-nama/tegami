@@ -190,10 +190,12 @@ async function versionPackages(
   const lines: string[] = [];
   for (const pkg of context.graph.getPackages()) {
     const plan = draft.getPackageDraft(pkg.id);
-    if (!plan || plan.bumpVersion(pkg) === pkg.version) continue;
+    if (!plan) continue;
+    const bumped = plan.bumpVersion(pkg);
+    if (!pkg.version || !bumped || bumped === pkg.version) continue;
 
     lines.push(
-      `${pkg.id}: ${pkg.version} → ${plan.bumpVersion(pkg)} (${plan.changelogs?.length ?? 0} changelogs)`,
+      `${pkg.id}: ${pkg.version} → ${bumped} (${plan.changelogs?.length ?? 0} changelogs)`,
     );
     if (plan.bumpReasons)
       for (const reason of plan.bumpReasons) {

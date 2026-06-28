@@ -6,8 +6,15 @@ export function formatNpmDistTag(distTag?: string): string {
   return distTag && distTag !== "latest" ? ` (${distTag})` : "";
 }
 
-export function formatPackageVersion(name: string, version: string, distTag?: string): string {
-  return `${name}@${version}${formatNpmDistTag(distTag)}`;
+export function formatPackageVersion(
+  name: string,
+  version: string | undefined,
+  distTag?: string,
+): string {
+  let out = name;
+  if (version) out += `@${version}`;
+  out += formatNpmDistTag(distTag);
+  return out;
 }
 
 const WEIGHTS = {

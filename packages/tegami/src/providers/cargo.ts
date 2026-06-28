@@ -34,8 +34,8 @@ export class CargoPackage extends WorkspacePackage {
     return this.packageInfo.name as string;
   }
 
-  get version(): string {
-    return stringValue(this.packageInfo.version) ?? this.workspaceVersion ?? "0.0.0";
+  get version() {
+    return stringValue(this.packageInfo.version) ?? this.workspaceVersion;
   }
 
   setVersion(version: string): void {
@@ -121,7 +121,9 @@ export function cargo({
 
       return {
         publish:
-          pkg.packageInfo.publish !== false && !(await isPackagePublished(pkg.name, pkg.version)),
+          pkg.version !== undefined &&
+          pkg.packageInfo.publish !== false &&
+          !(await isPackagePublished(pkg.name, pkg.version)),
         wait,
       };
     },
@@ -154,10 +156,8 @@ export function cargo({
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof CargoPackage)) continue;
 
-        const plan = draft.getPackageDraft(pkg.id);
-        if (plan) {
-          pkg.setVersion(plan.bumpVersion(pkg));
-        }
+        const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
+        if (bumped) pkg.setVersion(bumped);
       }
 
       for (const pkg of graph.getPackages()) {
@@ -172,7 +172,7 @@ export function cargo({
             const packageName = spec.package ?? rawName;
             const linked = graph.get(`cargo:${packageName}`);
             if (!linked || !(linked instanceof CargoPackage)) continue;
-            if (semver.satisfies(linked.version, spec.version)) continue;
+            if (!linked.version || semver.satisfies(linked.version, spec.version)) continue;
 
             let updatedRange: string;
             if (spec.version.startsWith("^")) {
@@ -245,7 +245,8 @@ function depsPolicy(
               continue;
             }
 
-            if (semver.satisfies(plan.bumpVersion(pkg), spec.version)) continue;
+            const bumped = plan.bumpVersion(pkg);
+            if (!bumped || semver.satisfies(bumped, spec.version)) continue;
 
             const bumpType = getBumpDepType({
               kind,

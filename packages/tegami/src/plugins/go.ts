@@ -164,10 +164,8 @@ export function go({
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof GoPackage)) continue;
 
-        const plan = draft.getPackageDraft(pkg.id);
-        if (plan) {
-          pkg.setVersion(plan.bumpVersion(pkg));
-        }
+        const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
+        if (bumped) pkg.setVersion(bumped);
       }
 
       for (const pkg of graph.getPackages()) {
@@ -214,10 +212,8 @@ export function go({
       for (const [id, packagePlan] of plan.packages) {
         const pkg = this.graph.get(id);
         if (!(pkg instanceof GoPackage)) continue;
-
-        packagePlan.git = {
-          tag: formatGoTag(this.cwd, pkg.path, pkg.version),
-        };
+        packagePlan.git ??= {};
+        packagePlan.git.tag = formatGoTag(this.cwd, pkg.path, pkg.version);
       }
     },
     async publishPreflight({ pkg }) {
@@ -300,7 +296,8 @@ function depsPolicy(
             continue;
           }
 
-          if (semver.satisfies(plan.bumpVersion(pkg), stripGoVersion(requireVersion))) continue;
+          const bumped = plan.bumpVersion(pkg);
+          if (!bumped || semver.satisfies(bumped, stripGoVersion(requireVersion))) continue;
 
           const bumpType = getBumpDepType?.({ name: pkg.name, dependent, version: requireVersion });
           if (bumpType === false) continue;

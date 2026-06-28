@@ -28,8 +28,8 @@ export interface PackageDraft {
     distTag?: string;
   };
 
-  /** get the bumped version of a package */
-  bumpVersion: (pkg: WorkspacePackage) => string;
+  /** get the bumped version of a package, return `undefined` if the package doesn't have a `version` field */
+  bumpVersion: (pkg: WorkspacePackage) => string | undefined;
 }
 
 export const changelogStoreSchema = z.object({
@@ -43,6 +43,8 @@ export const packageStoreSchema = z.object({
   updated: z.boolean(),
   changelogIds: z.array(z.string()).optional(),
 });
+
+type SnapshotMap = Map<string, { version: string | undefined }>;
 
 /** a draft describes all operations to perform before the actual publishing, such as version bumps. */
 export class Draft {
@@ -120,6 +122,7 @@ export class Draft {
     return false;
   }
 
+  /** get all changelogs, note that this includes replay-only changelogs, as long as they are in the `.tegami` folder. */
   getChangelogs() {
     return Array.from(this.changelogs.values());
   }
@@ -156,7 +159,7 @@ export class Draft {
     const { graph } = this.context;
     this.#applied = true;
 
-    const snapshots = new Map<string, { version: string }>();
+    const snapshots: SnapshotMap = new Map();
     for (const pkg of graph.getPackages()) {
       snapshots.set(pkg.id, { version: pkg.version });
     }
@@ -196,25 +199,30 @@ export class Draft {
   }
 
   /** write persistent data to publish lock */
-  private async writeLockFile(snapshots: Map<string, { version: string }>) {
+  private async writeLockFile(snapshots: SnapshotMap) {
     const lock = new PublishLock();
-    for (const entry of this.getChangelogs()) {
+    const changelogs = new Set<ChangelogEntry>();
+    for (const pkg of this.context.graph.getPackages()) {
+      const draft = this.getPackageDraft(pkg.id);
+      const snapshot = snapshots.get(pkg.id);
+      if (!snapshot) continue;
+
+      for (const entry of draft?.changelogs ?? []) {
+        changelogs.add(entry);
+      }
+
+      lock.write("core:packages", {
+        id: pkg.id,
+        updated: draft !== undefined && snapshot.version !== pkg.version,
+        changelogIds: draft?.changelogs?.map((entry) => entry.id),
+      } satisfies z.input<typeof packageStoreSchema>);
+    }
+    for (const entry of changelogs) {
       lock.write("core:changelogs", {
         v: "0.0.0",
         filename: entry.filename,
         content: entry.getRawContent(),
       } satisfies z.input<typeof changelogStoreSchema>);
-    }
-    for (const pkg of this.context.graph.getPackages()) {
-      const draft = this.getPackageDraft(pkg.id);
-      const snapshot = snapshots.get(pkg.id);
-
-      lock.write("core:packages", {
-        id: pkg.id,
-        updated:
-          draft !== undefined && (snapshot === undefined || snapshot.version !== pkg.version),
-        changelogIds: draft?.changelogs?.map((entry) => entry.id),
-      } satisfies z.input<typeof packageStoreSchema>);
     }
     for (const plugin of this.context.plugins) {
       await handlePluginError(plugin, "initPublishLock", () =>
@@ -240,7 +248,7 @@ export class Draft {
   }
 
   /** Attach replaying changelog entries to packages (already bumped), and return the updated changelog entries. */
-  private applyReplays(snapshots: Map<string, { version: string }>): Map<string, ChangelogEntry> {
+  private applyReplays(snapshots: SnapshotMap): Map<string, ChangelogEntry> {
     const updated = new Map<string, ChangelogEntry>();
     const { graph } = this.context;
 
@@ -262,7 +270,7 @@ export class Draft {
       if (condition.type === "on-exit-prerelease") {
         return graph.getByName(condition.name).some((pkg) => {
           const previous = snapshots.get(pkg.id);
-          return previous && semver.inc(previous.version, "release") === pkg.version;
+          return previous?.version && semver.inc(previous.version, "release") === pkg.version;
         });
       }
 

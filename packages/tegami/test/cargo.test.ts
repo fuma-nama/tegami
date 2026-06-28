@@ -268,7 +268,7 @@ name = "acme_lib"
     const pkg = graph.get("cargo:acme_lib");
 
     expect(pkg).toBeDefined();
-    expect(pkg!.version).toBe("0.0.0");
+    expect(pkg!.version).toBeUndefined();
   });
 });
 

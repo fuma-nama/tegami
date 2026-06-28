@@ -158,7 +158,7 @@ describe("tegami context", () => {
     const pkg = context.graph.get("npm:@acme/lib");
 
     expect(pkg).toBeDefined();
-    expect(pkg!.version).toBe("0.0.0");
+    expect(pkg!.version).toBeUndefined();
   });
 });
 

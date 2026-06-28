@@ -8,7 +8,7 @@ export abstract class WorkspacePackage {
   /** absolute path */
   abstract readonly path: string;
   abstract readonly manager: string;
-  abstract readonly version: string;
+  abstract readonly version: string | undefined;
 
   get id(): string {
     return `${this.manager}:${this.name}`;
@@ -29,6 +29,7 @@ export abstract class WorkspacePackage {
   initDraft(): PackageDraft {
     return {
       bumpVersion(pkg) {
+        if (!pkg.version) return;
         return bumpVersion(pkg.version, this.type, this.prerelease);
       },
     };

@@ -72,13 +72,15 @@ export async function buildPrPreview(
 
   for (const pkg of context.graph.getPackages()) {
     const plan = draft.getPackageDraft(pkg.id);
-    if (!plan || plan.bumpVersion(pkg) === pkg.version) continue;
+    if (!plan) continue;
+    const bumped = plan.bumpVersion(pkg);
+    if (!bumped || !pkg.version || bumped === pkg.version) continue;
 
     pendingPackages.push({
       name: pkg.name,
       type: plan.type ?? "—",
       from: pkg.version,
-      to: plan.bumpVersion(pkg),
+      to: bumped,
       distTag: plan.npm?.distTag,
     });
   }

@@ -1,6 +1,6 @@
 import { x } from "tinyexec";
 import { join, relative } from "node:path";
-import { prerelease as getPrerelease } from "semver";
+import semver from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
 import type { Draft } from "../plans/draft";
@@ -128,12 +128,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
   function defaultVersionPRBody(draft: Draft, context: TegamiContext): string {
     const packageLines: string[] = [];
+    const changesets = new Set<ChangelogEntry>();
 
     for (const pkg of context.graph.getPackages()) {
       const packageDraft = draft.getPackageDraft(pkg.id);
       if (!packageDraft) continue;
-      const originalVersion = cliOriginalPackageVersions.get(pkg.id) ?? pkg.version;
-      if (originalVersion === pkg.version) continue;
+
+      if (packageDraft.changelogs) {
+        for (const entry of packageDraft.changelogs) changesets.add(entry);
+      }
+
+      const originalVersion = cliOriginalPackageVersions.get(pkg.id);
+      if (!originalVersion || originalVersion === pkg.version) continue;
 
       packageLines.push(
         `| \`${pkg.name}\` | \`${originalVersion}\` | \`${pkg.version}\`${formatNpmDistTag(packageDraft.npm?.distTag)} |`,
@@ -141,7 +147,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     }
 
     const changelogLines: string[] = [];
-    for (const entry of draft.getChangelogs()) {
+    for (const entry of changesets) {
       changelogLines.push(`### ${entry.subject ?? `\`${entry.filename}\``}`, "");
       for (const section of entry.sections) {
         changelogLines.push(`#### ${section.title}`, "");
@@ -164,7 +170,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     return sections.join("\n");
   }
 
-  const cliOriginalPackageVersions = new Map<string, string>();
+  const cliOriginalPackageVersions = new Map<string, string | undefined>();
   const plugin: TegamiPlugin = {
     name: "github",
     init() {
@@ -179,7 +185,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       const requiredTags = new Set<string>();
 
       for (const pkg of plan.packages.values()) {
-        if (pkg.preflight!.publish && pkg.git) requiredTags.add(pkg.git.tag);
+        if (pkg.preflight!.publish && pkg.git?.tag) requiredTags.add(pkg.git.tag);
       }
 
       try {
@@ -242,7 +248,8 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
               notes:
                 overrides.notes ?? (await defaultGroupedNotes(getRenderer(this), plan, packages)),
               prerelease:
-                overrides.prerelease ?? packages.some((pkg) => getPrerelease(pkg.version) !== null),
+                overrides.prerelease ??
+                packages.some((pkg) => pkg.version && semver.prerelease(pkg.version)),
             };
           } else {
             const pkg = packages[0]!;
@@ -254,7 +261,9 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
                 overrides.title ??
                 formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
               notes: overrides.notes ?? (await defaultNotes(getRenderer(this), pkg, packagePlan)),
-              prerelease: overrides.prerelease ?? getPrerelease(pkg.version) !== null,
+              prerelease:
+                overrides.prerelease ??
+                (pkg.version !== undefined && semver.prerelease(pkg.version) !== null),
             };
           }
 
