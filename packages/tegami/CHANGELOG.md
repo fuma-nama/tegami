@@ -1,3 +1,21 @@
+## tegami@1.0.0-beta.3 (beta)
+
+### Improve GitHub release notes
+
+The release notes can now display related PRs & contributors.
+
+### Support `go.publish` option
+
+Decide whether a Go package should be published via the `go.publish` option, default to `true`.
+
+### Drop MDAST dependencies
+
+Tegami only requires extracting headings and preserves formatting, a regex alternative is lighter, better, and faster.
+
+### Add GitLab plugin
+
+Tegami now includes a GitLab plugin with version merge requests, GitLab releases, tag handling, and release note links for commits and related merge requests.
+
 ## tegami@1.0.0-beta.2 (beta)
 
 ### Change behaviour of `publishPreflight` hook
