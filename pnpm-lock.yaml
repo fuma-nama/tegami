@@ -20,6 +20,9 @@ importers:
       tegami:
         specifier: workspace:*
         version: link:packages/tegami
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
       turbo:
         specifier: ^2.9.18
         version: 2.9.18
