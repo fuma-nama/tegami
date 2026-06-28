@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { intro, note, outro, spinner } from "@clack/prompts";
-import { Command, InvalidArgumentError } from "commander";
 import type { Awaitable } from "../types";
 import { isCI } from "../utils/common";
 import { CancelledError, handlePluginError } from "../utils/error";
@@ -17,6 +17,10 @@ export interface TegamiCLIOptions {
   publish?: () => Awaitable<PublishPlan>;
 }
 
+export interface TegamiCLI {
+  parseAsync(argv?: string[]): Promise<void>;
+}
+
 interface PublishCommandOptions {
   dryRun?: boolean;
 }
@@ -30,128 +34,279 @@ interface PrPreviewCommandOptions {
   number?: number;
 }
 
-export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}) {
-  const program = new Command();
+export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}): TegamiCLI {
+  return {
+    async parseAsync(argv) {
+      await runCliProgram(tegami, options, argv);
+    },
+  };
+}
 
-  program
-    .name("tegami")
-    .description("create changelogs")
-    .action(() => runAction(tegami, () => runChangelogTui(tegami)));
+export async function runCli(tegami: Tegami, options: TegamiCLIOptions = {}): Promise<void> {
+  await runCliProgram(tegami, options);
+}
 
-  program
-    .command("version")
-    .description("draft version changes and write the publish lock")
-    .action(() =>
-      runAction(tegami, async () => {
-        await versionPackages(tegami, { cli: options });
-      }),
-    );
+async function runCliProgram(
+  tegami: Tegami,
+  options: TegamiCLIOptions,
+  argv = process.argv.slice(2),
+) {
+  try {
+    if (argv.length === 0) {
+      await runAction(tegami, () => runChangelogTui(tegami));
+      return;
+    }
 
-  program
-    .command("ci")
-    .description("version and publish packages")
-    .action(() =>
-      runAction(tegami, async () => {
-        const versioned = await versionPackages(tegami, { cli: options });
-        if (versioned) return;
-        await publishPackages(tegami, { cli: options });
-      }),
-    );
+    const [command, ...rest] = argv;
 
-  program
-    .command("check-publish")
-    .description("exit with code 1 if no publishing needed, otherwise 0")
-    .action(() =>
-      runAction(tegami, async () => {
-        const status = await tegami.publishStatus();
-        process.exit(status === "pending" ? 0 : 1);
-      }),
-    );
+    if (command === "--help" || command === "-h") {
+      console.log(`Usage: tegami [command]
 
-  const programPr = program.command("pr");
+create changelogs
 
-  programPr
-    .command("preview")
-    .description(
-      "(should be executed in a GitHub action) show a pull request release preview and changelog guidance",
-    )
-    .option("--artifact <path>", "write preview markdown to a file")
-    .option("--number <number>", "pull request number", (value) => {
-      const number = Number(value);
-      if (!Number.isInteger(number) || number <= 0) {
-        throw new InvalidArgumentError("--number must be a positive integer.");
-      }
-      return number;
-    })
-    .action((commandOptions: PrPreviewCommandOptions) =>
-      runAction(tegami, async () => {
-        const context = await tegami._internal.context();
-        const body = await buildPrPreview(context, await tegami.draft(), commandOptions);
+Commands:
+  version         draft version changes and write the publish lock
+  ci              version and publish packages
+  check-publish   exit with code 1 if no publishing needed, otherwise 0
+  pr preview      show a pull request release preview and changelog guidance
+  pr comment      post the pull request release preview as a comment
+  publish         publish packages from the publish lock
+  cleanup         remove the publish lock after all packages have been published
+  init-agent      write AGENTS.md with changelog instructions for AI agents
 
-        if (commandOptions.artifact) {
-          const artifactPath = path.resolve(context.cwd, commandOptions.artifact);
-          await writeFile(artifactPath, body);
-          if (!isCI()) {
-            note(
-              path.relative(context.cwd, artifactPath) || commandOptions.artifact,
-              "Release preview",
-            );
-            outro("Release preview ready.");
+Run without a command to open the changelog TUI.
+`);
+      return;
+    }
+
+    switch (command) {
+      case "version": {
+        if (rest.length > 0) {
+          if (rest[0] === "--help" || rest[0] === "-h") {
+            console.log(`Usage: tegami version`);
+            process.exit(0);
           }
-          return;
+          throw new Error(`Unknown option: ${rest[0]}`);
         }
-
-        if (isCI()) {
-          process.stdout.write(`${body}\n`);
-          return;
-        }
-
-        note(body, "Release preview");
-        outro("Release preview ready.");
-      }),
-    );
-
-  programPr
-    .command("comment")
-    .description(
-      "(should be used with 'pr preview') post the pull request release preview as a comment",
-    )
-    .argument("<artifact>", "the file path of GitHub artifact")
-    .action(async (artifact: string) => {
-      try {
-        await postPrComment(await readFile(artifact, "utf8"));
-        outro("Pull request comment updated.");
-      } catch (error) {
-        note(error instanceof Error ? error.message : String(error), "Error");
-        outro("Command failed.");
-        process.exit(1);
+        await runAction(tegami, async () => {
+          await versionPackages(tegami, { cli: options });
+        });
+        break;
       }
-    });
+      case "ci": {
+        if (rest.length > 0) {
+          if (rest[0] === "--help" || rest[0] === "-h") {
+            console.log(`Usage: tegami ci`);
+            process.exit(0);
+          }
+          throw new Error(`Unknown option: ${rest[0]}`);
+        }
+        await runAction(tegami, async () => {
+          const versioned = await versionPackages(tegami, { cli: options });
+          if (versioned) return;
+          await publishPackages(tegami, { cli: options });
+        });
+        break;
+      }
+      case "check-publish": {
+        if (rest.length > 0) {
+          if (rest[0] === "--help" || rest[0] === "-h") {
+            console.log(`Usage: tegami check-publish`);
+            process.exit(0);
+          }
+          throw new Error(`Unknown option: ${rest[0]}`);
+        }
+        await runAction(tegami, async () => {
+          const status = await tegami.publishStatus();
+          process.exit(status === "pending" ? 0 : 1);
+        });
+        break;
+      }
+      case "pr": {
+        const [subcommand, ...prRest] = rest;
 
-  program
-    .command("publish")
-    .description("publish packages from the publish lock")
-    .option("--dry-run", "validate the publish lock without publishing packages")
-    .action((commandOptions: PublishCommandOptions) =>
-      runAction(tegami, async () => {
-        await publishPackages(tegami, { ...commandOptions, cli: options });
-      }),
-    );
+        switch (subcommand) {
+          case "preview":
+            await runPrPreviewCommand(tegami, prRest);
+            break;
+          case "comment":
+            await runPrCommentCommand(prRest);
+            break;
+          case "--help":
+          case "-h":
+          case undefined:
+            console.log(`Usage: tegami pr <command>
 
-  program
-    .command("cleanup")
-    .description("remove the publish lock after all packages have been published")
-    .action(() => runAction(tegami, () => runCleanup(tegami)));
+Commands:
+  preview  show a pull request release preview and changelog guidance
+  comment  post the pull request release preview as a comment
+`);
+            break;
+          default:
+            throw new Error(`Unknown pr command: ${subcommand}`);
+        }
+        break;
+      }
+      case "publish":
+        await runPublishCommand(tegami, options, rest);
+        break;
+      case "cleanup": {
+        if (rest.length > 0) {
+          if (rest[0] === "--help" || rest[0] === "-h") {
+            console.log(`Usage: tegami cleanup`);
+            process.exit(0);
+          }
+          throw new Error(`Unknown option: ${rest[0]}`);
+        }
+        await runAction(tegami, () => runCleanup(tegami));
+        break;
+      }
+      case "init-agent":
+        await runInitAgentCommand(tegami, rest);
+        break;
+      default:
+        throw new Error(`Unknown command: ${command}`);
+    }
+  } catch (error) {
+    if (error instanceof CancelledError) {
+      outro(error.message);
+    } else {
+      note(error instanceof Error ? error.message : String(error), "Error");
+      outro("Command failed.");
+    }
+    process.exit(1);
+  }
+}
 
-  program
-    .command("init-agent")
-    .description("write AGENTS.md with changelog instructions for AI agents")
-    .option("-o, --output <path>", "output path", "AGENTS.md")
-    .action((commandOptions: InitAgentCommandOptions) =>
-      runAction(tegami, () => runInitAgent(tegami, commandOptions)),
-    );
+async function runPublishCommand(tegami: Tegami, options: TegamiCLIOptions, args: string[]) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      "dry-run": { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
 
-  return program;
+  if (values.help) {
+    console.log(`Usage: tegami publish [--dry-run]
+
+publish packages from the publish lock
+`);
+    return;
+  }
+
+  await runAction(tegami, async () => {
+    await publishPackages(tegami, { dryRun: values["dry-run"], cli: options });
+  });
+}
+
+async function runInitAgentCommand(tegami: Tegami, args: string[]) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      output: { type: "string", short: "o", default: "AGENTS.md" },
+      help: { type: "boolean", short: "h" },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    console.log(`Usage: tegami init-agent [-o, --output <path>]
+
+write AGENTS.md with changelog instructions for AI agents
+`);
+    return;
+  }
+
+  await runAction(tegami, () => runInitAgent(tegami, { output: values.output }));
+}
+
+async function runPrPreviewCommand(tegami: Tegami, args: string[]) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      artifact: { type: "string" },
+      number: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    console.log(`Usage: tegami pr preview [--artifact <path>] [--number <number>]
+
+show a pull request release preview and changelog guidance
+`);
+    return;
+  }
+
+  const commandOptions: PrPreviewCommandOptions = {
+    artifact: values.artifact,
+    number: values.number ? parsePositiveInt(values.number, "--number") : undefined,
+  };
+
+  await runAction(tegami, async () => {
+    const context = await tegami._internal.context();
+    const body = await buildPrPreview(context, await tegami.draft(), commandOptions);
+
+    if (commandOptions.artifact) {
+      const artifactPath = path.resolve(context.cwd, commandOptions.artifact);
+      await writeFile(artifactPath, body);
+      if (!isCI()) {
+        note(
+          path.relative(context.cwd, artifactPath) || commandOptions.artifact,
+          "Release preview",
+        );
+        outro("Release preview ready.");
+      }
+      return;
+    }
+
+    if (isCI()) {
+      process.stdout.write(`${body}\n`);
+      return;
+    }
+
+    note(body, "Release preview");
+    outro("Release preview ready.");
+  });
+}
+
+async function runPrCommentCommand(args: string[]) {
+  const { positionals, values } = parseArgs({
+    args,
+    options: {
+      help: { type: "boolean", short: "h" },
+    },
+    strict: true,
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    console.log(`Usage: tegami pr comment <artifact>
+
+post the pull request release preview as a comment
+`);
+    return;
+  }
+
+  const artifact = positionals[0];
+  if (!artifact) throw new Error("missing required argument: artifact");
+
+  await postPrComment(await readFile(artifact, "utf8"));
+  outro("Pull request comment updated.");
+}
+
+function parsePositiveInt(value: string, option: string): number {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error(`${option} must be a positive integer.`);
+  }
+  return number;
 }
 
 async function versionPackages(
@@ -318,22 +473,11 @@ async function runCleanup(tegami: Tegami): Promise<void> {
 }
 
 async function runAction(tegami: Tegami, action: () => Awaitable<void>): Promise<void> {
-  try {
-    const context = await tegami._internal.context();
+  const context = await tegami._internal.context();
 
-    for (const plugin of context.plugins) {
-      await handlePluginError(plugin, "cli.init", () => plugin.cli?.init?.call(context));
-    }
-
-    await action();
-  } catch (error) {
-    if (error instanceof CancelledError) {
-      outro(error.message);
-    } else {
-      note(error instanceof Error ? error.message : String(error), "Error");
-      outro("Command failed.");
-    }
-
-    process.exit(1);
+  for (const plugin of context.plugins) {
+    await handlePluginError(plugin, "cli.init", () => plugin.cli?.init?.call(context));
   }
+
+  await action();
 }

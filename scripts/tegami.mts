@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { tegami } from "tegami";
-import { createCli } from "tegami/cli";
+import { runCli } from "tegami/cli";
 import { github } from "tegami/plugins/github";
 import { x } from "tinyexec";
 
@@ -30,4 +30,4 @@ const paper = tegami({
   },
 });
 
-await createCli(paper).parseAsync();
+await runCli(paper);

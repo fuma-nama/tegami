@@ -37,7 +37,7 @@ npm i tegami -D -w
 
 ```ts title="scripts/tegami.mts"
 import { tegami } from "tegami";
-import { createCli } from "tegami/cli";
+import { runCli } from "tegami/cli";
 import { github } from "tegami/plugins/github";
 
 const paper = tegami({
@@ -48,7 +48,7 @@ const paper = tegami({
   ],
 });
 
-void createCli(paper).parseAsync();
+await runCli(paper);
 ```
 
 ```json title="package.json"

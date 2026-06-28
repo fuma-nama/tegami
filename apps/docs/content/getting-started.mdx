@@ -19,7 +19,7 @@ Create an entry script in your repo root.
 
 ```ts title="scripts/tegami.mts"
 import { tegami } from "tegami";
-import { createCli } from "tegami/cli";
+import { runCli } from "tegami/cli";
 import { github } from "tegami/plugins/github";
 
 const paper = tegami({
@@ -37,7 +37,7 @@ const paper = tegami({
   },
 });
 
-void createCli(paper).parseAsync();
+await runCli(paper);
 ```
 
 Add a package script so the CLI is easy to run:
@@ -54,7 +54,7 @@ Tegami discovers npm and Cargo workspace packages automatically. Use the `packag
 
 ## CLI commands
 
-`createCli` wraps the programmatic API. Pass the same `tegami()` instance you use in scripts.
+`runCli` wraps the programmatic API. Pass the same `tegami()` instance you use in scripts.
 
 | Command             | Description                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------- |
