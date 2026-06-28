@@ -20,6 +20,7 @@ vi.mock("../src/plugins/github/api", () => ({
   findOpenPullRequest: vi.fn(),
   updatePullRequest: vi.fn(),
   createPullRequest: vi.fn(),
+  listPullRequestsForCommit: vi.fn(),
 }));
 
 const exec = vi.mocked(x);
@@ -28,6 +29,7 @@ const createGitHubRelease = vi.mocked(githubClient.createRelease);
 const findOpenPullRequest = vi.mocked(githubClient.findOpenPullRequest);
 const updatePullRequest = vi.mocked(githubClient.updatePullRequest);
 const createPullRequest = vi.mocked(githubClient.createPullRequest);
+const listPullRequestsForCommit = vi.mocked(githubClient.listPullRequestsForCommit);
 
 beforeEach(() => {
   exec.mockReset();
@@ -42,6 +44,8 @@ beforeEach(() => {
   updatePullRequest.mockResolvedValue(undefined);
   createPullRequest.mockReset();
   createPullRequest.mockResolvedValue(undefined);
+  listPullRequestsForCommit.mockReset();
+  listPullRequestsForCommit.mockResolvedValue([]);
 });
 
 describe("github release plugin", () => {
@@ -273,6 +277,54 @@ describe("github release plugin", () => {
       title: "@acme/core@1.0.1",
       notes:
         "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
+      prerelease: false,
+      token: "test-token",
+    });
+  });
+
+  test("shows related pull requests and contributors in release notes", async () => {
+    exec.mockImplementation((command, args = []) => {
+      if (command === "git" && args[0] === "log") {
+        return commandResult({
+          stdout: "abc1234567890abcdef1234567890abcdef123456\n",
+        });
+      }
+
+      return commandResult();
+    });
+    listPullRequestsForCommit.mockResolvedValue([
+      { number: 42, title: "Add proxy server", user: { login: "alice" } },
+    ]);
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = {
+      ...publishContext(),
+      github: { repo: "acme/repo", token: "test-token" },
+    };
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {
+          changelogs: [
+            testChangelogEntry({
+              packages: new Map([["@acme/core", { type: "minor" }]]),
+              sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
+            }),
+          ],
+        },
+      ]),
+    });
+
+    expect(listPullRequestsForCommit).toHaveBeenCalledWith(
+      "acme/repo",
+      "abc1234567890abcdef1234567890abcdef123456",
+      "test-token",
+    );
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "@acme/core@1.0.1",
+      title: "@acme/core@1.0.1",
+      notes:
+        "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.\n\n<details>\n<summary>Pull request & contributors</summary>\n\n- [#42 Add proxy server](https://github.com/acme/repo/pull/42) by @alice\n\n</details>",
       prerelease: false,
       token: "test-token",
     });

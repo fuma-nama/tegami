@@ -33,3 +33,19 @@ export async function somePromise<T>(
     }
   });
 }
+
+export function cached<Args extends unknown[], V>(
+  cacheKey: (...args: Args) => string,
+  fn: (...args: Args) => Awaitable<V>,
+  cacheMap = new Map<string, Awaitable<V>>(),
+): (...args: Args) => Awaitable<V> {
+  return (...args) => {
+    const key = cacheKey(...args);
+    let out = cacheMap.get(key);
+    if (!out) {
+      out = fn(...args);
+      cacheMap.set(key, out);
+    }
+    return out;
+  };
+}

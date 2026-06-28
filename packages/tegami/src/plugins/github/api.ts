@@ -134,6 +134,27 @@ export async function createPullRequest(
   }
 }
 
+export interface PullRequestSummary {
+  number: number;
+  title: string;
+  user?: { login: string };
+}
+
+export async function listPullRequestsForCommit(
+  repo: string,
+  commitSha: string,
+  token?: string,
+): Promise<PullRequestSummary[]> {
+  const { owner, repo: name } = parseGitHubRepo(repo);
+  const response = await githubRequest(`/repos/${owner}/${name}/commits/${commitSha}/pulls`, token);
+
+  if (!response.ok) {
+    throw new Error(`Failed to list pull requests for commit ${commitSha.slice(0, 7)}.`);
+  }
+
+  return (await response.json()) as PullRequestSummary[];
+}
+
 export async function getPullRequest(
   repo: string,
   number: number,

@@ -8,15 +8,17 @@ import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatNpmDistTag, formatPackageVersion } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
-import { isCI } from "../utils/common";
+import { cached, isCI } from "../utils/common";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
   createPullRequest,
   createRelease as createGitHubRelease,
   findOpenPullRequest,
+  listPullRequestsForCommit,
   releaseExistsByTag,
   updatePullRequest,
+  PullRequestSummary,
 } from "./github/api";
 
 interface GithubRelease {
@@ -373,46 +375,87 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
 
 type ChangelogRenderer = (entry: ChangelogEntry) => Promise<string>;
 
+interface ChangelogEntryMeta {
+  commit?: string;
+  pullRequests: PullRequestSummary[];
+}
+
 function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
-  const cache = new Map<string, Promise<string | undefined>>();
+  const { repo, token } = context.github!;
 
-  async function resolveFileCommit(filename: string): Promise<string | undefined> {
-    const relativePath = relative(context.cwd, join(context.changelogDir, filename));
-    const result = await x(
-      "git",
-      ["log", "--diff-filter=A", "-1", "--format=%H", "--", relativePath],
-      {
-        nodeOptions: { cwd: context.cwd },
-      },
-    );
+  const resolveFileCommit = cached(
+    (filename: string) => filename,
+    async (filename): Promise<string | undefined> => {
+      const relativePath = relative(context.cwd, join(context.changelogDir, filename));
+      const result = await x(
+        "git",
+        ["log", "--diff-filter=A", "-1", "--format=%H", "--", relativePath],
+        {
+          nodeOptions: { cwd: context.cwd },
+        },
+      );
 
-    if (result.exitCode !== 0) return;
-    return result.stdout.trim() || undefined;
-  }
+      if (result.exitCode !== 0) return;
+      return result.stdout.trim() || undefined;
+    },
+  );
 
-  function formatCommitLink(commit: string): string {
-    const short = commit.slice(0, 7);
-    const repo = context.github?.repo;
-    if (!repo) return `\`${short}\``;
+  const resolveEntryMeta = cached(
+    (entry: ChangelogEntry) => entry.id,
+    async (entry): Promise<ChangelogEntryMeta> => {
+      const commit = await resolveFileCommit(entry.filename);
+      if (!commit || !repo) return { commit, pullRequests: [] };
 
-    return `[${short}](https://github.com/${repo}/commit/${commit})`;
+      return {
+        commit,
+        pullRequests: await listPullRequestsForCommit(repo, commit, token).catch(() => []),
+      };
+    },
+  );
+
+  function formatEntryDetails(meta: ChangelogEntryMeta): string | undefined {
+    if (meta.pullRequests.length === 0) return;
+
+    const lines: string[] = [];
+    for (const pr of meta.pullRequests) {
+      let line = repo
+        ? `- [#${pr.number} ${pr.title}](https://github.com/${repo}/pull/${pr.number})`
+        : `- #${pr.number} ${pr.title}`;
+      if (pr.user) line += ` by @${pr.user.login}`;
+      lines.push(line);
+    }
+
+    return [
+      "<details>",
+      "<summary>Pull request & contributors</summary>",
+      "",
+      ...lines,
+      "",
+      "</details>",
+    ].join("\n");
   }
 
   return async (entry) => {
-    let commitPromise = cache.get(entry.filename);
-    if (!commitPromise) {
-      commitPromise = resolveFileCommit(entry.filename);
-      cache.set(entry.filename, commitPromise);
+    const meta = await resolveEntryMeta(entry);
+    let commitSuffix = "";
+
+    if (meta.commit) {
+      const short = meta.commit.slice(0, 7);
+      const link = repo
+        ? `[${short}](https://github.com/${repo}/commit/${meta.commit})`
+        : `\`${short}\``;
+      commitSuffix += ` (${link})`;
     }
 
-    const commit = await commitPromise;
-    const commitSuffix = commit ? ` (${formatCommitLink(commit)})` : "";
     const lines: string[] = [];
 
     for (const section of entry.sections) {
       lines.push(`### ${section.title}${commitSuffix}`, "");
       if (section.content) lines.push(section.content, "");
     }
+
+    const details = formatEntryDetails(meta);
+    if (details) lines.push(details);
 
     return lines.join("\n").trim();
   };

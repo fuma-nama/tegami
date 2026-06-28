@@ -315,7 +315,9 @@ export function npm({
             const isPeer = field === "peerDependencies";
             if (isPeer && onBreakPeerDep === "ignore") {
               continue;
-            } else if (isPeer && onBreakPeerDep === "set") {
+            }
+
+            if (isPeer && onBreakPeerDep === "set") {
               updatedRange = spec.linked.version;
             } else if (isPeer && onBreakPeerDep === "error") {
               throw new Error(
