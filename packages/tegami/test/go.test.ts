@@ -272,6 +272,118 @@ Note.
     );
   });
 
+  test("respects packages.go.publish when deciding whether to publish", async () => {
+    const cwd = await createGoWorkspace();
+    tempDirs.push(cwd);
+
+    await tegami({
+      cwd,
+      plugins: [git(), go()],
+      packages: {
+        "example.com/acme/core": { go: { publish: false } },
+      },
+    })
+      .draft()
+      .then((draft) => draft.apply());
+
+    mockRegistryMissing();
+    exec.mockImplementation((command, args = [], options) => {
+      if (command === "git" && args[0] === "tag" && args[1] === "--list") {
+        return commandResult({ stdout: "v1.0.0\npkg/api/v1.0.0\n" });
+      }
+
+      if (command === "git" && args[0] === "rev-parse") {
+        return commandResult({ exitCode: 1 });
+      }
+
+      if (command === "git" && (args[0] === "tag" || args[0] === "push")) {
+        return commandResult();
+      }
+
+      return mockGoExec(command, args, options);
+    });
+
+    const result = await tegami({
+      cwd,
+      plugins: [git(), go()],
+      packages: {
+        "example.com/acme/core": { go: { publish: false } },
+      },
+    }).publish();
+    if (result === "skipped") {
+      throw new Error("expected publish plan, got skipped");
+    }
+
+    expect(result.packages.get("go:example.com/acme/core")?.preflight?.shouldPublish).toBe(false);
+    expect(result.packages.get("go:example.com/acme/api")?.preflight?.shouldPublish).toBe(true);
+
+    const published = [...result.packages.entries()]
+      .filter(([, plan]) => plan.publishResult!.type === "published")
+      .map(([id]) => id);
+
+    expect(published).toEqual(["go:example.com/acme/api"]);
+
+    expect(
+      exec.mock.calls
+        .filter(([command, args]) => command === "git" && args?.[0] === "tag" && args.length === 2)
+        .map(([, args]) => args?.[1]),
+    ).toEqual(["pkg/api/v1.0.1"]);
+  });
+
+  test("respects groups.go.publish and package overrides", async () => {
+    const cwd = await createGoWorkspace();
+    tempDirs.push(cwd);
+
+    await tegami({
+      cwd,
+      plugins: [git(), go()],
+      groups: {
+        acme: { go: { publish: false } },
+      },
+      packages: {
+        "example.com/acme/api": { group: "acme", go: { publish: true } },
+        "example.com/acme/core": { group: "acme" },
+      },
+    })
+      .draft()
+      .then((draft) => draft.apply());
+
+    mockRegistryMissing();
+    exec.mockImplementation((command, args = [], options) => {
+      if (command === "git" && args[0] === "tag" && args[1] === "--list") {
+        return commandResult({ stdout: "v1.0.0\npkg/api/v1.0.0\n" });
+      }
+
+      if (command === "git" && args[0] === "rev-parse") {
+        return commandResult({ exitCode: 1 });
+      }
+
+      if (command === "git" && (args[0] === "tag" || args[0] === "push")) {
+        return commandResult();
+      }
+
+      return mockGoExec(command, args, options);
+    });
+
+    const result = await tegami({
+      cwd,
+      plugins: [git(), go()],
+      groups: {
+        acme: { go: { publish: false } },
+      },
+      packages: {
+        "example.com/acme/api": { group: "acme", go: { publish: true } },
+        "example.com/acme/core": { group: "acme" },
+      },
+    }).publish();
+    if (result === "skipped") {
+      throw new Error("expected publish plan, got skipped");
+    }
+
+    expect(result.packages.get("go:example.com/acme/core")?.preflight?.shouldPublish).toBe(false);
+    expect(result.packages.get("go:example.com/acme/api")?.preflight?.shouldPublish).toBe(true);
+  });
+
   test("still creates git tags when the module version is already on the proxy", async () => {
     const cwd = await createRootModuleWorkspace();
     tempDirs.push(cwd);

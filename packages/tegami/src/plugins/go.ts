@@ -219,6 +219,10 @@ export function go({
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof GoPackage)) return;
 
+      const shouldPublish =
+        pkg.getPackageOptions().go?.publish ??
+        this.graph.getPackageGroup(pkg.id)?.options?.go?.publish ??
+        true;
       const wait: string[] = [];
 
       for (const [moduleName] of pkg.mod.requires) {
@@ -236,7 +240,7 @@ export function go({
       }
 
       return {
-        shouldPublish: true,
+        shouldPublish,
         wait,
       };
     },

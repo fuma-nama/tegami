@@ -51,6 +51,20 @@ export interface TegamiOptions<Groups extends string = string> {
   cargo?: CargoPluginOptions;
 }
 
+interface SharedGoOptions {
+  /**
+   * Whether to publish this module (create git tags).
+   *
+   * @default true
+   */
+  publish?: boolean;
+}
+
+interface SharedNpmOptions {
+  /** npm dist-tag used when publishing. */
+  distTag?: string;
+}
+
 export interface GroupOptions {
   /** Prerelease identifier appended to bumped versions (e.g. `alpha` → `1.1.0-alpha.0`). */
   prerelease?: string;
@@ -62,10 +76,10 @@ export interface GroupOptions {
   syncGitTag?: boolean;
 
   /** npm-specific options. */
-  npm?: {
-    /** npm dist-tag used when publishing. */
-    distTag?: string;
-  };
+  npm?: SharedNpmOptions;
+
+  /** go-specific options. */
+  go?: SharedGoOptions;
 }
 
 export interface PackageOptions<Group extends string = string> {
@@ -75,10 +89,10 @@ export interface PackageOptions<Group extends string = string> {
   group?: Group;
 
   /** npm-specific options. */
-  npm?: {
-    /** npm dist-tag used when publishing. */
-    distTag?: string;
-  };
+  npm?: SharedNpmOptions;
+
+  /** go-specific options. */
+  go?: SharedGoOptions;
 }
 
 export type TegamiPluginOption = TegamiPlugin | TegamiPluginOption[];
