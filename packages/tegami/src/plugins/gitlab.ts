@@ -17,16 +17,19 @@ import {
   hasGitChanges,
 } from "../utils/version-request";
 import {
-  createPullRequest,
-  createRelease as createGitHubRelease,
-  findOpenPullRequest,
-  listPullRequestsForCommit,
+  createMergeRequest,
+  createRelease as createGitLabRelease,
+  findOpenMergeRequest,
+  listMergeRequestsForCommit,
   releaseExistsByTag,
-  updatePullRequest,
-  PullRequestSummary,
-} from "./github/api";
+  updateMergeRequest,
+  type GitLabToken,
+  type MergeRequestSummary,
+  type GitLabRequestOptions,
+  gitlabWebUrl,
+} from "./gitlab/api";
 
-interface GithubRelease {
+interface GitlabRelease {
   /** Release title */
   title?: string;
   /** Release notes */
@@ -35,48 +38,52 @@ interface GithubRelease {
   prerelease?: boolean;
 }
 
-type ResolvedGithubRelease = Required<GithubRelease>;
+type ResolvedGitlabRelease = Required<GitlabRelease>;
 
-interface VersionPullRequest {
-  /** Pull request title. */
+interface VersionMergeRequest {
+  /** Merge request title. */
   title?: string;
-  /** Pull request body. */
+  /** Merge request body. */
   body?: string;
 }
 
-interface VersionPullRequestOptions {
+interface VersionMergeRequestOptions {
   /**
-   * Create the PR even outside of CI.
+   * Create the MR even outside of CI.
    *
    * @default false
    */
   forceCreate?: boolean;
   /**
-   * Pull request branch.
+   * Merge request branch.
    *
    * @default "tegami/version-packages"
    */
   branch?: string;
   /**
-   * Pull request base branch.
+   * Merge request base branch.
    *
    * @default "main"
    */
   base?: string;
 
-  /** Override details for "Version Packages" PR. */
-  create?: (this: TegamiContext, opts: { draft: Draft }) => Awaitable<VersionPullRequest>;
+  /** Override details for "Version Packages" MR. */
+  create?: (this: TegamiContext, opts: { draft: Draft }) => Awaitable<VersionMergeRequest>;
 }
 
-/** Options for creating GitHub releases after a successful publish. */
-export interface GitHubPluginOptions extends GitPluginOptions {
-  /** GitHub repository. */
+/** Options for creating GitLab releases after a successful publish. */
+export interface GitLabPluginOptions extends GitPluginOptions {
+  /** GitLab repository. */
   repo?: string;
-  /** Optional GitHub token for Git & GitHub operations. */
+  /** Optional GitLab token for Git & GitLab operations. */
   token?: string;
+  /** GitLab API URL. Defaults to `https://gitlab.com/api/v4`. */
+  apiUrl?: string;
+  /** GitLab web URL. Defaults to `https://gitlab.com`. */
+  webUrl?: string;
 
   /**
-   * Create GitHub release for published packages.
+   * Create GitLab release for published packages.
    *
    * @default true
    */
@@ -84,7 +91,7 @@ export interface GitHubPluginOptions extends GitPluginOptions {
     | boolean
     | {
         /**
-         * Create GitHub release immediately after successful publish, without waiting for others.
+         * Create GitLab release immediately after successful publish, without waiting for others.
          *
          * @default false
          */
@@ -94,24 +101,24 @@ export interface GitHubPluginOptions extends GitPluginOptions {
         create?: (
           this: TegamiContext,
           opts: { tag: string; pkg: WorkspacePackage; plan: PublishPlan },
-        ) => Awaitable<GithubRelease>;
+        ) => Awaitable<GitlabRelease>;
         /** Override release details when multiple packages share a git tag. */
         createGrouped?: (
           this: TegamiContext,
           opts: { tag: string; packages: WorkspacePackage[]; plan: PublishPlan },
-        ) => Awaitable<GithubRelease>;
+        ) => Awaitable<GitlabRelease>;
       };
 
   /**
-   * (CLI only) Open a version pull request after versioning.
+   * (CLI only) Open a version merge request after versioning.
    *
    * Defaults to enabled in CI and disabled locally.
    */
-  versionPr?: VersionPullRequestOptions | false;
+  versionMr?: VersionMergeRequestOptions | false;
 }
 
-/** Create GitHub releases for successfully published packages after the whole plan succeeds. */
-export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
+/** Create GitLab releases for successfully published packages after the whole plan succeeds. */
+export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
   const { release: releaseOptions = true } = options;
 
   let renderer: ChangelogRenderer | undefined;
@@ -119,31 +126,35 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     return (renderer ??= createChangelogRenderer(context));
   }
 
-  const cliSnapshots = new Map<string, string | undefined>();
+  const cliOriginalPackageVersions = new Map<string, string | undefined>();
   const plugin: TegamiPlugin = {
-    name: "github",
+    name: "gitlab",
     init() {
-      this.github = {
-        repo: options.repo ?? process.env.GITHUB_REPOSITORY,
-        token: options.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
+      this.gitlab = {
+        repo: options.repo ?? process.env.GITLAB_REPOSITORY ?? process.env.CI_PROJECT_PATH,
+        token: resolveGitLabToken(options.token),
+        apiUrl: options.apiUrl ?? process.env.GITLAB_API_URL ?? process.env.CI_API_V4_URL,
+        webUrl: options.webUrl ?? process.env.GITLAB_SERVER_URL ?? process.env.CI_SERVER_URL,
       };
     },
     async resolvePlanStatus({ plan }) {
-      const { repo, token } = this.github!;
+      const { repo, token } = this.gitlab!;
       if (!repo || !token || releaseOptions === false) return;
       const requiredTags = new Set<string>();
+      const api = gitLabApiOptions(this.gitlab);
 
       for (const pkg of plan.packages.values()) {
         if (pkg.preflight!.shouldPublish && pkg.git?.tag) requiredTags.add(pkg.git.tag);
       }
 
       return Array.from(requiredTags, async (tag) => {
-        if (!(await releaseExistsByTag(repo, tag, token))) return "pending";
+        if (!(await releaseExistsByTag(repo, tag, api))) return "pending";
       });
     },
     async afterPublishAll({ plan }) {
-      const { repo, token } = this.github!;
+      const { repo, token } = this.gitlab!;
       if (!repo || !token || releaseOptions === false) return;
+      const api = gitLabApiOptions(this.gitlab);
       const {
         eager = false,
         create,
@@ -170,8 +181,8 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             if (result.type === "failed") return;
           }
 
-          if (await releaseExistsByTag(repo, tag, token)) return;
-          let release: ResolvedGithubRelease;
+          if (await releaseExistsByTag(repo, tag, api)) return;
+          let release: ResolvedGitlabRelease;
 
           if (packages.length > 1) {
             const overrides = (await createGrouped?.call(this, { tag, packages, plan })) ?? {};
@@ -199,12 +210,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             };
           }
 
-          await createGitHubRelease(repo, {
+          await createGitLabRelease(repo, {
             tag,
             title: release.title,
             notes: release.notes,
             prerelease: release.prerelease,
-            token,
+            ...api,
           });
         }),
       );
@@ -212,25 +223,24 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     cli: {
       async init() {
         if (!isCI()) return;
-        const { repo, token } = this.github ?? {};
+        const { repo, token, webUrl } = this.gitlab ?? {};
         if (!token || !repo) return;
 
-        const result = await x(
-          "git",
-          ["remote", "set-url", "origin", `https://x-access-token:${token}@github.com/${repo}.git`],
-          { nodeOptions: { cwd: this.cwd } },
-        );
+        const origin = gitlabRemoteUrl(repo, token, webUrl);
+        const result = await x("git", ["remote", "set-url", "origin", origin], {
+          nodeOptions: { cwd: this.cwd },
+        });
         if (result.exitCode !== 0) {
-          throw execFailure("Failed to configure git remote for GitHub Actions.", result);
+          throw execFailure("Failed to configure git remote for GitLab Actions.", result);
         }
       },
       draftCreated() {
         for (const pkg of this.graph.getPackages()) {
-          cliSnapshots.set(pkg.id, pkg.version);
+          cliOriginalPackageVersions.set(pkg.id, pkg.version);
         }
       },
       async draftApplied(draft) {
-        const config = options.versionPr ?? {};
+        const config = options.versionMr ?? {};
         if (
           config === false ||
           !(config.forceCreate || isCI()) ||
@@ -239,43 +249,44 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           return;
         }
 
-        const repo = this.github?.repo;
+        const repo = this.gitlab?.repo;
         const { branch = "tegami/version-packages", base = "main" } = config;
-        const basePR = await config.create?.call(this, { draft });
-        const pr: Required<VersionPullRequest> = {
-          title: basePR?.title ?? "Version Packages",
+        const baseMR = await config.create?.call(this, { draft });
+        const mr: Required<VersionMergeRequest> = {
+          title: baseMR?.title ?? "Version Packages",
           body:
-            basePR?.body ??
+            baseMR?.body ??
             createVersionRequestBody(
               draft,
               this,
-              cliSnapshots,
-              "Merge this PR to publish the versioned packages.",
+              cliOriginalPackageVersions,
+              "Merge this MR to publish the versioned packages.",
             ),
         };
 
-        await commitVersionBranchChanges(this.cwd, branch, pr.title);
+        await commitVersionBranchChanges(this.cwd, branch, mr.title);
 
-        const token = this.github?.token;
+        const api = gitLabApiOptions(this.gitlab);
         if (!repo) return;
 
-        const openPr = await findOpenPullRequest(repo, branch, token);
+        const openMr = await findOpenMergeRequest(repo, { head: branch, base, ...api });
 
-        if (openPr !== undefined) {
-          await updatePullRequest(repo, openPr, {
-            title: pr.title,
-            body: pr.body,
-            token,
+        if (openMr !== undefined) {
+          await updateMergeRequest(repo, openMr, {
+            title: mr.title,
+            body: mr.body,
+            base,
+            ...api,
           });
           return;
         }
 
-        await createPullRequest(repo, {
-          title: pr.title,
-          body: pr.body,
+        await createMergeRequest(repo, {
+          title: mr.title,
+          body: mr.body,
           head: branch,
           base,
-          token,
+          ...api,
         });
       },
     },
@@ -288,11 +299,13 @@ type ChangelogRenderer = (entry: ChangelogEntry) => Promise<string>;
 
 interface ChangelogEntryMeta {
   commit?: string;
-  pullRequests: PullRequestSummary[];
+  mergeRequests: MergeRequestSummary[];
 }
 
 function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
-  const { repo, token } = context.github!;
+  const { repo, webUrl } = context.gitlab!;
+  const api = gitLabApiOptions(context.gitlab);
+  const baseUrl = gitlabWebUrl(webUrl);
 
   const resolveFileCommit = cached(
     (filename: string) => filename,
@@ -315,24 +328,24 @@ function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
     (entry: ChangelogEntry) => entry.id,
     async (entry): Promise<ChangelogEntryMeta> => {
       const commit = await resolveFileCommit(entry.filename);
-      if (!commit || !repo) return { commit, pullRequests: [] };
+      if (!commit || !repo) return { commit, mergeRequests: [] };
 
       return {
         commit,
-        pullRequests: await listPullRequestsForCommit(repo, commit, token).catch(() => []),
+        mergeRequests: await listMergeRequestsForCommit(repo, commit, api).catch(() => []),
       };
     },
   );
 
   function formatEntryDetails(meta: ChangelogEntryMeta): string | undefined {
-    if (meta.pullRequests.length === 0) return;
+    if (meta.mergeRequests.length === 0) return;
 
     const lines: string[] = [];
-    for (const pr of meta.pullRequests) {
+    for (const mr of meta.mergeRequests) {
       let line = repo
-        ? `- [#${pr.number} ${pr.title}](https://github.com/${repo}/pull/${pr.number})`
-        : `- #${pr.number} ${pr.title}`;
-      if (pr.user) line += ` by @${pr.user.login}`;
+        ? `- [!${mr.number} ${mr.title}](${baseUrl}/${repo}/-/merge_requests/${mr.number})`
+        : `- #${mr.number} ${mr.title}`;
+      if (mr.user) line += ` by @${mr.user.login}`;
       lines.push(line);
     }
 
@@ -352,9 +365,7 @@ function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
 
     if (meta.commit) {
       const short = meta.commit.slice(0, 7);
-      const link = repo
-        ? `[${short}](https://github.com/${repo}/commit/${meta.commit})`
-        : `\`${short}\``;
+      const link = repo ? `[${short}](${baseUrl}/${repo}/-/commit/${meta.commit})` : `\`${short}\``;
       commitSuffix += ` (${link})`;
     }
 
@@ -417,4 +428,34 @@ async function defaultGroupedNotes(
   }
 
   return sections.join("\n");
+}
+
+function gitLabApiOptions(gitlab: TegamiContext["gitlab"]): GitLabRequestOptions {
+  const options: GitLabRequestOptions = {};
+  if (gitlab?.apiUrl) options.apiUrl = gitlab.apiUrl;
+  if (gitlab?.token) options.token = gitlab.token;
+  return options;
+}
+
+function resolveGitLabToken(optionToken?: string): GitLabToken | undefined {
+  if (optionToken) return { value: optionToken, type: "private-token" };
+  if (process.env.GITLAB_TOKEN) {
+    return { value: process.env.GITLAB_TOKEN, type: "private-token" };
+  }
+  if (process.env.GL_TOKEN) {
+    return { value: process.env.GL_TOKEN, type: "private-token" };
+  }
+  if (process.env.CI_JOB_TOKEN) {
+    return { value: process.env.CI_JOB_TOKEN, type: "job-token" };
+  }
+}
+
+function gitlabRemoteUrl(repo: string, token: GitLabToken, webUrl?: string): string {
+  const username = token.type === "job-token" ? "gitlab-ci-token" : "oauth2";
+  const authenticatedUrl = gitlabWebUrl(webUrl).replace(
+    /^https?:\/\//,
+    `https://${username}:${token.value}@`,
+  );
+
+  return `${authenticatedUrl}/${repo}.git`;
 }

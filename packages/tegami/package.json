@@ -15,6 +15,7 @@
     "./generators/simple": "./dist/generators/simple.js",
     "./plugins/git": "./dist/plugins/git.js",
     "./plugins/github": "./dist/plugins/github.js",
+    "./plugins/gitlab": "./dist/plugins/gitlab.js",
     "./plugins/go": "./dist/plugins/go.js",
     "./providers/cargo": "./dist/providers/cargo.js",
     "./providers/npm": "./dist/providers/npm.js",

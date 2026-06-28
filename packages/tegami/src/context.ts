@@ -5,6 +5,7 @@ import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
 import type { AgentName } from "package-manager-detector";
+import type { GitLabToken } from "./plugins/gitlab/api";
 
 export interface TegamiContext {
   /** absolute path */
@@ -21,6 +22,13 @@ export interface TegamiContext {
   github?: {
     repo?: string;
     token?: string;
+  };
+  /** additional context when GitLab plugin is configured */
+  gitlab?: {
+    repo?: string;
+    token?: GitLabToken;
+    apiUrl?: string;
+    webUrl?: string;
   };
   /** additional context when npm plugin is configured */
   npm?: {

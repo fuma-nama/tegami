@@ -1,0 +1,93 @@
+---
+title: GitLab
+description: Version Packages merge requests and GitLab releases.
+---
+
+The GitLab plugin automates the Changesets-style release flow: open a Version Packages merge request after versioning, then create GitLab releases after publish. It includes the [git plugin](/plugins/git) for tag creation.
+
+```ts
+import { gitlab } from "tegami/plugins/gitlab";
+
+const paper = tegami({
+  plugins: [
+    gitlab({
+      repo: "your-org/your-repo",
+    }),
+  ],
+});
+```
+
+## Requirements
+
+- `GITLAB_TOKEN` or `GL_TOKEN` with permission to create merge requests and releases.
+- Or `CI_JOB_TOKEN` when your GitLab project allows job-token access to the required repository and API operations.
+
+For self-hosted GitLab, pass `apiUrl` and `webUrl`, or set `GITLAB_API_URL` and `GITLAB_SERVER_URL`.
+
+## Version Packages MR
+
+After `tegami version` applies a plan in CI, the plugin:
+
+1. Creates or updates the `tegami/version-packages` branch.
+2. Commits version and changelog changes.
+3. Opens a merge request against your base branch.
+
+Configure the MR behavior:
+
+```ts
+gitlab({
+  repo: "your-org/your-repo",
+  apiUrl: "https://gitlab.example.com/api/v4",
+  webUrl: "https://gitlab.example.com",
+  versionMr: {
+    branch: "tegami/version-packages",
+    base: "main",
+  },
+});
+```
+
+| Setting       | Default                   | Description                                      |
+| ------------- | ------------------------- | ------------------------------------------------ |
+| `branch`      | `tegami/version-packages` | Source branch for the version MR                 |
+| `base`        | `main`                    | Target branch for the version MR                 |
+| `forceCreate` | `false`                   | Create the MR outside CI as well                 |
+| `create`      | —                         | Override the MR title and body before it is sent |
+
+Set `versionMr: false` to disable MR creation. Set `versionMr: { forceCreate: true }` to always create the MR, including locally.
+
+## GitLab releases
+
+After a successful publish, the plugin creates a GitLab release for each git tag. Release notes come from the changelog sections attached to each package.
+
+For grouped tags (`syncGitTag`), one release covers all packages in the group.
+
+Set `release: false` to disable GitLab release creation.
+
+```ts
+gitlab({
+  repo: "your-org/your-repo",
+  release: {
+    // create a release as soon as a tag succeeds, without waiting for the whole plan
+    eager: false,
+    create({ tag, pkg, plan }) {
+      return {
+        title: tag,
+        notes: `Released ${pkg.name}`,
+        prerelease: false,
+      };
+    },
+    createGrouped({ tag, packages, plan }) {
+      return {
+        title: tag,
+        notes: packages.map((pkg) => pkg.name).join("\n"),
+      };
+    },
+  },
+});
+```
+
+| Setting         | Default | Description                                                       |
+| --------------- | ------- | ----------------------------------------------------------------- |
+| `eager`         | `false` | Create releases without waiting for every package in the plan     |
+| `create`        | —       | Override release details for a single package                     |
+| `createGrouped` | —       | Override release details when multiple packages share one git tag |
