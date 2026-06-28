@@ -159,6 +159,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         ...linkedPackages.map((pkg) => `- \`${pkg.id}\``),
         "",
         "</details>",
+        "",
       );
 
       for (const section of entry.sections) {
