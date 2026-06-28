@@ -128,14 +128,16 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
   function defaultVersionPRBody(draft: Draft, context: TegamiContext): string {
     const packageLines: string[] = [];
-    const changesets = new Set<ChangelogEntry>();
+    const changesets = new Map<ChangelogEntry, WorkspacePackage[]>();
 
-    for (const pkg of context.graph.getPackages()) {
-      const packageDraft = draft.getPackageDraft(pkg.id);
-      if (!packageDraft) continue;
+    for (const [id, packageDraft] of draft.getPackageDrafts()) {
+      const pkg = context.graph.get(id);
+      if (!pkg) continue;
 
-      if (packageDraft.changelogs) {
-        for (const entry of packageDraft.changelogs) changesets.add(entry);
+      for (const entry of packageDraft.changelogs ?? []) {
+        const list = changesets.get(entry);
+        if (list) list.push(pkg);
+        else changesets.set(entry, [pkg]);
       }
 
       const originalVersion = cliOriginalPackageVersions.get(pkg.id);
@@ -147,8 +149,18 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     }
 
     const changelogLines: string[] = [];
-    for (const entry of changesets) {
+    for (const [entry, linkedPackages] of changesets) {
       changelogLines.push(`### ${entry.subject ?? `\`${entry.filename}\``}`, "");
+
+      changelogLines.push(
+        "<details>",
+        `<summary>Show Bumped Packages (${linkedPackages.length})</summary>`,
+        "",
+        ...linkedPackages.map((pkg) => `- \`${pkg.id}\``),
+        "",
+        "</details>",
+      );
+
       for (const section of entry.sections) {
         changelogLines.push(`#### ${section.title}`, "");
         if (section.content) changelogLines.push(section.content);
