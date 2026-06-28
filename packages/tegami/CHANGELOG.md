@@ -1,3 +1,13 @@
+## tegami@1.0.0-beta.2 (beta)
+
+### Change behaviour of `publishPreflight` hook
+
+Now only the first handler plugin will be considered, no longer merges results.
+
+### Replace `preflight.publish` with `preflight.shouldPublish`
+
+The publish checking will only happen at publish-time & plan resolve.
+
 ## tegami@1.0.0-beta.1 (beta)
 
 ### Handle empty `version` fields in `Cargo.toml` & `package.json`
