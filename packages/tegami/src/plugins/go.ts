@@ -236,14 +236,23 @@ export function go({
       }
 
       return {
-        publish: !(await isModulePublished(pkg.name, pkg.version)),
+        shouldPublish: true,
         wait,
       };
+    },
+    resolvePlanStatus({ plan }) {
+      return Array.from(plan.packages, async ([id, { preflight }]) => {
+        if (!preflight!.shouldPublish) return;
+
+        const pkg = this.graph.get(id)!;
+        if (!(pkg instanceof GoPackage)) return;
+        if (!(await isModulePublished(pkg.name, pkg.version))) return "pending";
+      });
     },
     async publish({ pkg }) {
       if (!(pkg instanceof GoPackage)) return;
 
-      return { type: "published" };
+      return { type: (await isModulePublished(pkg.name, pkg.version)) ? "skipped" : "published" };
     },
     cli: {
       async draftApplied() {

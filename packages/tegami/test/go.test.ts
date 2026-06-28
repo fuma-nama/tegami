@@ -272,7 +272,7 @@ Note.
     );
   });
 
-  test("skips publish when the module version is already on the proxy", async () => {
+  test("still creates git tags when the module version is already on the proxy", async () => {
     const cwd = await createRootModuleWorkspace();
     tempDirs.push(cwd);
 
@@ -306,10 +306,10 @@ Note.
       "https://proxy.golang.org/example.com%2Facme%2Fapp/@v/v1.0.1.info",
     );
     expect(
-      exec.mock.calls.some(
-        ([command, args]) => command === "git" && args?.[0] === "tag" && args.length === 2,
-      ),
-    ).toBe(false);
+      exec.mock.calls
+        .filter(([command, args]) => command === "git" && args?.[0] === "tag" && args.length === 2)
+        .map(([, args]) => args?.[1]),
+    ).toEqual(["v1.0.1"]);
   });
 });
 

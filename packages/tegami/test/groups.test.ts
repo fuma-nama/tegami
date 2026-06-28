@@ -164,10 +164,6 @@ Breaking note.
     });
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "rev-parse") {
-        return commandResult({ exitCode: 1 });
-      }
-
       if (args.at(0) === "tag") {
         return commandResult();
       }

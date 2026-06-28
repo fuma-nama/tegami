@@ -3,7 +3,7 @@ import path from "node:path";
 import { intro, note, outro, spinner } from "@clack/prompts";
 import { Command, InvalidArgumentError } from "commander";
 import type { Awaitable } from "../types";
-import { isCI } from "../utils/constants";
+import { isCI } from "../utils/common";
 import { CancelledError, handlePluginError } from "../utils/error";
 import type { PublishPlan, Tegami } from "..";
 import type { Draft } from "../plans/draft";
@@ -253,7 +253,7 @@ async function publishPackages(
   let hasFailed = false;
 
   for (const [id, packagePlan] of plan.packages) {
-    if (!packagePlan.updated) continue;
+    if (!packagePlan.preflight!.shouldPublish) continue;
 
     const result = packagePlan.publishResult!;
     const pkg = context.graph.get(id)!;

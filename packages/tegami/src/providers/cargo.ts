@@ -120,12 +120,17 @@ export function cargo({
       }
 
       return {
-        publish:
-          pkg.version !== undefined &&
-          pkg.packageInfo.publish !== false &&
-          !(await isPackagePublished(pkg.name, pkg.version)),
+        shouldPublish: pkg.version !== undefined && pkg.packageInfo.publish !== false,
         wait,
       };
+    },
+    resolvePlanStatus({ plan }) {
+      return Array.from(plan.packages, async ([id, { preflight }]) => {
+        if (!preflight!.shouldPublish) return;
+        const pkg = this.graph.get(id)!;
+        if (!(pkg instanceof CargoPackage) || !pkg.version) return;
+        if (!(await isPackagePublished(pkg.name, pkg.version))) return "pending";
+      });
     },
     async publish({ pkg }) {
       if (!(pkg instanceof CargoPackage)) return;
@@ -137,6 +142,10 @@ export function cargo({
       });
 
       if (result.exitCode !== 0) {
+        if (/already exists|already published/i.test(`${result.stdout}\n${result.stderr}`)) {
+          return { type: "skipped" };
+        }
+
         return {
           type: "failed",
           error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,

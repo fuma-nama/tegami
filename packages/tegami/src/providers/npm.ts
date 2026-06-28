@@ -235,11 +235,20 @@ export function npm({
       if (!(pkg instanceof NpmPackage)) return;
 
       return {
-        publish:
-          pkg.version !== undefined &&
-          pkg.manifest.private !== true &&
-          !(await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry)),
+        shouldPublish: pkg.version !== undefined && pkg.manifest.private !== true,
       };
+    },
+    resolvePlanStatus({ plan }) {
+      return Array.from(plan.packages, async ([id, { preflight }]) => {
+        if (!preflight!.shouldPublish) return;
+        const pkg = this.graph.get(id)!;
+
+        if (!(pkg instanceof NpmPackage) || !pkg.version) return;
+        if (
+          !(await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry))
+        )
+          return "pending";
+      });
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {
@@ -424,6 +433,13 @@ async function publish(
   pkg: NpmPackage,
   distTag?: string,
 ): Promise<PackagePublishResult> {
+  if (
+    !pkg.version ||
+    (await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry))
+  ) {
+    return { type: "skipped" };
+  }
+
   // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
   if (client === "bun") {
     // `npm publish tarball.tgz` does not run lifecycle scripts, we must run it to align with default behaviours

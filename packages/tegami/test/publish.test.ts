@@ -46,10 +46,7 @@ describe("publish plans", () => {
     const result = plan.packages.get("npm:@acme/core");
 
     expect(result?.publishResult).toEqual({ type: "published" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
-      { headers: { Accept: "application/json" } },
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
   });
 

@@ -95,12 +95,6 @@ describe("git utils", () => {
     });
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "rev-parse") {
-        return commandResult({
-          exitCode: 1,
-        });
-      }
-
       if (args.at(0) === "tag") {
         return commandResult();
       }
@@ -111,28 +105,6 @@ describe("git utils", () => {
     await plugin.afterPublishAll?.call(context, { plan });
     expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
       [
-        {
-          "args": [
-            "rev-parse",
-            "-q",
-            "--verify",
-            "refs/tags/@acme/core@1.0.1",
-          ],
-          "command": "git",
-          "cwd": "/repo",
-          "throwOnError": undefined,
-        },
-        {
-          "args": [
-            "rev-parse",
-            "-q",
-            "--verify",
-            "refs/tags/@acme/ui@1.0.1",
-          ],
-          "command": "git",
-          "cwd": "/repo",
-          "throwOnError": undefined,
-        },
         {
           "args": [
             "tag",
@@ -153,6 +125,34 @@ describe("git utils", () => {
         },
       ]
     `);
+  });
+
+  test("creates git tags for skipped publish results", async () => {
+    const plugin = git();
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "tag") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: publishPlan(context.graph, {
+        packages: [{ pkg: core, publishResult: { type: "skipped" } }],
+      }),
+    });
+
+    expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+      {
+        args: ["tag", "@acme/core@1.0.1"],
+        command: "git",
+        cwd: "/repo",
+        throwOnError: undefined,
+      },
+    ]);
   });
 
   test("skips plugin tags on dry runs, disabled tags, and failed publishes", async () => {
@@ -183,12 +183,6 @@ describe("git utils", () => {
       const context = pluginContext();
       const core = context.graph.get("test:@acme/core")!;
       exec.mockImplementation((_command, args = []) => {
-        if (args.at(0) === "rev-parse") {
-          return commandResult({
-            exitCode: 1,
-          });
-        }
-
         if (args.at(0) === "tag" || args.at(0) === "push") {
           return commandResult();
         }
@@ -202,17 +196,6 @@ describe("git utils", () => {
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
-          {
-            "args": [
-              "rev-parse",
-              "-q",
-              "--verify",
-              "refs/tags/@acme/core@1.0.1",
-            ],
-            "command": "git",
-            "cwd": "/repo",
-            "throwOnError": undefined,
-          },
           {
             "args": [
               "tag",
@@ -240,17 +223,48 @@ describe("git utils", () => {
     }
   });
 
+  test("skips duplicate tags without pushing them", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const plugin = git();
+      const context = pluginContext();
+      const core = context.graph.get("test:@acme/core")!;
+      exec.mockImplementation((_command, args = []) => {
+        if (args.at(0) === "tag") {
+          return commandResult({
+            exitCode: 128,
+            stderr: "fatal: tag '@acme/core@1.0.1' already exists",
+          });
+        }
+
+        throw new Error(`Unexpected command: ${args.join(" ")}`);
+      });
+
+      await plugin.afterPublishAll?.call(context, {
+        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+      });
+
+      expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+        {
+          args: ["tag", "@acme/core@1.0.1"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
+      ]);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
   test("throws when git tag creation fails", async () => {
     const plugin = git();
     const context = pluginContext();
     const core = context.graph.get("test:@acme/core")!;
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "rev-parse") {
-        return commandResult({
-          exitCode: 1,
-        });
-      }
-
       if (args.at(0) === "tag") {
         return commandResult({ exitCode: 1, stderr: "tag failed" });
       }

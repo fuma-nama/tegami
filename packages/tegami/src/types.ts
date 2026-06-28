@@ -106,7 +106,11 @@ export interface TegamiPlugin {
     opts: { lock: PublishLock; plan: PublishPlan },
   ): Awaitable<void>;
 
-  /** Collect data before publishing a package, will be merged if multiple plugins return preflight data for this package. */
+  /**
+   * Collect data before publishing a package.
+   *
+   * If multiple plugins return preflight data for the same package, only the first plugin will be considered.
+   */
   publishPreflight?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage; plan: PublishPlan },
@@ -126,7 +130,9 @@ export interface TegamiPlugin {
   resolvePlanStatus?(
     this: TegamiContext,
     opts: { plan: PublishPlan },
-  ): Awaitable<"success" | "pending" | undefined | void>;
+  ): Awaitable<
+    "success" | "pending" | undefined | void | Awaitable<"success" | "pending" | undefined>[]
+  >;
 
   /** Called before a package will be published, return `false` to prevent from publishing. */
   willPublish?(
@@ -159,8 +165,12 @@ export interface TegamiPlugin {
 export type Awaitable<T> = T | Promise<T>;
 
 export interface PublishPreflight {
-  /** if the package should be published. */
-  publish: boolean;
+  /**
+   * Whether the package should be published, the state **must not** be changed across different runs.
+   *
+   * To note if the package is already published, hook `resolvePlanStatus` on plugins, or skip at publish-time.
+   */
+  shouldPublish: boolean;
 
   /**
    * Package ids that must be published before this one, this will automatically disallow circular dependency.

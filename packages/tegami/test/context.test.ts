@@ -5,13 +5,6 @@ import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createTegamiContext } from "../src/context";
-import {
-  fetchMock,
-  installRegistryFetchMock,
-  mockRegistryPublished,
-  npmPackageVersionUrl,
-  uninstallRegistryFetchMock,
-} from "./helpers/registry-fetch";
 import type { TegamiPlugin } from "../src/types";
 
 vi.mock("package-manager-detector", () => ({
@@ -28,12 +21,9 @@ const tempDirs: string[] = [];
 beforeEach(() => {
   detectPackageManager.mockReset();
   exec.mockReset();
-  installRegistryFetchMock();
-  mockRegistryPublished(JSON.stringify({ version: "1.0.0" }));
 });
 
 afterEach(async () => {
-  uninstallRegistryFetchMock();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
@@ -47,14 +37,13 @@ describe("tegami context", () => {
     const pkg = context.graph.get("npm:@acme/core")!;
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    await npmPlugin.publishPreflight?.call(context, {
-      pkg,
-      plan: emptyPlan(),
-    });
+    await expect(
+      npmPlugin.publishPreflight?.call(context, {
+        pkg,
+        plan: emptyPlan(),
+      }),
+    ).resolves.toEqual({ shouldPublish: true });
 
-    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
-      headers: { Accept: "application/json" },
-    });
     expect(detectPackageManager).not.toHaveBeenCalled();
     expect(context.npm).toEqual({ client: "npm" });
   });
@@ -72,14 +61,13 @@ describe("tegami context", () => {
     const pkg = context.graph.get("npm:@acme/core")!;
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    await npmPlugin.publishPreflight?.call(context, {
-      pkg,
-      plan: emptyPlan(),
-    });
+    await expect(
+      npmPlugin.publishPreflight?.call(context, {
+        pkg,
+        plan: emptyPlan(),
+      }),
+    ).resolves.toEqual({ shouldPublish: true });
 
-    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
-      headers: { Accept: "application/json" },
-    });
     expect(detectPackageManager).toHaveBeenCalledTimes(1);
     expect(detectPackageManager).toHaveBeenCalledWith({
       cwd,
@@ -95,14 +83,13 @@ describe("tegami context", () => {
     const pkg = context.graph.get("npm:@acme/core")!;
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    await npmPlugin.publishPreflight?.call(context, {
-      pkg,
-      plan: emptyPlan(),
-    });
+    await expect(
+      npmPlugin.publishPreflight?.call(context, {
+        pkg,
+        plan: emptyPlan(),
+      }),
+    ).resolves.toEqual({ shouldPublish: true });
 
-    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.0"), {
-      headers: { Accept: "application/json" },
-    });
     expect(context.npm).toEqual({ client: "npm" });
   });
 

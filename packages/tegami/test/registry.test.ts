@@ -34,32 +34,31 @@ afterEach(async () => {
 });
 
 describe("npm registry preflight", () => {
-  test("reads the registry from the graph during preflight", async () => {
+  test("reads the registry from the graph during resolvePlanStatus", async () => {
     const context = await createContext("pnpm", "https://registry.example.test");
 
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
     );
 
-    await loadPlan(context);
+    const plan = await loadPlan(context);
 
+    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
     expect(fetchMock).toHaveBeenCalledWith(
       npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
       { headers: { Accept: "application/json" } },
     );
   });
 
-  test("returns publish true for missing package versions", async () => {
+  test("returns shouldPublish true for missing package versions", async () => {
     const context = await createContext("npm", undefined, "9.9.9");
     const pkg = context.graph.get("npm:@acme/core");
     if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
-
     await expect(
       npmPlugin.publishPreflight?.call(context, { pkg, plan: await loadPlan(context) }),
-    ).resolves.toEqual({ publish: true });
+    ).resolves.toEqual({ shouldPublish: true });
   });
 
   test("publishes with yarn publish", async () => {

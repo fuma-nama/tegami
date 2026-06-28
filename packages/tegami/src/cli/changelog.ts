@@ -15,7 +15,7 @@ import type { Tegami } from "..";
 import { changelogFilename, generateFromCommits } from "../changelog/generate";
 import type { PackageGroup, PackageGraph, WorkspacePackage } from "../graph";
 import type { TegamiContext } from "../context";
-import { isCI } from "../utils/constants";
+import { isCI } from "../utils/common";
 import { CancelledError } from "../utils/error";
 import { getChangedPackages } from "../utils/git-changes";
 import type { BumpType } from "../utils/semver";

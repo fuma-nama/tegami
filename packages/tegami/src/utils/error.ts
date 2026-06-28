@@ -1,6 +1,6 @@
 import type { Result } from "tinyexec";
 import type { Awaitable, TegamiPlugin } from "../types";
-import { isCI } from "./constants";
+import { isCI } from "./common";
 
 export class CancelledError extends Error {
   constructor() {

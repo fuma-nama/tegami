@@ -8,7 +8,7 @@ import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatNpmDistTag, formatPackageVersion } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
-import { isCI } from "../utils/constants";
+import { isCI } from "../utils/common";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
@@ -198,19 +198,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       const requiredTags = new Set<string>();
 
       for (const pkg of plan.packages.values()) {
-        if (pkg.preflight!.publish && pkg.git?.tag) requiredTags.add(pkg.git.tag);
+        if (pkg.preflight!.shouldPublish && pkg.git?.tag) requiredTags.add(pkg.git.tag);
       }
 
-      try {
-        await Promise.all(
-          Array.from(requiredTags, async (tag) => {
-            if (!(await releaseExistsByTag(repo, tag, token))) throw "pending";
-          }),
-        );
-      } catch (e) {
-        if (e === "pending") return "pending";
-        throw e;
-      }
+      return Array.from(requiredTags, async (tag) => {
+        if (!(await releaseExistsByTag(repo, tag, token))) return "pending";
+      });
     },
     async afterPublishAll({ plan }) {
       const { repo, token } = this.github!;
@@ -222,13 +215,13 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       } = releaseOptions === true ? {} : releaseOptions;
 
       const groups = new Map<string, WorkspacePackage[]>();
-      for (const [id, packagePlan] of plan.packages) {
+      for (const [id, { preflight, publishResult, git }] of plan.packages) {
+        if (!eager && publishResult!.type === "failed") return;
+
+        const tag = git?.tag;
+        if (!tag || !preflight!.shouldPublish) continue;
+
         const pkg = this.graph.get(id)!;
-        if (!eager && packagePlan.publishResult!.type === "failed") return;
-
-        const tag = packagePlan.git?.tag;
-        if (!tag) continue;
-
         const group = groups.get(tag);
         if (group) group.push(pkg);
         else groups.set(tag, [pkg]);
@@ -236,21 +229,11 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
 
       await Promise.all(
         Array.from(groups, async ([tag, packages]) => {
-          let hasFailed = false;
-          let hasPublished = false;
           for (const member of packages) {
             const result = plan.packages.get(member.id)!.publishResult!;
-            switch (result.type) {
-              case "published":
-                hasPublished = true;
-                break;
-              case "failed":
-                hasFailed = true;
-                break;
-            }
+            if (result.type === "failed") return;
           }
 
-          if (hasFailed || !hasPublished) return;
           if (await releaseExistsByTag(repo, tag, token)) return;
           let release: ResolvedGithubRelease;
 

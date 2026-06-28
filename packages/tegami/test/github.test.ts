@@ -8,6 +8,7 @@ import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
+import { somePromise } from "../src/utils/common";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -141,11 +142,14 @@ describe("github release plugin", () => {
     const plugin = githubPlugin({ repo: "acme/repo" });
     const context = publishContext();
 
-    await expect(
-      plugin.resolvePlanStatus?.call(context, {
-        plan: releasePlan(context, [{}]),
-      }),
-    ).resolves.toBe("pending");
+    const status = await plugin.resolvePlanStatus?.call(context, {
+      plan: releasePlan(context, [{}]),
+    });
+
+    expect(Array.isArray(status)).toBe(true);
+    expect(
+      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
+    ).toBe(true);
   });
 
   test("ignores missing releases when npm preflight is complete", async () => {
@@ -155,9 +159,9 @@ describe("github release plugin", () => {
 
     await expect(
       plugin.resolvePlanStatus?.call(context, {
-        plan: releasePlan(context, [{ preflight: { publish: false } }]),
+        plan: releasePlan(context, [{ preflight: { shouldPublish: false } }]),
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual([]);
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
   });
@@ -193,6 +197,18 @@ describe("github release plugin", () => {
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
     expect(createGitHubRelease).not.toHaveBeenCalled();
+  });
+
+  test("creates GitHub releases for skipped publish results", async () => {
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext();
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [{ publishResult: { type: "skipped" } }]),
+    });
+
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
+    expect(createGitHubRelease).toHaveBeenCalledTimes(1);
   });
 
   test("uses changelog entries for default notes", async () => {
@@ -734,7 +750,7 @@ function releasePlan(
       updated: true,
       git: "git" in entry ? entry.git : { tag: `${name}@${pkg.version}` },
       npm: entry.npm ?? { distTag: "latest" },
-      preflight: entry.preflight ?? { publish: true },
+      preflight: entry.preflight ?? { shouldPublish: true },
       publishResult: entry.publishResult ?? { type: "published" },
     });
   }

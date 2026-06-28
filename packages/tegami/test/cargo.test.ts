@@ -184,7 +184,13 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("not found", { status: 404 })),
+      vi.fn(async (url: string) => {
+        if (url.includes("registry.npmjs.org")) {
+          return new Response(JSON.stringify({ version: "1.1.0" }), { status: 200 });
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
     );
     exec.mockImplementation(() => commandResult());
 
@@ -198,9 +204,8 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
       .filter(([, plan]) => plan.publishResult!.type === "published")
       .map(([id]) => id);
 
-    expect(published.sort()).toEqual(
-      ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
-    );
+    expect(published.sort()).toEqual(["cargo:acme_binding", "cargo:acme_core"].sort());
+    expect(result.packages.get("npm:@acme/js")?.publishResult).toEqual({ type: "skipped" });
     expect(
       exec.mock.calls.map(([command, args, options]) => ({
         command,
@@ -208,11 +213,6 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
         cwd: normalizeDirPath(String(options?.nodeOptions?.cwd)),
       })),
     ).toEqual([
-      {
-        command: "npm",
-        args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "packages/js")),
-      },
       {
         command: "cargo",
         args: ["publish"],
@@ -224,6 +224,10 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
         cwd: normalizeDirPath(join(cwd, "crates/binding")),
       },
     ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://registry.npmjs.org/@acme/js/1.1.0",
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_core/1.1.0");
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_binding/1.0.1");
   });

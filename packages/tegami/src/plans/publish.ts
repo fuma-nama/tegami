@@ -6,6 +6,7 @@ import { parsePublishLock, PublishLock } from "./lock";
 import { PublishPreflight } from "../types";
 import { WorkspacePackage } from "../graph";
 import { handlePluginError } from "../utils/error";
+import { somePromise } from "../utils/common";
 
 export interface PublishPlan {
   options: PublishOptions;
@@ -97,7 +98,7 @@ function resolvePublishTargets(plan: PublishPlan): string[] {
 
   function scan(id: string, stack = new Set<string>()) {
     const preflight = plan.packages.get(id)?.preflight;
-    if (!preflight || !preflight.publish) return;
+    if (!preflight || !preflight.shouldPublish) return;
 
     if (stack.has(id)) {
       throw new Error(`circular reference of deps: ${[...stack, id].join(" -> ")}`);
@@ -204,32 +205,25 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
 export async function runPreflights(context: TegamiContext, plan: PublishPlan): Promise<void> {
   const promises: Promise<void>[] = [];
 
-  const runPreflight = async (pkg: WorkspacePackage) => {
-    const out: PublishPreflight = {
-      publish: true,
-    };
-
+  const runPreflight = async (pkg: WorkspacePackage): Promise<PublishPreflight> => {
     for (const plugin of context.plugins) {
       const res = await handlePluginError(plugin, "publishPreflight", () =>
         plugin.publishPreflight?.call(context, { pkg, plan }),
       );
 
-      if (res === undefined) continue;
-
-      out.publish = res.publish;
-      if (res.wait) {
-        out.wait ??= [];
-        out.wait.push(...res.wait);
-      }
+      if (res) return res;
     }
-    return out;
+
+    return {
+      shouldPublish: false,
+    };
   };
 
   for (const [id, packagePlan] of plan.packages) {
     const pkg = context.graph.get(id)!;
 
     if (!packagePlan.updated) {
-      packagePlan.preflight = { publish: false };
+      packagePlan.preflight = { shouldPublish: false };
       continue;
     }
 
@@ -247,26 +241,19 @@ export async function publishPlanStatus(
   plan: PublishPlan,
   context: TegamiContext,
 ): Promise<"success" | "pending"> {
-  for (const pkg of plan.packages.values()) {
-    if (!pkg.preflight) throw new Error("Should perform preflight before checking plan status.");
-
-    if (pkg.preflight.publish) return "pending";
-  }
-
-  try {
-    await Promise.all(
-      context.plugins.map(async (plugin) => {
-        const status = await handlePluginError(plugin, "resolvePlanStatus", () =>
-          plugin.resolvePlanStatus?.call(context, { plan }),
-        );
-
-        if (status === "pending") throw "pending";
-      }),
+  for (const plugin of context.plugins) {
+    const status = await handlePluginError(plugin, "resolvePlanStatus", () =>
+      plugin.resolvePlanStatus?.call(context, { plan }),
     );
 
-    return "success";
-  } catch (e) {
-    if (e === "pending") return "pending";
-    throw e;
+    if (Array.isArray(status) && (await somePromise(status, (v) => v === "pending"))) {
+      return "pending";
+    }
+
+    if (status === "pending") {
+      return "pending";
+    }
   }
+
+  return "success";
 }
