@@ -1,3 +1,17 @@
+## tegami@1.0.0-beta.1 (beta)
+
+### Handle empty `version` fields in `Cargo.toml` & `package.json`
+
+No longer bump versions when `version` field is not defined.
+
+### Fix replaying changelogs showing in PR body
+
+No longer show replay-only changelogs in PR previews.
+
+### Show bumped packages of each changelog
+
+The PR preview body now show the bumped packages of each changelog, in a collapsible.
+
 ## tegami@1.0.0-beta.0 (beta)
 
 ### Generate dist tag for npm in prerelease mode
