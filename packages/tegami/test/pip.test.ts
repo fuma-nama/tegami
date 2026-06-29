@@ -21,10 +21,6 @@ vi.mock("tinyexec", () => ({
 const tempDirs: string[] = [];
 const exec = vi.mocked(x);
 
-function paper(cwd: string) {
-  return tegami({ cwd, plugins: [pip()] });
-}
-
 beforeEach(() => {
   exec.mockReset();
   installRegistryFetchMock();
@@ -61,7 +57,7 @@ Note.
     exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
       ReturnType<typeof x>
     >);
-    await paper(cwd)
+    await tegami({ cwd, plugins: [pip()] })
       .draft()
       .then((draft) => draft.apply());
 
@@ -72,7 +68,7 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const graph = (await paper(cwd)._internal.context()).graph;
+    const graph = (await tegami({ cwd, plugins: [pip()] })._internal.context()).graph;
     const packages = graph.getPackages().map((pkg) => ({
       manager: pkg.manager,
       name: pkg.name,
@@ -105,7 +101,7 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const draft = await paper(cwd).draft();
+    const draft = await tegami({ cwd, plugins: [pip()] }).draft();
     await draft.apply();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/js/package.json"), "utf8"));
@@ -132,7 +128,7 @@ Note.
     const cwd = await createDuplicateNameWorkspace();
     tempDirs.push(cwd);
 
-    const paperInstance = paper(cwd);
+    const paperInstance = tegami({ cwd, plugins: [pip()] });
     const draft = await paperInstance.draft();
     await draft.apply();
 
@@ -171,7 +167,7 @@ acme-core = { workspace = true }
 `;
     await writeFile(join(cwd, "packages/api/pyproject.toml"), apiManifest);
 
-    await paper(cwd)
+    await tegami({ cwd, plugins: [pip()] })
       .draft()
       .then((draft) => draft.apply());
 
@@ -184,7 +180,7 @@ acme-core = { workspace = true }
   test("routes npm and pip publishes through their registry clients", async () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
-    await paper(cwd)
+    await tegami({ cwd, plugins: [pip()] })
       .draft()
       .then((draft) => draft.apply());
 
@@ -200,7 +196,7 @@ acme-core = { workspace = true }
     );
     exec.mockImplementation(() => commandResult());
 
-    const result = await paper(cwd).publish();
+    const result = await tegami({ cwd, plugins: [pip()] }).publish();
 
     if (result === "skipped") {
       throw new Error("expected publish plan, got skipped");
@@ -241,7 +237,7 @@ acme-core = { workspace = true }
   test("throws on circular pip workspace dependencies", async () => {
     const cwd = await createCircularPipWorkspace();
     tempDirs.push(cwd);
-    await paper(cwd)
+    await tegami({ cwd, plugins: [pip()] })
       .draft()
       .then((draft) => draft.apply());
 
@@ -254,7 +250,7 @@ acme-core = { workspace = true }
     );
     exec.mockImplementation(() => commandResult());
 
-    await expect(paper(cwd).publish()).rejects.toThrow(/circular reference of deps/);
+    await expect(tegami({ cwd, plugins: [pip()] }).publish()).rejects.toThrow(/circular reference of deps/);
   });
 });
 

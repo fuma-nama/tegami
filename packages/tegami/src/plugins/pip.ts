@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join, normalize, relative, resolve } from "node:path";
+import { join, normalize, resolve } from "node:path";
 import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
@@ -8,7 +8,7 @@ import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { WorkspacePackage } from "../graph";
+import { PackageGraph, WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 
 interface TomlTable {
@@ -105,7 +105,7 @@ export function pip({
           const spec = parseDependencySpec(String(rawSpec));
           if (!spec) continue;
 
-          const linked = resolveLinkedPackage(this, pkg, spec);
+          const linked = resolveLinkedPackage(this.graph, pkg, spec);
           if (!linked) continue;
 
           wait.push(linked.id);
@@ -162,7 +162,7 @@ export function pip({
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof PipPackage)) continue;
 
-        for (const { table, path: tablePath, kind } of dependencyTables(pkg.manifest)) {
+        for (const { table, path: tablePath } of dependencyTables(pkg.manifest)) {
           const next: string[] = [];
           let changed = false;
 
@@ -179,7 +179,7 @@ export function pip({
               continue;
             }
 
-            const workspace = isWorkspaceDependency(pkg, spec.name);
+            const workspace = getUvSource(pkg.manifest, spec.name)?.workspace === true;
             if (
               !workspace &&
               spec.version &&
@@ -259,11 +259,12 @@ function depsPolicy(
             const bumped = plan.bumpVersion(pkg);
             if (!bumped) continue;
 
-            if (isWorkspaceDependency(dependent, spec.name)) {
-              // ponytail: workspace deps always bump together like npm `workspace:` / `file:`
-            } else if (spec.version && semver.validRange(spec.version)) {
-              if (semver.satisfies(bumped, spec.version)) continue;
-            } else {
+            if (
+              getUvSource(dependent.manifest, spec.name)?.workspace !== true &&
+              (!spec.version ||
+                !semver.validRange(spec.version) ||
+                semver.satisfies(bumped, spec.version))
+            ) {
               continue;
             }
 
@@ -287,34 +288,24 @@ function depsPolicy(
 }
 
 function resolveLinkedPackage(
-  context: TegamiContext | PackageGraphLike,
+  graph: PackageGraph,
   pkg: PipPackage,
-  spec: DependencySpec,
+  spec: NonNullable<ReturnType<typeof parseDependencySpec>>,
 ): PipPackage | undefined {
-  const graph = "graph" in context ? context.graph : context;
-
-  const byName = graph.get(`pip:${spec.name}`);
-  if (byName instanceof PipPackage) return byName;
+  const linked = graph.get(`pip:${spec.name}`);
+  if (linked instanceof PipPackage) return linked;
 
   const source = getUvSource(pkg.manifest, spec.name);
-  if (source?.workspace) {
-    return graph.get(`pip:${spec.name}`) as PipPackage | undefined;
-  }
+  const absolute = source?.path
+    ? resolve(pkg.path, source.path)
+    : spec.url?.startsWith("file:")
+      ? resolveFileUrl(pkg.path, spec.url)
+      : undefined;
+  if (!absolute) return;
 
-  if (source?.path) {
-    const absolute = resolve(pkg.path, source.path);
-    return findPackageByPath(graph, absolute);
-  }
-
-  if (spec.url?.startsWith("file:")) {
-    const target = resolveFileUrl(pkg.path, spec.url);
-    return findPackageByPath(graph, target);
-  }
-}
-
-interface PackageGraphLike {
-  get(id: string): WorkspacePackage | undefined;
-  getPackages(): WorkspacePackage[];
+  return graph
+    .getPackages()
+    .find((candidate): candidate is PipPackage => candidate instanceof PipPackage && candidate.path === absolute);
 }
 
 async function isPackagePublished(name: string, version: string) {
@@ -340,49 +331,33 @@ async function discoverPipPackages(cwd: string, add: (pkg: PipPackage) => void):
   const workspace = tableValue(uv?.workspace);
   const members = workspace?.members;
   if (Array.isArray(members) && members.length > 0) {
-    const paths = await expandWorkspaceMembers(
-      cwd,
+    const paths = await glob(
       members.filter((member): member is string => typeof member === "string"),
-    );
-    const manifests = await Promise.all(
-      paths.map((path) =>
-        readPyprojectManifest(path)
-          .then((manifest) => ({ path, manifest }))
-          .catch(() => undefined),
-      ),
+      {
+        absolute: true,
+        cwd,
+        ignore: ["**/.venv/**", "**/__pycache__/**", "**/dist/**"],
+        onlyDirectories: true,
+        onlyFiles: false,
+      },
     );
 
-    for (const entry of manifests) {
-      if (entry) addPipPackage(entry.path, entry.manifest.manifest, entry.manifest.content, add);
+    for (const path of paths.map(normalize)) {
+      const manifest = await readPyprojectManifest(path).catch(() => undefined);
+      if (!manifest) continue;
+
+      const project = tableValue(manifest.manifest.project);
+      if (!project?.name) continue;
+
+      add(new PipPackage(path, manifest.manifest, manifest.content));
     }
     return;
   }
 
-  addPipPackage(cwd, root.manifest, root.content, add);
-}
-
-function addPipPackage(
-  path: string,
-  manifest: TomlTable,
-  content: string,
-  add: (pkg: PipPackage) => void,
-): void {
-  const project = tableValue(manifest.project);
+  const project = tableValue(root.manifest.project);
   if (!project?.name) return;
 
-  add(new PipPackage(path, manifest, content));
-}
-
-async function expandWorkspaceMembers(cwd: string, members: string[]): Promise<string[]> {
-  if (members.length === 0) return [];
-
-  return glob(members, {
-    absolute: true,
-    cwd,
-    ignore: ["**/.venv/**", "**/__pycache__/**", "**/dist/**"],
-    onlyDirectories: true,
-    onlyFiles: false,
-  }).then((paths) => paths.map(normalize));
+  add(new PipPackage(cwd, root.manifest, root.content));
 }
 
 function dependencyTables(manifest: TomlTable) {
@@ -418,22 +393,16 @@ function dependencyTables(manifest: TomlTable) {
   return tables;
 }
 
-interface DependencySpec {
-  name: string;
-  version?: string;
-  url?: string;
-}
-
-function parseDependencySpec(spec: string): DependencySpec | undefined {
+function parseDependencySpec(spec: string) {
   const trimmed = spec.trim();
   const atIndex = trimmed.indexOf(" @ ");
   if (atIndex > 0) {
-    const name = parsePackageName(trimmed.slice(0, atIndex).trim());
+    const name = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?/.exec(trimmed.slice(0, atIndex).trim())?.[1];
     if (!name) return;
     return { name, url: trimmed.slice(atIndex + 3).trim() };
   }
 
-  const name = parsePackageName(trimmed);
+  const name = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?/.exec(trimmed)?.[1];
   if (!name) return;
 
   const remainder = trimmed.slice(name.length).trim();
@@ -442,12 +411,10 @@ function parseDependencySpec(spec: string): DependencySpec | undefined {
   return { name, version: remainder };
 }
 
-function parsePackageName(value: string): string | undefined {
-  const match = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?/.exec(value.trim());
-  return match?.[1];
-}
-
-function formatDependencySpec(spec: DependencySpec, version: string): string {
+function formatDependencySpec(
+  spec: NonNullable<ReturnType<typeof parseDependencySpec>>,
+  version: string,
+): string {
   if (!spec.version) return spec.name;
 
   const trimmed = spec.version.trim();
@@ -460,7 +427,7 @@ function formatDependencySpec(spec: DependencySpec, version: string): string {
   return `${spec.name}>=${version}`;
 }
 
-function getUvSource(manifest: TomlTable, name: string): { workspace?: boolean; path?: string } | undefined {
+function getUvSource(manifest: TomlTable, name: string) {
   const sources = tableValue(tableValue(tableValue(manifest.tool)?.uv)?.sources);
   const source = tableValue(sources?.[name]);
   if (!source) return;
@@ -469,16 +436,6 @@ function getUvSource(manifest: TomlTable, name: string): { workspace?: boolean; 
     workspace: source.workspace === true,
     path: stringValue(source.path),
   };
-}
-
-function isWorkspaceDependency(pkg: PipPackage, name: string): boolean {
-  return getUvSource(pkg.manifest, name)?.workspace === true;
-}
-
-function findPackageByPath(graph: PackageGraphLike, absolute: string): PipPackage | undefined {
-  return graph
-    .getPackages()
-    .find((pkg): pkg is PipPackage => pkg instanceof PipPackage && pkg.path === absolute);
 }
 
 function resolveFileUrl(basePath: string, url: string): string {
@@ -494,7 +451,7 @@ function normalizePyPiName(name: string): string {
   return name.replaceAll("_", "-").toLowerCase();
 }
 
-async function readPyprojectManifest(path: string): Promise<{ manifest: TomlTable; content: string }> {
+async function readPyprojectManifest(path: string) {
   const content = await readFile(join(path, "pyproject.toml"), "utf8");
   return { manifest: parse(content) as TomlTable, content };
 }
