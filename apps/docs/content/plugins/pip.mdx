@@ -1,0 +1,42 @@
+---
+title: pip
+description: Python workspace support and PyPI publishing.
+---
+
+The pip plugin discovers workspace members from `pyproject.toml`, bumps versions, updates dependency ranges, and publishes to PyPI with `uv publish`.
+
+Add it to your config:
+
+```ts
+import { tegami } from "tegami";
+import { pip } from "tegami/plugins/pip";
+
+const paper = tegami({
+  plugins: [pip()],
+});
+```
+
+## Discovery
+
+Tegami reads the root `pyproject.toml` and expands `[tool.uv.workspace].members`. Packages need a `[project].name` and `version`.
+
+Workspace dependencies linked through `[tool.uv.sources]` are resolved automatically.
+
+## Configuration
+
+```ts
+pip({
+  updateLockFile: false,
+  bumpDep: ({ kind }) => (kind === "dependencies" ? "patch" : false),
+});
+```
+
+| Option           | Default | Description                                   |
+| ---------------- | ------- | --------------------------------------------- |
+| `updateLockFile` | `true`  | Run `uv lock` after versioning                |
+| `bumpDep`        | —       | Decide how to bump dependents when a package is bumped |
+
+Default behavior:
+
+- `dependencies` → patch bump on the dependent
+- `optional-dependencies` → no automatic bump

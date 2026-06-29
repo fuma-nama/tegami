@@ -200,10 +200,9 @@ function parseCommandArgs(
     help: { type: "boolean", short: "h" },
   };
   for (const option of command.options) {
-    optionConfig[option.name] = {
-      type: option.type,
-      short: option.short,
-    };
+    optionConfig[option.name] = option.short
+      ? { type: option.type, short: option.short }
+      : { type: option.type };
   }
 
   const parsed = parseArgs({

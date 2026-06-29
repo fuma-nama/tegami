@@ -38,6 +38,34 @@ describe("cli registry", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("--number <value>"));
   });
 
+  test("parses string options that do not define short flags", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-string-option-"));
+    tempDirs.push(cwd);
+    const action = vi.fn(async () => {});
+
+    await createCli(
+      tegami({
+        cwd,
+        plugins: [
+          {
+            name: "test",
+            initCli(cli) {
+              cli
+                .command("test cmd", { resolve: false })
+                .option("artifact", {
+                  type: "string",
+                  description: "output file",
+                })
+                .action(({ values }) => action(values));
+            },
+          },
+        ],
+      }),
+    ).parseAsync(["test", "cmd", "--artifact", "preview.md"]);
+
+    expect(action).toHaveBeenCalledWith({ artifact: "preview.md" });
+  });
+
   test("runs the registered root command without argv", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-root-"));
     tempDirs.push(cwd);
