@@ -136,7 +136,7 @@ export async function updateMergeRequest(
       body: JSON.stringify({
         title: options.title,
         description: options.body,
-        ...(options.base === undefined ? {} : { target_branch: options.base }),
+        target_branch: options.base,
       }),
     },
   );

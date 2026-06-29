@@ -207,17 +207,15 @@ export function cargo({
 
       await Promise.all(writes);
     },
-    cli: {
-      async draftApplied() {
-        if (!active || !updateLockFile) return;
-        const result = await x("cargo", ["update", "--workspace"], {
-          nodeOptions: { cwd: this.cwd },
-        });
+    async applyCliDraft() {
+      if (!active || !updateLockFile) return;
+      const result = await x("cargo", ["update", "--workspace"], {
+        nodeOptions: { cwd: this.cwd },
+      });
 
-        if (result.exitCode !== 0) {
-          throw execFailure("Failed to update Cargo lock file", result);
-        }
-      },
+      if (result.exitCode !== 0) {
+        throw execFailure("Failed to update Cargo lock file", result);
+      }
     },
   };
 }

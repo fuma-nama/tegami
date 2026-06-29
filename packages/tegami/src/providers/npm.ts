@@ -340,30 +340,28 @@ export function npm({
 
       await Promise.all(writes);
     },
-    cli: {
-      async draftApplied() {
-        if (!active || !updateLockFile) return;
+    async applyCliDraft() {
+      if (!active || !updateLockFile) return;
 
-        let args: string[];
-        if (client === "npm") {
-          args = ["ci"];
-        } else if (client === "yarn") {
-          args = ["install", "--immutable"];
-        } else if (client === "bun") {
-          args = ["install", "--frozen-lockfile"];
-        } else {
-          args = ["install", "--frozen-lockfile"];
-        }
+      let args: string[];
+      if (client === "npm") {
+        args = ["ci"];
+      } else if (client === "yarn") {
+        args = ["install", "--immutable"];
+      } else if (client === "bun") {
+        args = ["install", "--frozen-lockfile"];
+      } else {
+        args = ["install", "--frozen-lockfile"];
+      }
 
-        const result = await x(client, args, {
-          nodeOptions: {
-            cwd: this.cwd,
-          },
-        });
-        if (result.exitCode !== 0) {
-          throw execFailure("Failed to update lockfile.", result);
-        }
-      },
+      const result = await x(client, args, {
+        nodeOptions: {
+          cwd: this.cwd,
+        },
+      });
+      if (result.exitCode !== 0) {
+        throw execFailure("Failed to update lockfile.", result);
+      }
     },
   };
 }

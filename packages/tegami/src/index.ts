@@ -2,11 +2,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { generateFromCommits } from "./changelog/generate";
 import type { CommitChangelog, GenerateFromCommitsOptions } from "./changelog/generate";
-import { createTegamiContext, TegamiContext } from "./context";
+import { createTegamiContext, resolveGraph, TegamiContext } from "./context";
 import { Draft, createDraft } from "./plans/draft";
 import { parseChangelogFile, readChangelogEntries } from "./changelog/parse";
 import type { TegamiOptions } from "./types";
-import { PackageGraph } from "./graph";
 import {
   PublishOptions,
   PublishPlan,
@@ -72,7 +71,8 @@ export interface Tegami {
   /** Internal APIs, do not use it unless you know what you are doing */
   _internal: {
     context(): Promise<TegamiContext>;
-    graph(): Promise<PackageGraph>;
+    /** access context without requiring graph resolution */
+    contextUnresolved(): Promise<TegamiContext>;
     options: TegamiOptions;
   };
 }
@@ -81,17 +81,24 @@ export interface Tegami {
 export function tegami<const Groups extends string = string>(
   options: TegamiOptions<Groups> = {},
 ): Tegami {
-  const $context = init();
-  async function init() {
-    return createTegamiContext(options);
+  let $context: Promise<TegamiContext> | undefined;
+  let $contextResolved: Promise<TegamiContext> | undefined;
+  function getContext() {
+    return ($context ??= createTegamiContext(options));
+  }
+  function getContextResolved() {
+    return ($contextResolved ??= getContext().then((ctx) => {
+      resolveGraph(ctx);
+      return ctx;
+    }));
   }
 
   return {
     async generateChangelog(generateOptions = {}) {
       const { write = true } = generateOptions;
-
-      const context = await $context;
+      const context = await getContextResolved();
       const changelogs = await generateFromCommits(context, generateOptions);
+
       if (write && changelogs.length > 0) {
         await mkdir(context.changelogDir, { recursive: true });
         await Promise.all(
@@ -104,15 +111,11 @@ export function tegami<const Groups extends string = string>(
     },
     _internal: {
       options,
-      context() {
-        return $context;
-      },
-      async graph() {
-        return (await $context).graph;
-      },
+      context: getContextResolved,
+      contextUnresolved: getContext,
     },
     async draft() {
-      const context = await $context;
+      const context = await getContextResolved();
       const changelogs = await readChangelogEntries(context);
 
       if (context.options.conventionalCommits) {
@@ -129,7 +132,7 @@ export function tegami<const Groups extends string = string>(
       return createDraft(changelogs, context);
     },
     async publishStatus() {
-      const context = await $context;
+      const context = await getContextResolved();
       const plan = await initPublishPlan(context, {});
       if (!plan) return "idle";
 
@@ -137,7 +140,7 @@ export function tegami<const Groups extends string = string>(
       return publishPlanStatus(plan, context);
     },
     async publish(publishOptions = {}) {
-      const context = await $context;
+      const context = await getContextResolved();
       const plan = await initPublishPlan(context, publishOptions);
       if (!plan) return "skipped";
 
@@ -159,7 +162,7 @@ export function tegami<const Groups extends string = string>(
     },
 
     async cleanup() {
-      const context = await $context;
+      const context = await getContextResolved();
       const plan = await initPublishPlan(context, {});
       if (!plan) {
         return { state: "skipped", reason: "no-plan" };

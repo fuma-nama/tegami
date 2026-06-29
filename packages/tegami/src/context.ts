@@ -39,7 +39,6 @@ export interface TegamiContext {
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const changelogDir = path.resolve(cwd, options.changelogDir ?? ".tegami");
-  const graph = new PackageGraph();
   const ctx: TegamiContext = {
     cwd,
     changelogDir,
@@ -48,12 +47,18 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
       : path.join(changelogDir, "publish-lock.yaml"),
     options,
     plugins: resolvePlugins([npm(options.npm), cargo(options.cargo), ...(options.plugins ?? [])]),
-    graph,
+    graph: new PackageGraph(),
   };
 
   for (const plugin of ctx.plugins) {
     await handlePluginError(plugin, "init", () => plugin.init?.call(ctx));
   }
+
+  return ctx;
+}
+
+export async function resolveGraph(ctx: TegamiContext) {
+  const { options, graph } = ctx;
 
   for (const plugin of ctx.plugins) {
     await handlePluginError(plugin, "resolve", () => plugin.resolve?.call(ctx));
@@ -94,8 +99,6 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
       graph.addGroupMember(packageOptions.group, pkg.id);
     }
   }
-
-  return ctx;
 }
 
 const PLUGIN_ORDER = {

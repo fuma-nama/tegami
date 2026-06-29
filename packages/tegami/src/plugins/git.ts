@@ -39,22 +39,20 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
   return {
     name: "git",
     enforce: "pre",
-    cli: {
-      async init() {
-        if (!isCI()) return;
+    async initCli() {
+      if (!isCI()) return;
 
-        const gitOptions = { nodeOptions: { cwd: this.cwd } };
+      const gitOptions = { nodeOptions: { cwd: this.cwd } };
 
-        for (const args of [
-          ["config", "user.name", "github-actions[bot]"],
-          ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"],
-        ] as const) {
-          const result = await x("git", [...args], gitOptions);
-          if (result.exitCode !== 0) {
-            throw execFailure("Failed to configure git user for GitHub Actions.", result);
-          }
+      for (const args of [
+        ["config", "user.name", "github-actions[bot]"],
+        ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"],
+      ] as const) {
+        const result = await x("git", args, gitOptions);
+        if (result.exitCode !== 0) {
+          throw execFailure("Failed to configure git user for GitHub Actions.", result);
         }
-      },
+      }
     },
     initPublishPlan({ plan }) {
       const { graph } = this;

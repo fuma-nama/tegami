@@ -35,15 +35,41 @@ interface PrPreviewCommandOptions {
 }
 
 export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}): TegamiCLI {
+  const $init = init();
+  async function init() {
+    const ctx = await tegami._internal.contextUnresolved();
+
+    for (const plugin of ctx.plugins) {
+      await handlePluginError(plugin, "initCli", () => plugin.initCli?.call(ctx));
+    }
+  }
+
   return {
     async parseAsync(argv) {
-      await runCliProgram(tegami, options, argv);
+      await handleCliError(async () => {
+        await $init;
+        await runCliProgram(tegami, options, argv);
+      });
     },
   };
 }
 
 export async function runCli(tegami: Tegami, options: TegamiCLIOptions = {}): Promise<void> {
-  await runCliProgram(tegami, options);
+  await createCli(tegami, options).parseAsync();
+}
+
+async function handleCliError<T>(fn: () => Awaitable<T>) {
+  try {
+    return await fn();
+  } catch (error) {
+    if (error instanceof CancelledError) {
+      outro(error.message);
+    } else {
+      note(error instanceof Error ? error.message : String(error), "Error");
+      outro("Command failed.");
+    }
+    process.exit(1);
+  }
 }
 
 async function runCliProgram(
@@ -51,16 +77,31 @@ async function runCliProgram(
   options: TegamiCLIOptions,
   argv = process.argv.slice(2),
 ) {
-  try {
-    if (argv.length === 0) {
-      await runAction(tegami, () => runChangelogTui(tegami));
+  const unresolvedContext = await tegami._internal.contextUnresolved();
+
+  for (const plugin of unresolvedContext.plugins) {
+    const result = await handlePluginError(plugin, "runCli", () =>
+      plugin.runCli?.call(unresolvedContext, {
+        argv,
+      }),
+    );
+
+    if (result === true) return;
+    if (typeof result === "function") {
+      await result.call(await tegami._internal.context());
       return;
     }
+  }
 
-    const [command, ...rest] = argv;
+  if (argv.length === 0) {
+    await runAction(tegami, () => runChangelogTui(tegami));
+    return;
+  }
 
-    if (command === "--help" || command === "-h") {
-      console.log(`Usage: tegami [command]
+  const [command, ...rest] = argv;
+
+  if (command === "--help" || command === "-h") {
+    console.log(`Usage: tegami [command]
 
 create changelogs
 
@@ -76,105 +117,96 @@ Commands:
 
 Run without a command to open the changelog TUI.
 `);
-      return;
+    return;
+  }
+
+  switch (command) {
+    case "version": {
+      if (rest.length > 0) {
+        if (rest[0] === "--help" || rest[0] === "-h") {
+          console.log(`Usage: tegami version`);
+          process.exit(0);
+        }
+        throw new Error(`Unknown option: ${rest[0]}`);
+      }
+      await runAction(tegami, async () => {
+        await versionPackages(tegami, { cli: options });
+      });
+      break;
     }
+    case "ci": {
+      if (rest.length > 0) {
+        if (rest[0] === "--help" || rest[0] === "-h") {
+          console.log(`Usage: tegami ci`);
+          process.exit(0);
+        }
+        throw new Error(`Unknown option: ${rest[0]}`);
+      }
+      await runAction(tegami, async () => {
+        const versioned = await versionPackages(tegami, { cli: options });
+        if (versioned) return;
+        await publishPackages(tegami, { cli: options });
+      });
+      break;
+    }
+    case "check-publish": {
+      if (rest.length > 0) {
+        if (rest[0] === "--help" || rest[0] === "-h") {
+          console.log(`Usage: tegami check-publish`);
+          process.exit(0);
+        }
+        throw new Error(`Unknown option: ${rest[0]}`);
+      }
+      await runAction(tegami, async () => {
+        const status = await tegami.publishStatus();
+        process.exit(status === "pending" ? 0 : 1);
+      });
+      break;
+    }
+    case "pr": {
+      const [subcommand, ...prRest] = rest;
 
-    switch (command) {
-      case "version": {
-        if (rest.length > 0) {
-          if (rest[0] === "--help" || rest[0] === "-h") {
-            console.log(`Usage: tegami version`);
-            process.exit(0);
-          }
-          throw new Error(`Unknown option: ${rest[0]}`);
-        }
-        await runAction(tegami, async () => {
-          await versionPackages(tegami, { cli: options });
-        });
-        break;
-      }
-      case "ci": {
-        if (rest.length > 0) {
-          if (rest[0] === "--help" || rest[0] === "-h") {
-            console.log(`Usage: tegami ci`);
-            process.exit(0);
-          }
-          throw new Error(`Unknown option: ${rest[0]}`);
-        }
-        await runAction(tegami, async () => {
-          const versioned = await versionPackages(tegami, { cli: options });
-          if (versioned) return;
-          await publishPackages(tegami, { cli: options });
-        });
-        break;
-      }
-      case "check-publish": {
-        if (rest.length > 0) {
-          if (rest[0] === "--help" || rest[0] === "-h") {
-            console.log(`Usage: tegami check-publish`);
-            process.exit(0);
-          }
-          throw new Error(`Unknown option: ${rest[0]}`);
-        }
-        await runAction(tegami, async () => {
-          const status = await tegami.publishStatus();
-          process.exit(status === "pending" ? 0 : 1);
-        });
-        break;
-      }
-      case "pr": {
-        const [subcommand, ...prRest] = rest;
-
-        switch (subcommand) {
-          case "preview":
-            await runPrPreviewCommand(tegami, prRest);
-            break;
-          case "comment":
-            await runPrCommentCommand(prRest);
-            break;
-          case "--help":
-          case "-h":
-          case undefined:
-            console.log(`Usage: tegami pr <command>
+      switch (subcommand) {
+        case "preview":
+          await runPrPreviewCommand(tegami, prRest);
+          break;
+        case "comment":
+          await runPrCommentCommand(prRest);
+          break;
+        case "--help":
+        case "-h":
+        case undefined:
+          console.log(`Usage: tegami pr <command>
 
 Commands:
   preview  show a pull request release preview and changelog guidance
   comment  post the pull request release preview as a comment
 `);
-            break;
-          default:
-            throw new Error(`Unknown pr command: ${subcommand}`);
-        }
-        break;
+          break;
+        default:
+          throw new Error(`Unknown pr command: ${subcommand}`);
       }
-      case "publish":
-        await runPublishCommand(tegami, options, rest);
-        break;
-      case "cleanup": {
-        if (rest.length > 0) {
-          if (rest[0] === "--help" || rest[0] === "-h") {
-            console.log(`Usage: tegami cleanup`);
-            process.exit(0);
-          }
-          throw new Error(`Unknown option: ${rest[0]}`);
+      break;
+    }
+    case "publish":
+      await runPublishCommand(tegami, options, rest);
+      break;
+    case "cleanup": {
+      if (rest.length > 0) {
+        if (rest[0] === "--help" || rest[0] === "-h") {
+          console.log(`Usage: tegami cleanup`);
+          process.exit(0);
         }
-        await runAction(tegami, () => runCleanup(tegami));
-        break;
+        throw new Error(`Unknown option: ${rest[0]}`);
       }
-      case "init-agent":
-        await runInitAgentCommand(tegami, rest);
-        break;
-      default:
-        throw new Error(`Unknown command: ${command}`);
+      await runAction(tegami, () => runCleanup(tegami));
+      break;
     }
-  } catch (error) {
-    if (error instanceof CancelledError) {
-      outro(error.message);
-    } else {
-      note(error instanceof Error ? error.message : String(error), "Error");
-      outro("Command failed.");
-    }
-    process.exit(1);
+    case "init-agent":
+      await runInitAgentCommand(tegami, rest);
+      break;
+    default:
+      throw new Error(`Unknown command: ${command}`);
   }
 }
 
@@ -323,8 +355,8 @@ async function versionPackages(
   }
 
   for (const plugin of context.plugins) {
-    await handlePluginError(plugin, "cli.draftCreated", () =>
-      plugin.cli?.draftCreated?.call(context, draft),
+    await handlePluginError(plugin, "initCliDraft", () =>
+      plugin.initCliDraft?.call(context, draft),
     );
   }
 
@@ -373,8 +405,8 @@ async function versionPackages(
   s.stop("Package versions updated");
 
   for (const plugin of context.plugins) {
-    await handlePluginError(plugin, "cli.draftApplied", () =>
-      plugin.cli?.draftApplied?.call(context, draft),
+    await handlePluginError(plugin, "applyCliDraft", () =>
+      plugin.applyCliDraft?.call(context, draft),
     );
   }
 
@@ -476,7 +508,7 @@ async function runAction(tegami: Tegami, action: () => Awaitable<void>): Promise
   const context = await tegami._internal.context();
 
   for (const plugin of context.plugins) {
-    await handlePluginError(plugin, "cli.init", () => plugin.cli?.init?.call(context));
+    await handlePluginError(plugin, "initCli", () => plugin.initCli?.call(context));
   }
 
   await action();

@@ -100,8 +100,13 @@ export type TegamiPluginOption = TegamiPlugin | TegamiPluginOption[];
 export interface TegamiPlugin {
   name: string;
   enforce?: "pre" | "default" | "post";
-  /** When Tegami initializes */
+
+  /** When Tegami initializes. */
   init?(this: TegamiContext): Awaitable<void>;
+
+  /** When Tegami CLI initializes, this runs before `resolve()`. */
+  initCli?(this: TegamiContext): Promise<void>;
+
   /** Resolve workspace packages and dependency metadata into the shared graph. */
   resolve?(this: TegamiContext): Awaitable<void>;
 
@@ -163,17 +168,23 @@ export interface TegamiPlugin {
   /** Called after all publishing finishes. */
   afterPublishAll?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
 
-  /** CLI lifecycle hooks. */
-  cli?: {
-    /** Called once before a CLI command runs. */
-    init?(this: TegamiContext): Awaitable<void>;
+  /**
+   * Called when Tegami CLI is executed, returns `true` if the command is handled by this plugin.
+   *
+   * This runs before `resolve`, you can return a function if the package graph must be resolved before running the command.
+   */
+  runCli?(
+    this: TegamiContext,
+    opts: {
+      argv: string[];
+    },
+  ): Awaitable<boolean | ((this: TegamiContext) => Awaitable<void>) | void | undefined>;
 
-    /** Called after `tegami version` returns a draft. */
-    draftCreated?(this: TegamiContext, draft: Draft): Awaitable<void>;
+  /** Called after `tegami version` returns a draft. */
+  initCliDraft?(this: TegamiContext, draft: Draft): Awaitable<void>;
 
-    /** Called after `tegami version` applies a draft. */
-    draftApplied?(this: TegamiContext, draft: Draft): Awaitable<void>;
-  };
+  /** Called after `tegami version` applies a draft. */
+  applyCliDraft?(this: TegamiContext, draft: Draft): Awaitable<void>;
 }
 
 export type Awaitable<T> = T | Promise<T>;

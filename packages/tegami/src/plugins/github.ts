@@ -209,75 +209,69 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         }),
       );
     },
-    cli: {
-      async init() {
-        if (!isCI()) return;
-        const { repo, token } = this.github ?? {};
-        if (!token || !repo) return;
+    async initCli() {
+      if (!isCI()) return;
+      const { repo, token } = this.github ?? {};
+      if (!token || !repo) return;
 
-        const result = await x(
-          "git",
-          ["remote", "set-url", "origin", `https://x-access-token:${token}@github.com/${repo}.git`],
-          { nodeOptions: { cwd: this.cwd } },
-        );
-        if (result.exitCode !== 0) {
-          throw execFailure("Failed to configure git remote for GitHub Actions.", result);
-        }
-      },
-      draftCreated() {
-        for (const pkg of this.graph.getPackages()) {
-          cliSnapshots.set(pkg.id, pkg.version);
-        }
-      },
-      async draftApplied(draft) {
-        const config = options.versionPr ?? {};
-        if (
-          config === false ||
-          !(config.forceCreate || isCI()) ||
-          !(await hasGitChanges(this.cwd))
-        ) {
-          return;
-        }
+      const result = await x(
+        "git",
+        ["remote", "set-url", "origin", `https://x-access-token:${token}@github.com/${repo}.git`],
+        { nodeOptions: { cwd: this.cwd } },
+      );
+      if (result.exitCode !== 0) {
+        throw execFailure("Failed to configure git remote for GitHub Actions.", result);
+      }
+    },
+    initCliDraft() {
+      for (const pkg of this.graph.getPackages()) {
+        cliSnapshots.set(pkg.id, pkg.version);
+      }
+    },
+    async applyCliDraft(draft) {
+      const config = options.versionPr ?? {};
+      if (config === false || !(config.forceCreate || isCI()) || !(await hasGitChanges(this.cwd))) {
+        return;
+      }
 
-        const repo = this.github?.repo;
-        const { branch = "tegami/version-packages", base = "main" } = config;
-        const basePR = await config.create?.call(this, { draft });
-        const pr: Required<VersionPullRequest> = {
-          title: basePR?.title ?? "Version Packages",
-          body:
-            basePR?.body ??
-            createVersionRequestBody(
-              draft,
-              this,
-              cliSnapshots,
-              "Merge this PR to publish the versioned packages.",
-            ),
-        };
+      const repo = this.github?.repo;
+      const { branch = "tegami/version-packages", base = "main" } = config;
+      const basePR = await config.create?.call(this, { draft });
+      const pr: Required<VersionPullRequest> = {
+        title: basePR?.title ?? "Version Packages",
+        body:
+          basePR?.body ??
+          createVersionRequestBody(
+            draft,
+            this,
+            cliSnapshots,
+            "Merge this PR to publish the versioned packages.",
+          ),
+      };
 
-        await commitVersionBranchChanges(this.cwd, branch, pr.title);
+      await commitVersionBranchChanges(this.cwd, branch, pr.title);
 
-        const token = this.github?.token;
-        if (!repo) return;
+      const token = this.github?.token;
+      if (!repo) return;
 
-        const openPr = await findOpenPullRequest(repo, branch, token);
+      const openPr = await findOpenPullRequest(repo, branch, token);
 
-        if (openPr !== undefined) {
-          await updatePullRequest(repo, openPr, {
-            title: pr.title,
-            body: pr.body,
-            token,
-          });
-          return;
-        }
-
-        await createPullRequest(repo, {
+      if (openPr !== undefined) {
+        await updatePullRequest(repo, openPr, {
           title: pr.title,
           body: pr.body,
-          head: branch,
-          base,
           token,
         });
-      },
+        return;
+      }
+
+      await createPullRequest(repo, {
+        title: pr.title,
+        body: pr.body,
+        head: branch,
+        base,
+        token,
+      });
     },
   };
 

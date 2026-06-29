@@ -258,33 +258,31 @@ export function go({
 
       return { type: (await isModulePublished(pkg.name, pkg.version)) ? "skipped" : "published" };
     },
-    cli: {
-      async draftApplied() {
-        if (!active || !updateLockFile) return;
+    async applyCliDraft() {
+      if (!active || !updateLockFile) return;
 
-        if (await listGoWorkUsePaths(this.cwd)) {
-          const result = await x("go", ["work", "sync"], {
-            nodeOptions: { cwd: this.cwd },
+      if (await listGoWorkUsePaths(this.cwd)) {
+        const result = await x("go", ["work", "sync"], {
+          nodeOptions: { cwd: this.cwd },
+        });
+        if (result.exitCode !== 0) {
+          throw execFailure("Failed to run `go work sync`.", result);
+        }
+        return;
+      }
+
+      await Promise.all(
+        this.graph.getPackages().map(async (pkg) => {
+          if (!(pkg instanceof GoPackage)) return;
+
+          const result = await x("go", ["mod", "tidy"], {
+            nodeOptions: { cwd: pkg.path },
           });
           if (result.exitCode !== 0) {
-            throw execFailure("Failed to run `go work sync`.", result);
+            throw execFailure(`Failed to run \`go mod tidy\` in ${pkg.path}.`, result);
           }
-          return;
-        }
-
-        await Promise.all(
-          this.graph.getPackages().map(async (pkg) => {
-            if (!(pkg instanceof GoPackage)) return;
-
-            const result = await x("go", ["mod", "tidy"], {
-              nodeOptions: { cwd: pkg.path },
-            });
-            if (result.exitCode !== 0) {
-              throw execFailure(`Failed to run \`go mod tidy\` in ${pkg.path}.`, result);
-            }
-          }),
-        );
-      },
+        }),
+      );
     },
   };
 }

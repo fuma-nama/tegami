@@ -220,75 +220,69 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
         }),
       );
     },
-    cli: {
-      async init() {
-        if (!isCI()) return;
-        const { repo, token, webUrl } = this.gitlab ?? {};
-        if (!token || !repo) return;
+    async initCli() {
+      if (!isCI()) return;
+      const { repo, token, webUrl } = this.gitlab ?? {};
+      if (!token || !repo) return;
 
-        const origin = gitlabRemoteUrl(repo, token, webUrl);
-        const result = await x("git", ["remote", "set-url", "origin", origin], {
-          nodeOptions: { cwd: this.cwd },
-        });
-        if (result.exitCode !== 0) {
-          throw execFailure("Failed to configure git remote for GitLab Actions.", result);
-        }
-      },
-      draftCreated() {
-        for (const pkg of this.graph.getPackages()) {
-          cliOriginalPackageVersions.set(pkg.id, pkg.version);
-        }
-      },
-      async draftApplied(draft) {
-        const config = options.versionMr ?? {};
-        if (
-          config === false ||
-          !(config.forceCreate || isCI()) ||
-          !(await hasGitChanges(this.cwd))
-        ) {
-          return;
-        }
+      const origin = gitlabRemoteUrl(repo, token, webUrl);
+      const result = await x("git", ["remote", "set-url", "origin", origin], {
+        nodeOptions: { cwd: this.cwd },
+      });
+      if (result.exitCode !== 0) {
+        throw execFailure("Failed to configure git remote for GitLab Actions.", result);
+      }
+    },
+    initCliDraft() {
+      for (const pkg of this.graph.getPackages()) {
+        cliOriginalPackageVersions.set(pkg.id, pkg.version);
+      }
+    },
+    async applyCliDraft(draft) {
+      const config = options.versionMr ?? {};
+      if (config === false || !(config.forceCreate || isCI()) || !(await hasGitChanges(this.cwd))) {
+        return;
+      }
 
-        const repo = this.gitlab?.repo;
-        const { branch = "tegami/version-packages", base = "main" } = config;
-        const baseMR = await config.create?.call(this, { draft });
-        const mr: Required<VersionMergeRequest> = {
-          title: baseMR?.title ?? "Version Packages",
-          body:
-            baseMR?.body ??
-            createVersionRequestBody(
-              draft,
-              this,
-              cliOriginalPackageVersions,
-              "Merge this MR to publish the versioned packages.",
-            ),
-        };
+      const repo = this.gitlab?.repo;
+      const { branch = "tegami/version-packages", base = "main" } = config;
+      const baseMR = await config.create?.call(this, { draft });
+      const mr: Required<VersionMergeRequest> = {
+        title: baseMR?.title ?? "Version Packages",
+        body:
+          baseMR?.body ??
+          createVersionRequestBody(
+            draft,
+            this,
+            cliOriginalPackageVersions,
+            "Merge this MR to publish the versioned packages.",
+          ),
+      };
 
-        await commitVersionBranchChanges(this.cwd, branch, mr.title);
+      await commitVersionBranchChanges(this.cwd, branch, mr.title);
 
-        const api = gitLabApiOptions(this.gitlab);
-        if (!repo) return;
+      const api = gitLabApiOptions(this.gitlab);
+      if (!repo) return;
 
-        const openMr = await findOpenMergeRequest(repo, { head: branch, base, ...api });
+      const openMr = await findOpenMergeRequest(repo, { head: branch, base, ...api });
 
-        if (openMr !== undefined) {
-          await updateMergeRequest(repo, openMr, {
-            title: mr.title,
-            body: mr.body,
-            base,
-            ...api,
-          });
-          return;
-        }
-
-        await createMergeRequest(repo, {
+      if (openMr !== undefined) {
+        await updateMergeRequest(repo, openMr, {
           title: mr.title,
           body: mr.body,
-          head: branch,
           base,
           ...api,
         });
-      },
+        return;
+      }
+
+      await createMergeRequest(repo, {
+        title: mr.title,
+        body: mr.body,
+        head: branch,
+        base,
+        ...api,
+      });
     },
   };
 
