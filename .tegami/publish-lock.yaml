@@ -1,15 +1,12 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Improve GitHub release notes\n\nThe release notes can now display related PRs & contributors.\n"
-    filename: 2026-06-29-mqy1hys5.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Remove dependency for parsing\n\nReplace extra dependencies with `util:parseArgs`.\n"
+    filename: 2026-06-29-mqy5nzrz.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support `go.publish` option\n\nDecide whether a Go package should be published via the `go.publish` option, default to `true`.\n"
-    filename: 2026-06-29-mqy1w07a.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Allow plugins to add CLI commands\n\nPlugins can now hook on `runCli` hook to add custom commands.\n"
+    filename: 2026-06-29-mqz0vmbb.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Drop MDAST dependencies\n\nTegami only requires extracting headings and preserves formatting, a regex alternative is lighter, better, and faster.\n"
-    filename: 2026-06-29-mqy3y8qs.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Add GitLab plugin\n\nTegami now includes a GitLab plugin with version merge requests, GitLab releases, tag handling, and release note links for commits and related merge requests.\n"
-    filename: 2026-06-29-mqygitlb.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Move request preview commands into plugins\n\nThe GitHub plugin now provides `tegami pr`, and the GitLab plugin provides `tegami mr` for merge request previews and comments.\n\nPlugin CLI commands now register through the `initCli` hook, so `tegami --help` and grouped help output include plugin-provided commands.\n"
+    filename: 2026-06-29-mrprcmds.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -17,10 +14,9 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-06-29-mqy1hys5.md
-      - 2026-06-29-mqy1w07a.md
-      - 2026-06-29-mqy3y8qs.md
-      - 2026-06-29-mqygitlb.md
+      - 2026-06-29-mqy5nzrz.md
+      - 2026-06-29-mqz0vmbb.md
+      - 2026-06-29-mrprcmds.md
     id: npm:tegami
     updated: true
   - id: npm:@repo/typescript-config

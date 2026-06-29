@@ -1,3 +1,19 @@
+## tegami@1.0.0-beta.4 (beta)
+
+### Remove dependency for parsing
+
+Replace extra dependencies with `util:parseArgs`.
+
+### Allow plugins to add CLI commands
+
+Plugins can now hook on `runCli` hook to add custom commands.
+
+### Move request preview commands into plugins
+
+The GitHub plugin now provides `tegami pr`, and the GitLab plugin provides `tegami mr` for merge request previews and comments.
+
+Plugin CLI commands now register through the `initCli` hook, so `tegami --help` and grouped help output include plugin-provided commands.
+
 ## tegami@1.0.0-beta.3 (beta)
 
 ### Improve GitHub release notes
