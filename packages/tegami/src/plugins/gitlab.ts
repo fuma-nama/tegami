@@ -28,6 +28,7 @@ import {
   type GitLabRequestOptions,
   gitlabWebUrl,
 } from "./gitlab/api";
+import { registerMrCli } from "./gitlab/cli";
 
 interface GitlabRelease {
   /** Release title */
@@ -220,7 +221,8 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
         }),
       );
     },
-    async initCli() {
+    async initCli(cli) {
+      registerMrCli(cli);
       if (!isCI()) return;
       const { repo, token, webUrl } = this.gitlab ?? {};
       if (!token || !repo) return;

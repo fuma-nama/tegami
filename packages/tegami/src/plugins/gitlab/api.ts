@@ -172,6 +172,50 @@ export async function createMergeRequest(
   }
 }
 
+export async function getMergeRequest(
+  repo: string,
+  number: number,
+  options: GitLabRequestOptions = {},
+): Promise<{
+  sourceBranch: string;
+  sourceProjectPath?: string;
+  baseSha: string;
+  headSha: string;
+}> {
+  const { encodedProjectPath } = parseGitLabRepo(repo);
+  const response = await gitlabRequest(
+    options,
+    `/projects/${encodedProjectPath}/merge_requests/${number}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to resolve merge request !${number}.`);
+  }
+
+  const data = (await response.json()) as {
+    source_branch: string;
+    source_project_id?: number;
+    diff_refs?: { base_sha?: string; head_sha?: string };
+    sha?: string;
+  };
+
+  let sourceProjectPath: string | undefined;
+  if (data.source_project_id !== undefined) {
+    const projectResponse = await gitlabRequest(options, `/projects/${data.source_project_id}`);
+    if (projectResponse.ok) {
+      const project = (await projectResponse.json()) as { path_with_namespace?: string };
+      sourceProjectPath = project.path_with_namespace;
+    }
+  }
+
+  return {
+    sourceBranch: data.source_branch,
+    sourceProjectPath,
+    baseSha: data.diff_refs?.base_sha ?? "",
+    headSha: data.diff_refs?.head_sha ?? data.sha ?? "",
+  };
+}
+
 export interface MergeRequestSummary {
   number: number;
   title: string;
@@ -278,5 +322,80 @@ export async function createIssueComment(
 
   if (!response.ok) {
     throw new Error("Failed to create issue comment.");
+  }
+}
+
+export async function findMergeRequestCommentByPrefix(
+  repo: string,
+  mergeRequestNumber: number,
+  prefix: string,
+  options: GitLabRequestOptions = {},
+): Promise<number | undefined> {
+  const { encodedProjectPath } = parseGitLabRepo(repo);
+  let page = 1;
+
+  while (true) {
+    const response = await gitlabRequest(
+      options,
+      `/projects/${encodedProjectPath}/merge_requests/${mergeRequestNumber}/notes?per_page=100&page=${page}`,
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to list merge request comments.");
+    }
+
+    const batch = (await response.json()) as Array<{ id: number; body: string }>;
+    if (batch.length === 0) break;
+
+    const comment = batch.find((comment) => comment.body.startsWith(prefix));
+    if (comment) return comment.id;
+
+    if (batch.length < 100) break;
+    page += 1;
+  }
+}
+
+export async function updateMergeRequestComment(
+  repo: string,
+  mergeRequestNumber: number,
+  commentId: number,
+  body: string,
+  options: GitLabRequestOptions = {},
+): Promise<void> {
+  const { encodedProjectPath } = parseGitLabRepo(repo);
+  const response = await gitlabRequest(
+    options,
+    `/projects/${encodedProjectPath}/merge_requests/${mergeRequestNumber}/notes/${commentId}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to update merge request comment.");
+  }
+}
+
+export async function createMergeRequestComment(
+  repo: string,
+  mergeRequestNumber: number,
+  body: string,
+  options: GitLabRequestOptions = {},
+): Promise<void> {
+  const { encodedProjectPath } = parseGitLabRepo(repo);
+  const response = await gitlabRequest(
+    options,
+    `/projects/${encodedProjectPath}/merge_requests/${mergeRequestNumber}/notes`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to create merge request comment.");
   }
 }
