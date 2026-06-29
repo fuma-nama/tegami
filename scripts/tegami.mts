@@ -8,12 +8,11 @@ const paper = tegami({
   plugins: [
     {
       name: "auto-format",
-      cli: {
-        async draftApplied() {
-          await x("pnpm", ["format"], {
-            throwOnError: true,
-          });
-        },
+      enforce: "post",
+      async applyCliDraft() {
+        await x("pnpm", ["format"], {
+          throwOnError: true,
+        });
       },
     },
     github({

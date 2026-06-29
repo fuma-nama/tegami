@@ -1,7 +1,7 @@
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import type { TegamiContext } from "../context";
 import type { Awaitable } from "../types";
-import { Tegami } from "..";
+import type { Tegami } from "..";
 
 export interface TegamiCliCommand<
   Values extends Record<string, boolean | string | undefined>,
