@@ -61,8 +61,12 @@ function registerCoreCommands(cli: TegamiCliRegistry, tegami: Tegami, options: T
 
   cli
     .command("version", { description: "draft version changes and write the publish lock" })
-    .action(async () => {
-      await versionPackages(tegami, { cli: options });
+    .option("no-checks", {
+      type: "boolean",
+      description: "skip checking whether the publish lock is still pending",
+    })
+    .action(async ({ values }) => {
+      await versionPackages(tegami, { cli: options, noChecks: values["no-checks"] });
     });
 
   cli.command("ci", { description: "version and publish packages" }).action(async () => {
@@ -115,7 +119,7 @@ function registerCoreCommands(cli: TegamiCliRegistry, tegami: Tegami, options: T
 
 async function versionPackages(
   tegami: Tegami,
-  options: { cli: TegamiCLIOptions },
+  options: { cli: TegamiCLIOptions; noChecks?: boolean },
 ): Promise<boolean> {
   intro("Version Packages");
 
@@ -138,7 +142,7 @@ async function versionPackages(
     return false;
   }
 
-  if ((await tegami.publishStatus()) === "pending") {
+  if (!options.noChecks && (await tegami.publishStatus()) === "pending") {
     note(
       `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
     );

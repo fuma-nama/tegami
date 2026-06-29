@@ -410,6 +410,10 @@ Note.
         return commandResult({ exitCode: 1 });
       }
 
+      if (command === "git" && args[0] === "ls-remote") {
+        return commandResult({ exitCode: 2 });
+      }
+
       return mockGoExec(command, args, options);
     });
 
