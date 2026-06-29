@@ -4,11 +4,13 @@ import type { ChangelogEntry } from "../src/changelog/parse";
 import { Draft } from "../src/plans/draft";
 import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../src/plans/publish";
 import * as githubClient from "../src/plugins/github/api";
+import { tegami } from "../src";
 import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { somePromise } from "../src/utils/common";
+import { createTegamiCliRegistry } from "../src/cli/core";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -456,7 +458,7 @@ describe("github version pull request", () => {
       exec.mockImplementation(() => commandResult());
 
       await plugin.init?.call(context);
-      await plugin.cli?.init?.call(context);
+      await plugin.initCli?.call(context, createTegamiCliRegistry(tegami({ cwd: "/repo" })));
 
       expect(exec).toHaveBeenCalledWith(
         "git",
@@ -773,9 +775,9 @@ async function runVersionPullRequest(
   const pkg = context.graph.get("test:@acme/core");
   if (!(pkg instanceof TestPackage)) throw new Error("missing package");
 
-  await plugin.cli?.draftCreated?.call(context, draft);
+  await plugin.initCliDraft?.call(context, draft);
   pkg.setVersion("1.1.0");
-  await plugin.cli?.draftApplied?.call(context, draft);
+  await plugin.applyCliDraft?.call(context, draft);
 }
 
 function releasePlan(

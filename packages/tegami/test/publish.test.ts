@@ -4,7 +4,7 @@ import { join, normalize } from "node:path";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import { createTegamiContext } from "../src/context";
+import { createTegamiContext, resolveGraph } from "../src/context";
 import { initPublishPlan, runPreflights, runPublishPlan } from "../src/plans/publish";
 import { writePublishLock } from "./helpers/lock";
 import {
@@ -41,7 +41,7 @@ describe("publish plans", () => {
       registry: "https://registry.example.test",
     });
 
-    const context = await createTegamiContext({ cwd, lockPath: lockPath });
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
     const plan = await publishFixture(context, { dryRun: true });
     const result = plan.packages.get("npm:@acme/core");
 
@@ -94,7 +94,7 @@ Some description.
       npm: [{ id: "npm:@acme/core", distTag: "latest" }],
     });
 
-    const context = await createTegamiContext({ cwd, lockPath: lockPath });
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
     const plan = await publishFixture(context, { dryRun: true });
     const changelogs = plan.packages.get("npm:@acme/core")?.changelogs ?? [];
 
@@ -136,7 +136,7 @@ Some description.
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const context = await createTegamiContext({ cwd, lockPath: lockPath });
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
     const plan = await publishFixture(context);
     const ui = plan.packages.get("npm:@acme/ui");
 
@@ -157,7 +157,7 @@ Some description.
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const context = await createTegamiContext({ cwd, lockPath: lockPath });
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
     const plan = await publishFixture(context, { dryRun: false });
     const result = plan.packages.get("npm:@acme/core");
 
@@ -366,6 +366,12 @@ async function publishFixture(
   await runPreflights(context, plan);
   await runPublishPlan(context, plan);
   return plan;
+}
+
+async function createResolvedContext(options: Parameters<typeof createTegamiContext>[0]) {
+  const context = await createTegamiContext(options);
+  await resolveGraph(context);
+  return context;
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

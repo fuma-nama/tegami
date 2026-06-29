@@ -60,6 +60,15 @@ github({
 
 Set `versionPr: false` to disable PR creation. Set `versionPr: { forceCreate: true }` to always create the PR, including locally.
 
+## CLI commands
+
+`runCli` wraps the programmatic API. Pass the same `tegami()` instance you use in scripts.
+
+| Command             | Description                          |
+| ------------------- | ------------------------------------ |
+| `tegami pr preview` | Build a pull request release preview |
+| `tegami pr comment` | Post a pull request preview artifact |
+
 ## GitHub releases
 
 After a successful publish, the plugin creates a GitHub release for each git tag. Release notes come from the changelog sections attached to each package.

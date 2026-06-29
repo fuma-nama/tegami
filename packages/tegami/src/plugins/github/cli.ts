@@ -1,35 +1,86 @@
-import { readFile } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
-import { x } from "tinyexec";
-import type { TegamiContext } from "../context";
-import type { Draft } from "../plans/draft";
-import { execFailure } from "../utils/error";
-import { formatNpmDistTag } from "../utils/semver";
+import { readFile, writeFile } from "node:fs/promises";
+import { basename, join, relative, resolve } from "node:path";
+import { note, outro } from "@clack/prompts";
 import { resolveCommand } from "package-manager-detector";
-import { changelogFilename } from "../changelog/generate";
-import { outro } from "@clack/prompts";
+import { x } from "tinyexec";
 import z from "zod";
+import { changelogFilename } from "../../changelog/generate";
+import { readChangelogEntries } from "../../changelog/parse";
+import type { TegamiContext } from "../../context";
+import type { TegamiCliRegistry } from "../../cli/core";
+import { createDraft, type Draft } from "../../plans/draft";
+import { isCI } from "../../utils/common";
+import { execFailure } from "../../utils/error";
+import { formatNpmDistTag } from "../../utils/semver";
 import {
   createIssueComment,
   findIssueCommentByPrefix,
   getPullRequest,
   updateIssueComment,
-} from "../plugins/github/api";
+} from "./api";
 
-export const TEGAMI_DOCS_URL = "https://tegami.fuma-nama.dev";
-export const CHANGELOG_DOCS_URL = `${TEGAMI_DOCS_URL}/changelog`;
 const COMMENT_MARKER = "<!-- tegami -->";
 
-export interface PrPreviewOptions {
+interface PrPreviewOptions {
   number?: number;
 }
 
 interface PullRequestRef {
-  repo: string;
   headRepo: string;
   headRef: string;
   baseSha: string;
   headSha: string;
+}
+
+export function registerPrCli(cli: TegamiCliRegistry): void {
+  cli.command("pr", { description: "GitHub pull request commands" });
+
+  cli
+    .command("pr preview", {
+      description: "show a pull request release preview and changelog guidance",
+    })
+    .option("artifact", {
+      type: "string",
+      description: "write preview markdown to a file",
+    })
+    .option("number", {
+      type: "string",
+      description: "pull request number",
+    })
+    .action(async ({ context, values }) => {
+      const number = values.number ? parsePositiveInt(values.number, "--number") : undefined;
+      const artifact = values.artifact;
+      const draft = await createDraft(await readChangelogEntries(context), context);
+      const body = await buildPrPreview(context, draft, { number });
+
+      if (artifact) {
+        const artifactPath = resolve(context.cwd, artifact);
+        await writeFile(artifactPath, body);
+        if (!isCI()) {
+          note(relative(context.cwd, artifactPath) || artifact, "Release preview");
+          outro("Release preview ready.");
+        }
+        return;
+      }
+
+      if (isCI()) {
+        process.stdout.write(`${body}\n`);
+        return;
+      }
+
+      note(body, "Release preview");
+      outro("Release preview ready.");
+    });
+
+  cli
+    .command("pr comment", {
+      description: "post the pull request release preview as a comment",
+    })
+    .positional("artifact")
+    .action(async ({ context, positionals }) => {
+      await postPrComment(context, await readFile(positionals.artifact, "utf8"));
+      outro("Pull request comment updated.");
+    });
 }
 
 export async function buildPrPreview(
@@ -40,28 +91,17 @@ export async function buildPrPreview(
   const pullRequest = await resolvePullRequest(context, options);
   const tegamiCommandRaw = resolveCommand(context.npm?.client ?? "npm", "run", ["tegami"])!;
   const tegamiCommand = [tegamiCommandRaw.command, ...tegamiCommandRaw.args].join(" ");
-  const prChangelogFiles = await listPullRequestChangelogFiles(
+  const changelogFiles = await listPullRequestChangelogFiles(
     context,
     pullRequest.baseSha,
     pullRequest.headSha,
   );
-
   const createLink = createChangelogUrl(
     context,
     pullRequest.headRepo,
     pullRequest.headRef,
     changelogFilename(),
   );
-
-  const lines = [
-    "### Tegami",
-    "",
-    `This repository uses [Tegami](${TEGAMI_DOCS_URL}) to manage releases. When your changes affect published packages, add a changelog file under \`.tegami/\` before merging.`,
-    "",
-    `[**Create a changelog →**](${createLink}) · [Changelog format](${CHANGELOG_DOCS_URL})`,
-    "",
-  ];
-
   const pendingPackages: {
     name: string;
     type: string;
@@ -69,6 +109,14 @@ export async function buildPrPreview(
     to: string;
     distTag?: string;
   }[] = [];
+  const lines = [
+    "### Tegami",
+    "",
+    `This repository uses [Tegami](https://tegami.fuma-nama.dev) to manage releases. When your changes affect published packages, add a changelog file under \`.tegami/\` before merging.`,
+    "",
+    `[**Create a changelog →**](${createLink}) · [Changelog format](https://tegami.fuma-nama.dev/changelog)`,
+    "",
+  ];
 
   for (const pkg of context.graph.getPackages()) {
     const plan = draft.getPackageDraft(pkg.id);
@@ -85,9 +133,9 @@ export async function buildPrPreview(
     });
   }
 
-  const prChangelogs = draft
+  const requestChangelogs = draft
     .getChangelogs()
-    .filter((entry) => prChangelogFiles.has(entry.filename));
+    .filter((entry) => changelogFiles.has(entry.filename));
 
   if (pendingPackages.length > 0) {
     lines.push("#### Release preview", "", "| Package | Bump | Version |", "| --- | --- | --- |");
@@ -99,10 +147,10 @@ export async function buildPrPreview(
     lines.push("");
   }
 
-  if (prChangelogs.length > 0) {
+  if (requestChangelogs.length > 0) {
     lines.push("#### Changelogs in this PR", "", "| Changelog | Title |", "| --- | --- |");
 
-    for (const entry of prChangelogs) {
+    for (const entry of requestChangelogs) {
       for (const section of entry.sections) {
         lines.push(`| \`${entry.filename}\` | ${section.title} |`);
       }
@@ -116,7 +164,7 @@ export async function buildPrPreview(
       "This PR has no pending changelog files. If your changes require a release, add a changelog before merging.",
       "",
     );
-  } else if (prChangelogFiles.size === 0) {
+  } else if (changelogFiles.size === 0) {
     lines.push(
       "This PR does not add changelog files. Pending changelogs from other branches are included in the preview above.",
       "",
@@ -126,17 +174,17 @@ export async function buildPrPreview(
   lines.push(
     `Run \`${tegamiCommand}\` locally to create a changelog interactively.`,
     "",
-    `<sub>Managed by [Tegami](${TEGAMI_DOCS_URL}).</sub>`,
+    `<sub>Managed by [Tegami](https://tegami.fuma-nama.dev).</sub>`,
     "",
   );
 
   return lines.join("\n");
 }
 
-export async function postPrComment(body: string): Promise<void> {
-  const repo = process.env.GITHUB_REPOSITORY;
+export async function postPrComment(context: TegamiContext, body: string): Promise<void> {
+  const { repo, token } = context.github ?? {};
   if (!repo) {
-    outro("GITHUB_REPOSITORY is required.");
+    outro("GitHub plugin context is required.");
     return;
   }
 
@@ -147,7 +195,6 @@ export async function postPrComment(body: string): Promise<void> {
   }
 
   const markedBody = `${COMMENT_MARKER}\n${body}`;
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const existingId = await findIssueCommentByPrefix(repo, pr.number, COMMENT_MARKER, token);
 
   if (existingId) {
@@ -158,8 +205,57 @@ export async function postPrComment(body: string): Promise<void> {
   await createIssueComment(repo, pr.number, markedBody, token);
 }
 
-const eventSchema = z.looseObject({
-  workflow_run: z.looseObject(
+async function resolvePullRequest(
+  context: TegamiContext,
+  options: PrPreviewOptions,
+): Promise<PullRequestRef> {
+  const { repo, token } = context.github ?? {};
+  if (!repo) {
+    throw new Error("GitHub plugin context is required.");
+  }
+
+  if (options.number !== undefined) {
+    parsePositiveInt(String(options.number), "--number");
+    const data = await getPullRequest(repo, options.number, token);
+
+    return {
+      headRepo: data.headRepository
+        ? `${data.headRepository.owner.login}/${data.headRepository.name}`
+        : repo,
+      headRef: data.headRefName,
+      baseSha: data.baseRefOid,
+      headSha: data.headRefOid,
+    };
+  }
+
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (eventPath) {
+    try {
+      const event = JSON.parse(await readFile(eventPath, "utf8")) as {
+        pull_request?: {
+          head: { ref: string; sha: string; repo: { full_name: string } };
+          base: { sha: string };
+        };
+      };
+      const pullRequest = event.pull_request;
+      if (pullRequest) {
+        return {
+          headRepo: pullRequest.head.repo.full_name,
+          headRef: pullRequest.head.ref,
+          baseSha: pullRequest.base.sha,
+          headSha: pullRequest.head.sha,
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  throw new Error("A pull request event or --number is required.");
+}
+
+const workflowRunEventSchema = z.object({
+  workflow_run: z.object(
     {
       event: z.literal("pull_request", {
         error: "The preview workflow was not triggered by a pull request.",
@@ -168,7 +264,7 @@ const eventSchema = z.looseObject({
         error: "The preview workflow did not complete successfully.",
       }),
       pull_requests: z
-        .array(z.looseObject({ number: z.int() }), {
+        .array(z.object({ number: z.int() }), {
           error: "The preview workflow is not associated with a pull request.",
         })
         .min(1),
@@ -201,83 +297,12 @@ async function readPullRequestFromWorkflowRunEvent(): Promise<
     return { found: false, reason: "Failed to read workflow_run event." };
   }
 
-  const { error, data } = eventSchema.safeParse(raw);
+  const { error, data } = workflowRunEventSchema.safeParse(raw);
   if (error) {
     return { found: false, reason: z.prettifyError(error) };
   }
 
   return { found: true, number: data.workflow_run.pull_requests[0]!.number };
-}
-
-async function resolvePullRequest(
-  context: TegamiContext,
-  options: PrPreviewOptions,
-): Promise<PullRequestRef> {
-  const repo = context.github?.repo ?? process.env.GITHUB_REPOSITORY;
-  if (!repo) {
-    throw new Error("GITHUB_REPOSITORY is required.");
-  }
-  const token = context.github?.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (!repo) {
-    throw new Error("GITHUB_TOKEN is required.");
-  }
-
-  if (options.number !== undefined) {
-    if (!Number.isInteger(options.number) || options.number <= 0) {
-      throw new Error("--number must be a positive integer.");
-    }
-
-    const data = await getPullRequest(repo, options.number, token);
-
-    return {
-      repo,
-      headRepo: data.headRepository
-        ? `${data.headRepository.owner.login}/${data.headRepository.name}`
-        : repo,
-      headRef: data.headRefName,
-      baseSha: data.baseRefOid,
-      headSha: data.headRefOid,
-    };
-  }
-
-  const event = await readPullRequestEvent();
-  if (event) {
-    return { repo, ...event };
-  }
-
-  throw new Error("A pull request event or --number is required.");
-}
-
-async function readPullRequestEvent() {
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) return;
-
-  let event: {
-    pull_request?: {
-      head: {
-        ref: string;
-        sha: string;
-        repo: { full_name: string };
-      };
-      base: { sha: string };
-    };
-  };
-
-  try {
-    event = JSON.parse(await readFile(eventPath, "utf8"));
-  } catch {
-    return;
-  }
-
-  const pullRequest = event.pull_request;
-  if (!pullRequest) return;
-
-  return {
-    headRepo: pullRequest.head.repo.full_name,
-    headRef: pullRequest.head.ref,
-    baseSha: pullRequest.base.sha,
-    headSha: pullRequest.head.sha,
-  };
 }
 
 async function listPullRequestChangelogFiles(
@@ -299,12 +324,9 @@ async function listPullRequestChangelogFiles(
   }
 
   const files = new Set<string>();
-
   for (const line of result.stdout.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed.endsWith(".md")) {
-      files.add(basename(trimmed));
-    }
+    if (trimmed.endsWith(".md")) files.add(basename(trimmed));
   }
 
   return files;
@@ -324,4 +346,12 @@ function createChangelogUrl(
   const params = new URLSearchParams({ filename: filePath });
 
   return `https://github.com/${repo}/new/${branchPath}?${params}`;
+}
+
+function parsePositiveInt(value: string, option: string): number {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error(`${option} must be a positive integer.`);
+  }
+  return number;
 }

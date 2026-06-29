@@ -336,18 +336,22 @@ Core only.
     const cwd = await createWorkspace({ changelog: false });
     tempDirs.push(cwd);
 
-    const graph = await tegami({
-      cwd,
-      ignore: ["@acme/ui"],
-    })._internal.graph();
+    const graph = (
+      await tegami({
+        cwd,
+        ignore: ["@acme/ui"],
+      })._internal.context()
+    ).graph;
 
     expect(graph.get("npm:@acme/core")).toBeDefined();
     expect(graph.getByName("@acme/ui")).toEqual([]);
 
-    const graphById = await tegami({
-      cwd,
-      ignore: ["npm:@acme/core"],
-    })._internal.graph();
+    const graphById = (
+      await tegami({
+        cwd,
+        ignore: ["npm:@acme/core"],
+      })._internal.context()
+    ).graph;
 
     expect(graphById.get("npm:@acme/core")).toBeUndefined();
     expect(graphById.get("npm:@acme/ui")).toBeDefined();
@@ -357,18 +361,22 @@ Core only.
     const cwd = await createWorkspace({ changelog: false });
     tempDirs.push(cwd);
 
-    const graph = await tegami({
-      cwd,
-      ignore: [/^@acme\/ui$/],
-    })._internal.graph();
+    const graph = (
+      await tegami({
+        cwd,
+        ignore: [/^@acme\/ui$/],
+      })._internal.context()
+    ).graph;
 
     expect(graph.get("npm:@acme/core")).toBeDefined();
     expect(graph.getByName("@acme/ui")).toEqual([]);
 
-    const graphByPattern = await tegami({
-      cwd,
-      ignore: [/^npm:@acme/],
-    })._internal.graph();
+    const graphByPattern = (
+      await tegami({
+        cwd,
+        ignore: [/^npm:@acme/],
+      })._internal.context()
+    ).graph;
 
     expect(graphByPattern.getPackages()).toEqual([]);
   });
@@ -535,7 +543,7 @@ Fixed something during beta.
       version: "1.0.0",
     });
 
-    const graph = await tegami({ cwd })._internal.graph();
+    const graph = (await tegami({ cwd })._internal.context()).graph;
 
     expect(normalizeDirPath(graph.get("npm:@acme/nested")?.path ?? "")).toBe(
       normalizeDirPath(join(cwd, "examples/nested/pkg")),

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { x } from "tinyexec";
-import { createTegamiContext } from "../src/context";
+import { createTegamiContext, resolveGraph } from "../src/context";
 import { initPublishPlan, runPreflights, publishPlanStatus } from "../src/plans/publish";
 import { NpmPackage } from "../src/providers/npm";
 import { writePublishLock } from "./helpers/lock";
@@ -183,7 +183,7 @@ async function createTestContext() {
     )}\n`,
   );
 
-  return createTegamiContext({
+  return createResolvedContext({
     cwd,
     npm: { client: "npm" },
   });
@@ -224,7 +224,7 @@ async function createContext(
       2,
     )}\n`,
   );
-  const context = await createTegamiContext({
+  const context = await createResolvedContext({
     cwd,
     npm: { client },
   });
@@ -232,6 +232,12 @@ async function createContext(
     packages: [{ id: "npm:@acme/core", updated: true }],
     npm: [{ id: "npm:@acme/core", distTag: "latest" }],
   });
+  return context;
+}
+
+async function createResolvedContext(options: Parameters<typeof createTegamiContext>[0]) {
+  const context = await createTegamiContext(options);
+  await resolveGraph(context);
   return context;
 }
 

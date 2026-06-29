@@ -87,8 +87,8 @@ export function tegami<const Groups extends string = string>(
     return ($context ??= createTegamiContext(options));
   }
   function getContextResolved() {
-    return ($contextResolved ??= getContext().then((ctx) => {
-      resolveGraph(ctx);
+    return ($contextResolved ??= getContext().then(async (ctx) => {
+      await resolveGraph(ctx);
       return ctx;
     }));
   }

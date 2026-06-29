@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { detect } from "package-manager-detector";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { createTegamiContext } from "../src/context";
+import { createTegamiContext, resolveGraph } from "../src/context";
 import type { TegamiPlugin } from "../src/types";
 
 vi.mock("package-manager-detector", () => ({
@@ -30,7 +30,7 @@ afterEach(async () => {
 describe("tegami context", () => {
   test("uses an explicit npm client without detecting", async () => {
     const cwd = await npmWorkspace();
-    const context = await createTegamiContext({
+    const context = await createResolvedContext({
       cwd,
       npm: { client: "npm" },
     });
@@ -55,7 +55,7 @@ describe("tegami context", () => {
     });
 
     const cwd = await npmWorkspace();
-    const context = await createTegamiContext({
+    const context = await createResolvedContext({
       cwd,
     });
     const pkg = context.graph.get("npm:@acme/core")!;
@@ -77,7 +77,7 @@ describe("tegami context", () => {
 
   test("defaults npm client when package manager detection fails", async () => {
     const cwd = await npmWorkspace();
-    const context = await createTegamiContext({
+    const context = await createResolvedContext({
       cwd,
     });
     const pkg = context.graph.get("npm:@acme/core")!;
@@ -141,7 +141,7 @@ describe("tegami context", () => {
       `${JSON.stringify({ name: "@acme/lib" }, null, 2)}\n`,
     );
 
-    const context = await createTegamiContext({ cwd });
+    const context = await createResolvedContext({ cwd });
     const pkg = context.graph.get("npm:@acme/lib");
 
     expect(pkg).toBeDefined();
@@ -165,6 +165,12 @@ function emptyPlan() {
     changelogs: new Map(),
     packages: new Map(),
   };
+}
+
+async function createResolvedContext(options: Parameters<typeof createTegamiContext>[0]) {
+  const context = await createTegamiContext(options);
+  await resolveGraph(context);
+  return context;
 }
 
 function plugin(name: string, enforce?: TegamiPlugin["enforce"]): TegamiPlugin {

@@ -10,7 +10,7 @@ import { parseChangelogFile } from "../src/changelog/parse";
 import type { TegamiContext } from "../src/context";
 import type { PackageOptions } from "../src/types";
 import * as githubClient from "../src/plugins/github/api";
-import { buildPrPreview, postPrComment } from "../src/cli/pr";
+import { buildPrPreview, postPrComment } from "../src/plugins/github/cli";
 
 vi.mock("package-manager-detector", () => ({
   detect: vi.fn(),
@@ -418,7 +418,7 @@ packages: ["@acme/core"]
     findIssueCommentByPrefix.mockResolvedValue(undefined);
     createIssueComment.mockResolvedValue(undefined);
 
-    await postPrComment("### Tegami\n");
+    await postPrComment(createTestContext([]), "### Tegami\n");
 
     expect(findIssueCommentByPrefix).toHaveBeenCalledWith(
       "acme/repo",
@@ -441,7 +441,7 @@ packages: ["@acme/core"]
     findIssueCommentByPrefix.mockResolvedValue(12345);
     updateIssueComment.mockResolvedValue(undefined);
 
-    await postPrComment("### Tegami\n");
+    await postPrComment(createTestContext([]), "### Tegami\n");
 
     expect(updateIssueComment).toHaveBeenCalledWith(
       "acme/repo",
@@ -460,7 +460,7 @@ packages: ["@acme/core"]
     updateIssueComment.mockResolvedValue(undefined);
 
     const preview = "### Tegami\n\n`code` and key=value\n";
-    await postPrComment(preview);
+    await postPrComment(createTestContext([]), preview);
 
     expect(updateIssueComment).toHaveBeenCalledWith(
       "acme/repo",
@@ -512,6 +512,9 @@ function createTestContext(packages: WorkspacePackage[], cwd?: string): TegamiCo
     lockPath: join(root, ".tegami", "publish-lock.yaml"),
     options: {},
     plugins: [],
+    github: {
+      repo: "acme/repo",
+    },
     graph: new PackageGraph(packages),
   };
 }

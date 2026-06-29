@@ -5,6 +5,7 @@ import type { WorkspacePackage } from "./graph";
 import type { CargoPluginOptions } from "./providers/cargo";
 import type { PackagePublishResult, PublishPlan } from "./plans/publish";
 import type { PublishLock } from "./plans/lock";
+import type { TegamiCliRegistry } from "./cli/core";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -105,7 +106,7 @@ export interface TegamiPlugin {
   init?(this: TegamiContext): Awaitable<void>;
 
   /** When Tegami CLI initializes, this runs before `resolve()`. */
-  initCli?(this: TegamiContext): Promise<void>;
+  initCli?(this: TegamiContext, cli: TegamiCliRegistry): Awaitable<void>;
 
   /** Resolve workspace packages and dependency metadata into the shared graph. */
   resolve?(this: TegamiContext): Awaitable<void>;
@@ -167,18 +168,6 @@ export interface TegamiPlugin {
 
   /** Called after all publishing finishes. */
   afterPublishAll?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
-
-  /**
-   * Called when Tegami CLI is executed, returns `true` if the command is handled by this plugin.
-   *
-   * This runs before `resolve`, you can return a function if the package graph must be resolved before running the command.
-   */
-  runCli?(
-    this: TegamiContext,
-    opts: {
-      argv: string[];
-    },
-  ): Awaitable<boolean | ((this: TegamiContext) => Awaitable<void>) | void | undefined>;
 
   /** Called after `tegami version` returns a draft. */
   initCliDraft?(this: TegamiContext, draft: Draft): Awaitable<void>;

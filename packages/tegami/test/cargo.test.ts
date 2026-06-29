@@ -68,7 +68,7 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const graph = await tegami({ cwd })._internal.graph();
+    const graph = (await tegami({ cwd })._internal.context()).graph;
     const packages = graph.getPackages().map((pkg) => ({
       manager: pkg.manager,
       name: pkg.name,
@@ -268,7 +268,7 @@ name = "acme_lib"
 `,
     );
 
-    const graph = await tegami({ cwd })._internal.graph();
+    const graph = (await tegami({ cwd })._internal.context()).graph;
     const pkg = graph.get("cargo:acme_lib");
 
     expect(pkg).toBeDefined();

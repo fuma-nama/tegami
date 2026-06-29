@@ -78,7 +78,7 @@ Note.
     const cwd = await createGoWorkspace();
     tempDirs.push(cwd);
 
-    const graph = await tegami({ cwd, plugins: [git(), go()] })._internal.graph();
+    const graph = (await tegami({ cwd, plugins: [git(), go()] })._internal.context()).graph;
     const packages = graph.getPackages().map((pkg) => ({
       manager: pkg.manager,
       name: pkg.name,
@@ -119,7 +119,7 @@ Note.
       return mockGoExec(command, args, options);
     });
 
-    const graph = await tegami({ cwd, plugins: [git(), go()] })._internal.graph();
+    const graph = (await tegami({ cwd, plugins: [git(), go()] })._internal.context()).graph;
     const packages = Object.fromEntries(graph.getPackages().map((pkg) => [pkg.name, pkg.version]));
 
     expect(packages).toEqual({
@@ -176,7 +176,7 @@ Note.
 
     const context = await paper._internal.context();
     for (const plugin of context.plugins) {
-      await plugin.cli?.draftApplied?.call(context, draft);
+      await plugin.applyCliDraft?.call(context, draft);
     }
 
     expect(
@@ -205,7 +205,7 @@ Note.
 
     const context = await paper._internal.context();
     for (const plugin of context.plugins) {
-      await plugin.cli?.draftApplied?.call(context, draft);
+      await plugin.applyCliDraft?.call(context, draft);
     }
 
     expect(

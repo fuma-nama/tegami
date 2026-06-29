@@ -4,11 +4,13 @@ import type { ChangelogEntry } from "../src/changelog/parse";
 import { Draft } from "../src/plans/draft";
 import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../src/plans/publish";
 import * as gitlabClient from "../src/plugins/gitlab/api";
+import { tegami } from "../src";
 import { gitlab } from "../src/plugins/gitlab";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { somePromise } from "../src/utils/common";
+import { createTegamiCliRegistry } from "../src/cli/core";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -464,7 +466,7 @@ describe("gitlab version merge request", () => {
       exec.mockImplementation(() => commandResult());
 
       await plugin.init?.call(context);
-      await plugin.cli?.init?.call(context);
+      await plugin.initCli?.call(context, createTegamiCliRegistry(tegami({ cwd: "/repo" })));
 
       expect(exec).toHaveBeenCalledWith(
         "git",
@@ -496,7 +498,7 @@ describe("gitlab version merge request", () => {
       exec.mockImplementation(() => commandResult());
 
       await plugin.init?.call(context);
-      await plugin.cli?.init?.call(context);
+      await plugin.initCli?.call(context, createTegamiCliRegistry(tegami({ cwd: "/repo" })));
 
       expect(context.gitlab?.token).toEqual({ value: "job-token", type: "job-token" });
       expect(exec).toHaveBeenCalledWith(
@@ -826,9 +828,9 @@ async function runVersionMergeRequest(
   const pkg = context.graph.get("test:@acme/core");
   if (!(pkg instanceof TestPackage)) throw new Error("missing package");
 
-  await plugin.cli?.draftCreated?.call(context, draft);
+  await plugin.initCliDraft?.call(context, draft);
   pkg.setVersion("1.1.0");
-  await plugin.cli?.draftApplied?.call(context, draft);
+  await plugin.applyCliDraft?.call(context, draft);
 }
 
 function releasePlan(

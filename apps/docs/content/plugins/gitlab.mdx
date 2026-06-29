@@ -55,6 +55,13 @@ gitlab({
 
 Set `versionMr: false` to disable MR creation. Set `versionMr: { forceCreate: true }` to always create the MR, including locally.
 
+## CLI commands
+
+| Command             | Description                           |
+| ------------------- | ------------------------------------- |
+| `tegami mr preview` | Build a merge request release preview |
+| `tegami mr comment` | Post a merge request preview artifact |
+
 ## GitLab releases
 
 After a successful publish, the plugin creates a GitLab release for each git tag. Release notes come from the changelog sections attached to each package.

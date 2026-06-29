@@ -25,6 +25,7 @@ import {
   updatePullRequest,
   PullRequestSummary,
 } from "./github/api";
+import { registerPrCli } from "./github/cli";
 
 interface GithubRelease {
   /** Release title */
@@ -209,7 +210,8 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
         }),
       );
     },
-    async initCli() {
+    async initCli(cli) {
+      registerPrCli(cli);
       if (!isCI()) return;
       const { repo, token } = this.github ?? {};
       if (!token || !repo) return;

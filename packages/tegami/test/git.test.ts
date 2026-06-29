@@ -4,10 +4,12 @@ import { join } from "node:path";
 import * as tinyexec from "tinyexec";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { tegami } from "../src";
 import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
 import { publishPlan } from "./helpers/plan";
+import { createTegamiCliRegistry } from "../src/cli/core";
 
 vi.mock("tinyexec", async (importOriginal) => {
   const actual = await importOriginal<typeof tinyexec>();
@@ -38,7 +40,10 @@ describe("git utils", () => {
       const plugin = git();
       exec.mockImplementation(() => commandResult() as ReturnType<typeof x>);
 
-      await plugin.cli?.init?.call(pluginContext());
+      await plugin.initCli?.call(
+        pluginContext(),
+        createTegamiCliRegistry(tegami({ cwd: "/repo" })),
+      );
 
       expect(
         exec.mock.calls.map(([command, args, options]) => ({
