@@ -120,10 +120,10 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
 
       return api;
     },
-    help: () => formatHelp(commands),
+    help: () => formatRootHelp(commands),
     async parse(argv) {
       if (argv[0] === "--help" || argv[0] === "-h") {
-        console.log(formatHelp(commands));
+        console.log(formatRootHelp(commands));
         return;
       }
 
@@ -228,13 +228,18 @@ function parseCommandArgs(
   };
 }
 
-function formatHelp(commands: CommandDefinition[]): string {
+function formatRootHelp(commands: CommandDefinition[]): string {
   const root = commands.find((command) => command.path.length === 0);
-  const rows = commands
-    .filter((command) => command.path.length > 0)
-    .map((command) => [formatUsage(command), command.description ?? ""] as const);
-  const width = Math.max(...rows.map(([usage]) => usage.length), 0);
-  const lines = [
+  let width = 0;
+  const rows: [string, string][] = [];
+  for (const command of commands) {
+    if (command.path.length === 0) continue;
+    const key = formatUsage(command);
+    width = Math.max(width, key.length);
+    rows.push([key, command.description ?? ""]);
+  }
+
+  const lines: string[] = [
     "Usage: tegami [command]",
     "",
     root?.description ?? "create changelogs",
@@ -243,7 +248,7 @@ function formatHelp(commands: CommandDefinition[]): string {
     ...rows.map(([usage, description]) => `  ${usage.padEnd(width)}   ${description}`),
     "",
     "Run without a command to open the changelog TUI.",
-  ].filter((line): line is string => line !== undefined);
+  ];
 
   return `${lines.join("\n")}\n`;
 }
@@ -270,19 +275,17 @@ function formatCommandHelp(command: CommandDefinition, commands: CommandDefiniti
   if (command.description) lines.push("", command.description);
 
   if (optionRows.length > 0) {
-    lines.push(
-      "",
-      "Options:",
-      ...optionRows.map(([flags, description]) => `  ${flags.padEnd(width)}   ${description}`),
-    );
+    lines.push("", "Options:");
+    for (const [flags, description] of optionRows) {
+      lines.push(`  ${flags.padEnd(width)}   ${description}`);
+    }
   }
 
   if (childRows.length > 0) {
-    lines.push(
-      "",
-      "Commands:",
-      ...childRows.map(([usage, description]) => `  ${usage.padEnd(childWidth)}   ${description}`),
-    );
+    lines.push("", "Commands:");
+    for (const [usage, description] of childRows) {
+      lines.push(`  ${usage.padEnd(childWidth)}   ${description}`);
+    }
   }
 
   return `${lines.join("\n")}\n`;

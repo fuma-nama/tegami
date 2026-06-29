@@ -18,14 +18,6 @@ export interface TegamiCLI {
   parseAsync(argv?: string[]): Promise<void>;
 }
 
-interface PublishCommandOptions {
-  dryRun?: boolean;
-}
-
-interface InitAgentCommandOptions {
-  output?: string;
-}
-
 export function createCli(tegami: Tegami, options: TegamiCLIOptions = {}): TegamiCLI {
   const $cli = init();
   async function init() {
@@ -196,8 +188,9 @@ async function versionPackages(
 
 async function publishPackages(
   tegami: Tegami,
-  options: PublishCommandOptions & {
+  options: {
     cli: TegamiCLIOptions;
+    dryRun?: boolean;
   },
 ): Promise<boolean> {
   const dryRun = options.dryRun ?? false;
@@ -249,7 +242,12 @@ async function publishPackages(
   return true;
 }
 
-async function runInitAgent(tegami: Tegami, options: InitAgentCommandOptions): Promise<void> {
+async function runInitAgent(
+  tegami: Tegami,
+  options: {
+    output?: string;
+  },
+): Promise<void> {
   intro("Init agent instructions");
 
   const context = await tegami._internal.context();

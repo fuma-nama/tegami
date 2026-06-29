@@ -60,7 +60,6 @@ describe("gitlab release plugin", () => {
         create({ pkg, plan }) {
           const packagePlan = plan.packages.get(pkg.id);
           return {
-            prerelease: packagePlan?.npm?.distTag !== "latest",
             title: `Release ${pkg.version}`,
             notes: `Notes for ${pkg.name}`,
           };
@@ -83,7 +82,6 @@ describe("gitlab release plugin", () => {
       tag: "@acme/core@1.0.1",
       title: "Release 1.0.1",
       notes: "Notes for @acme/core",
-      prerelease: true,
       token: testToken,
     });
   });
@@ -246,7 +244,6 @@ describe("gitlab release plugin", () => {
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes: "### Add proxy server\n\nSome description.",
-      prerelease: false,
       token: testToken,
     });
   });
@@ -287,7 +284,6 @@ describe("gitlab release plugin", () => {
       title: "@acme/core@1.0.1",
       notes:
         "### Add proxy server ([abc1234](https://gitlab.com/acme/repo/-/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
-      prerelease: false,
       token: testToken,
     });
   });
@@ -334,13 +330,12 @@ describe("gitlab release plugin", () => {
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes:
-        "### Add proxy server ([abc1234](https://gitlab.com/acme/repo/-/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.\n\n<details>\n<summary>Pull request & contributors</summary>\n\n- [!42 Add proxy server](https://gitlab.com/acme/repo/-/merge_requests/42) by @alice\n\n</details>",
-      prerelease: false,
+        "### Add proxy server ([abc1234](https://gitlab.com/acme/repo/-/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.\n\n<details>\n<summary>Merge request & contributors</summary>\n\n- [!42 Add proxy server](https://gitlab.com/acme/repo/-/merge_requests/42) by @alice\n\n</details>",
       token: testToken,
     });
   });
 
-  test("marks semver prerelease versions as GitLab prerelease by default", async () => {
+  test("creates GitLab releases for semver prerelease versions", async () => {
     const plugin = gitlabPlugin({ repo: "acme/repo" });
 
     const context = publishContext();
@@ -359,7 +354,6 @@ describe("gitlab release plugin", () => {
       tag: "@acme/core@1.0.1-beta.0",
       title: "@acme/core@1.0.1-beta.0",
       notes: "Published @acme/core@1.0.1-beta.0.",
-      prerelease: true,
       token: testToken,
     });
   });
@@ -385,7 +379,6 @@ describe("gitlab release plugin", () => {
       tag: "acme@1.0.1",
       title: "acme@1.0.1",
       notes: "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
-      prerelease: false,
       token: testToken,
     });
   });
@@ -447,7 +440,6 @@ describe("gitlab release plugin", () => {
       tag: "acme@1.0.1",
       title: "Group release @acme/core",
       notes: "@acme/core, @acme/ui",
-      prerelease: false,
       token: testToken,
     });
   });

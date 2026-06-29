@@ -1,6 +1,5 @@
 import { x } from "tinyexec";
 import { join, relative } from "node:path";
-import semver from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
 import type { Draft } from "../plans/draft";
@@ -35,8 +34,6 @@ interface GitlabRelease {
   title?: string;
   /** Release notes */
   notes?: string;
-  /** Whether to mark release as prerelease */
-  prerelease?: boolean;
 }
 
 type ResolvedGitlabRelease = Required<GitlabRelease>;
@@ -191,9 +188,6 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
               title: overrides.title ?? tag,
               notes:
                 overrides.notes ?? (await defaultGroupedNotes(getRenderer(this), plan, packages)),
-              prerelease:
-                overrides.prerelease ??
-                packages.some((pkg) => pkg.version && semver.prerelease(pkg.version)),
             };
           } else {
             const pkg = packages[0]!;
@@ -205,9 +199,6 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
                 overrides.title ??
                 formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
               notes: overrides.notes ?? (await defaultNotes(getRenderer(this), pkg, packagePlan)),
-              prerelease:
-                overrides.prerelease ??
-                (pkg.version !== undefined && semver.prerelease(pkg.version) !== null),
             };
           }
 
@@ -215,7 +206,6 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
             tag,
             title: release.title,
             notes: release.notes,
-            prerelease: release.prerelease,
             ...api,
           });
         }),
@@ -232,7 +222,7 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
         nodeOptions: { cwd: this.cwd },
       });
       if (result.exitCode !== 0) {
-        throw execFailure("Failed to configure git remote for GitLab Actions.", result);
+        throw execFailure("Failed to configure git remote for GitLab CI.", result);
       }
     },
     initCliDraft() {
@@ -347,7 +337,7 @@ function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
 
     return [
       "<details>",
-      "<summary>Pull request & contributors</summary>",
+      "<summary>Merge request & contributors</summary>",
       "",
       ...lines,
       "",

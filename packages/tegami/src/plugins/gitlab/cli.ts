@@ -120,7 +120,7 @@ export async function buildMrPreview(
     "",
     `This repository uses [Tegami](https://tegami.fuma-nama.dev) to manage releases. When your changes affect published packages, add a changelog file under \`.tegami/\` before merging.`,
     "",
-    `[**Create a changelog ->**](${createLink}) | [Changelog format](https://tegami.fuma-nama.dev/changelog)`,
+    `[**Create a changelog →**](${createLink}) · [Changelog format](https://tegami.fuma-nama.dev/changelog)`,
     "",
   ];
 
@@ -132,7 +132,7 @@ export async function buildMrPreview(
 
     pendingPackages.push({
       name: pkg.name,
-      type: plan.type ?? "-",
+      type: plan.type ?? "—",
       from: pkg.version,
       to: bumped,
       distTag: plan.npm?.distTag,
@@ -148,7 +148,7 @@ export async function buildMrPreview(
 
     for (const { name, type, from, to, distTag } of pendingPackages) {
       lines.push(
-        `| \`${name}\` | ${type} | \`${from}\` -> \`${to}\`${formatNpmDistTag(distTag)} |`,
+        `| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)} |`,
       );
     }
 
@@ -194,7 +194,7 @@ export async function postMrComment(
   body: string,
   options: MrPreviewOptions = {},
 ): Promise<void> {
-  const repo = context.gitlab?.repo ?? process.env.GITLAB_REPOSITORY ?? process.env.CI_PROJECT_PATH;
+  const { repo } = context.gitlab ?? {};
   if (!repo) {
     outro("GITLAB_REPOSITORY or CI_PROJECT_PATH is required.");
     return;

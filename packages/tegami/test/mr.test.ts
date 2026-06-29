@@ -81,9 +81,9 @@ packages: ["@acme/core"]
 
     expect(body).toContain("### Tegami");
     expect(body).toContain(
-      "[**Create a changelog ->**](https://gitlab.com/acme/repo/-/new/feature/release?file_name=.tegami%2F",
+      "[**Create a changelog →**](https://gitlab.com/acme/repo/-/new/feature/release?file_name=.tegami%2F",
     );
-    expect(body).toContain("| `@acme/core` | minor | `1.0.0` -> `1.1.0` |");
+    expect(body).toContain("| `@acme/core` | minor | `1.0.0` → `1.1.0` |");
     expect(body).toContain("#### Changelogs in this MR");
     expect(body).toContain("| `2026-06-29-core.md` | Support release previews |");
   });
@@ -103,7 +103,7 @@ packages: ["@acme/core"]
     const body = await buildMrPreview(context, draft, { number: 7 });
 
     expect(body).toContain(
-      "[**Create a changelog ->**](https://gitlab.com/fork/repo/-/new/feature/test?file_name=.tegami%2F",
+      "[**Create a changelog →**](https://gitlab.com/fork/repo/-/new/feature/test?file_name=.tegami%2F",
     );
     expect(getMergeRequest).toHaveBeenCalledWith("acme/repo", 7, {});
   });

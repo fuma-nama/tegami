@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-  findIssueCommentByPrefix,
+  findMergeRequestCommentByPrefix,
   releaseExistsByTag,
-  updateIssueComment,
   updateMergeRequest,
+  updateMergeRequestComment,
 } from "../src/plugins/gitlab/api";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -48,7 +48,7 @@ describe("gitlab api", () => {
     expect(headers.get("PRIVATE-TOKEN")).toBeNull();
   });
 
-  test("stops listing comments once the matching marker is found", async () => {
+  test("stops listing merge request comments once the matching marker is found", async () => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockResolvedValue(
       new Response(
@@ -60,27 +60,29 @@ describe("gitlab api", () => {
       ),
     );
 
-    await expect(findIssueCommentByPrefix("acme/repo", 42, "<!-- tegami -->")).resolves.toBe(2);
+    await expect(findMergeRequestCommentByPrefix("acme/repo", 42, "<!-- tegami -->")).resolves.toBe(
+      2,
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://gitlab.com/api/v4/projects/acme%2Frepo/issues/42/notes?per_page=100&page=1",
+      "https://gitlab.com/api/v4/projects/acme%2Frepo/merge_requests/42/notes?per_page=100&page=1",
       expect.objectContaining({
         headers: expect.any(Headers),
       }),
     );
   });
 
-  test("updates comments through the project-scoped issue note endpoint", async () => {
+  test("updates merge request comments through the project-scoped note endpoint", async () => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
 
-    await updateIssueComment("acme/repo", 42, 12345, "<!-- tegami -->\npreview", {
+    await updateMergeRequestComment("acme/repo", 42, 12345, "<!-- tegami -->\npreview", {
       token: { value: "token", type: "private-token" },
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://gitlab.com/api/v4/projects/acme%2Frepo/issues/42/notes/12345",
+      "https://gitlab.com/api/v4/projects/acme%2Frepo/merge_requests/42/notes/12345",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ body: "<!-- tegami -->\npreview" }),

@@ -71,7 +71,6 @@ export async function createRelease(
     tag: string;
     title: string;
     notes: string;
-    prerelease?: boolean;
   } & GitLabRequestOptions,
 ): Promise<void> {
   const { encodedProjectPath } = parseGitLabRepo(repo);
@@ -248,81 +247,6 @@ export async function listMergeRequestsForCommit(
     title: mergeRequest.title,
     user: mergeRequest.author ? { login: mergeRequest.author.username } : undefined,
   }));
-}
-
-export async function findIssueCommentByPrefix(
-  repo: string,
-  issueNumber: number,
-  prefix: string,
-  options: GitLabRequestOptions = {},
-): Promise<number | undefined> {
-  const { encodedProjectPath } = parseGitLabRepo(repo);
-  let page = 1;
-
-  while (true) {
-    const response = await gitlabRequest(
-      options,
-      `/projects/${encodedProjectPath}/issues/${issueNumber}/notes?per_page=100&page=${page}`,
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to list issue comments.");
-    }
-
-    const batch = (await response.json()) as Array<{ id: number; body: string }>;
-    if (batch.length === 0) break;
-
-    const comment = batch.find((comment) => comment.body.startsWith(prefix));
-    if (comment) return comment.id;
-
-    if (batch.length < 100) break;
-    page += 1;
-  }
-}
-
-export async function updateIssueComment(
-  repo: string,
-  issueNumber: number,
-  commentId: number,
-  body: string,
-  options: GitLabRequestOptions = {},
-): Promise<void> {
-  const { encodedProjectPath } = parseGitLabRepo(repo);
-  const response = await gitlabRequest(
-    options,
-    `/projects/${encodedProjectPath}/issues/${issueNumber}/notes/${commentId}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error("Failed to update issue comment.");
-  }
-}
-
-export async function createIssueComment(
-  repo: string,
-  issueNumber: number,
-  body: string,
-  options: GitLabRequestOptions = {},
-): Promise<void> {
-  const { encodedProjectPath } = parseGitLabRepo(repo);
-  const response = await gitlabRequest(
-    options,
-    `/projects/${encodedProjectPath}/issues/${issueNumber}/notes`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error("Failed to create issue comment.");
-  }
 }
 
 export async function findMergeRequestCommentByPrefix(

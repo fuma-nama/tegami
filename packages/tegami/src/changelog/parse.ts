@@ -1,11 +1,9 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { dump } from "js-yaml";
 import { maxBump, type BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
 import type { TegamiContext } from "../context";
-import z from "zod";
-import { changelogFrontmatterSchema, type ChangelogPackageConfig } from "./shared";
+import { changelogFrontmatterSchema, renderChangelog, type ChangelogPackageConfig } from "./shared";
 
 export interface ChangelogEntry {
   id: string;
@@ -101,12 +99,12 @@ export function parseChangelogFile(filename: string, content: string): Changelog
     sections,
     _raw_body: parsed.content,
     getRawContent() {
-      const frontmatterData: z.input<typeof changelogFrontmatterSchema> = {
-        subject: this.subject,
-        packages: Object.fromEntries(this.packages.entries()),
-      };
-      return ["---", dump(frontmatterData).trim(), "---", "", entry._raw_body.trim(), ""].join(
-        "\n",
+      return renderChangelog(
+        {
+          subject: this.subject,
+          packages: Object.fromEntries(this.packages.entries()),
+        },
+        entry._raw_body,
       );
     },
   };
