@@ -19,6 +19,7 @@
     "./plugins/go": "./dist/plugins/go.js",
     "./providers/cargo": "./dist/providers/cargo.js",
     "./providers/npm": "./dist/providers/npm.js",
+    "./providers/pip": "./dist/providers/pip.js",
     "./package.json": "./package.json"
   },
   "publishConfig": {
