@@ -26,18 +26,6 @@ describe("cli registry", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("mr preview"));
   });
 
-  test("prints generated group help", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-group-help-"));
-    tempDirs.push(cwd);
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-
-    await createCli(tegami({ cwd, plugins: [github()] })).parseAsync(["pr"]);
-
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("Usage: pr"));
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("GitHub pull request commands"));
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("pr comment <artifact>"));
-  });
-
   test("prints command options in subcommand help", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-command-help-"));
     tempDirs.push(cwd);

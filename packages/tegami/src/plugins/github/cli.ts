@@ -33,8 +33,6 @@ interface PullRequestRef {
 }
 
 export function registerPrCli(cli: TegamiCliRegistry): void {
-  cli.command("pr", { description: "GitHub pull request commands" });
-
   cli
     .command("pr preview", {
       description: "show a pull request release preview and changelog guidance",

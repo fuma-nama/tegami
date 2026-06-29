@@ -83,7 +83,16 @@ interface PositionalDefinition {
 }
 
 export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
-  const commands: CommandDefinition[] = [];
+  const commands = new Map<string, CommandDefinition>();
+
+  function getChildCommands(command: CommandDefinition): CommandDefinition[] {
+    const out: CommandDefinition[] = [];
+    const prefix = command.path.join("\0");
+    for (const [key, candidate] of commands) {
+      if (key.startsWith(prefix) && key.length > prefix.length) out.push(candidate);
+    }
+    return out;
+  }
 
   return {
     command(path, options) {
@@ -94,15 +103,15 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
         options: [],
         resolve: options?.resolve ?? true,
       };
-      commands.push(definition);
+      commands.set(definition.path.join("\0"), definition);
 
       const api: TegamiCliCommand<Record<never, never>, Record<never, never>> = {
-        option(name, optionOptions) {
+        option(name, { short, description = "", type }) {
           definition.options.push({
             name,
-            short: optionOptions.short,
-            description: optionOptions.description ?? "",
-            type: optionOptions.type,
+            short,
+            type,
+            description,
           });
           return api as never;
         },
@@ -134,13 +143,13 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
 
       const args = argv.slice(match.path.length);
       if (args.includes("--help") || args.includes("-h")) {
-        console.log(formatCommandHelp(match, commands));
+        console.log(formatCommandHelp(match, getChildCommands(match)));
         return;
       }
 
       if (!match.action) {
         if (args.length === 0) {
-          console.log(formatCommandHelp(match, commands));
+          console.log(formatCommandHelp(match, getChildCommands(match)));
           return;
         }
 
@@ -165,22 +174,19 @@ function formatUsage(command: CommandDefinition): string {
   ].join(" ");
 }
 
-function findCommand(commands: CommandDefinition[], argv: string[]): CommandDefinition | undefined {
+function findCommand(
+  commands: Map<string, CommandDefinition>,
+  argv: string[],
+): CommandDefinition | undefined {
   if (argv.length === 0) {
-    return commands.find((command) => command.path.length === 0);
+    return commands.get("");
   }
 
-  let matched: CommandDefinition | undefined;
-  for (const command of commands) {
-    if (
-      command.path.length > 0 &&
-      command.path.every((part, index) => argv[index] === part) &&
-      (!matched || command.path.length > matched.path.length)
-    ) {
-      matched = command;
-    }
+  for (let i = 0; i < argv.length; i++) {
+    const search = argv.slice(0, argv.length - i).join("\0");
+    const res = commands.get(search);
+    if (res) return res;
   }
-  return matched;
 }
 
 function parseCommandArgs(
@@ -228,12 +234,12 @@ function parseCommandArgs(
   };
 }
 
-function formatRootHelp(commands: CommandDefinition[]): string {
-  const root = commands.find((command) => command.path.length === 0);
+function formatRootHelp(commands: Map<string, CommandDefinition>): string {
   let width = 0;
   const rows: [string, string][] = [];
-  for (const command of commands) {
+  for (const command of commands.values()) {
     if (command.path.length === 0) continue;
+
     const key = formatUsage(command);
     width = Math.max(width, key.length);
     rows.push([key, command.description ?? ""]);
@@ -242,7 +248,7 @@ function formatRootHelp(commands: CommandDefinition[]): string {
   const lines: string[] = [
     "Usage: tegami [command]",
     "",
-    root?.description ?? "create changelogs",
+    commands.get("")?.description ?? "create changelogs",
     "",
     "Commands:",
     ...rows.map(([usage, description]) => `  ${usage.padEnd(width)}   ${description}`),
@@ -253,7 +259,7 @@ function formatRootHelp(commands: CommandDefinition[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-function formatCommandHelp(command: CommandDefinition, commands: CommandDefinition[]): string {
+function formatCommandHelp(command: CommandDefinition, childCommands: CommandDefinition[]): string {
   let width = 0;
   let childWidth = 0;
   const optionRows = command.options.map<[string, string]>((option) => {
@@ -264,40 +270,32 @@ function formatCommandHelp(command: CommandDefinition, commands: CommandDefiniti
     width = Math.max(width, key.length);
     return [key, option.description ?? ""];
   });
-  const childRows = getChildCommands(command, commands).map<[string, string]>((child) => {
+  const childRows = childCommands.map<[string, string]>((child) => {
     const key = formatUsage(child);
 
     childWidth = Math.max(childWidth, key.length);
     return [key, child.description ?? ""];
   });
 
-  const lines: string[] = [`Usage: ${formatUsage(command)}`];
-  if (command.description) lines.push("", command.description);
+  const lines: string[] = [];
+  if (command.action) lines.push(`Usage: ${formatUsage(command)}`, "");
+  if (command.description) lines.push(command.description, "");
 
   if (optionRows.length > 0) {
-    lines.push("", "Options:");
+    lines.push("Options:");
     for (const [flags, description] of optionRows) {
       lines.push(`  ${flags.padEnd(width)}   ${description}`);
     }
+    lines.push("");
   }
 
   if (childRows.length > 0) {
-    lines.push("", "Commands:");
+    lines.push("Commands:");
     for (const [usage, description] of childRows) {
       lines.push(`  ${usage.padEnd(childWidth)}   ${description}`);
     }
+    lines.push("");
   }
 
-  return `${lines.join("\n")}\n`;
-}
-
-function getChildCommands(
-  command: CommandDefinition,
-  commands: CommandDefinition[],
-): CommandDefinition[] {
-  return commands.filter(
-    (candidate) =>
-      candidate.path.length === command.path.length + 1 &&
-      command.path.every((part, index) => candidate.path[index] === part),
-  );
+  return lines.join("\n");
 }

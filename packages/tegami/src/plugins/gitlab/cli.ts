@@ -33,8 +33,6 @@ interface MergeRequestRef {
 }
 
 export function registerMrCli(cli: TegamiCliRegistry): void {
-  cli.command("mr", { description: "GitLab merge request commands" });
-
   cli
     .command("mr preview", {
       description: "show a merge request release preview and changelog guidance",
@@ -147,9 +145,7 @@ export async function buildMrPreview(
     lines.push("#### Release preview", "", "| Package | Bump | Version |", "| --- | --- | --- |");
 
     for (const { name, type, from, to, distTag } of pendingPackages) {
-      lines.push(
-        `| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)} |`,
-      );
+      lines.push(`| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)} |`);
     }
 
     lines.push("");
