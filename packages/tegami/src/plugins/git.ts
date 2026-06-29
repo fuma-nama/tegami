@@ -73,7 +73,20 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
       const pendingTags = getPendingTags(plan);
 
       return Array.from(pendingTags, async (tag) => {
-        if (!(await gitTagExists(this.cwd, tag))) return "pending";
+        const local = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
+          nodeOptions: { cwd: this.cwd },
+        });
+        if (local.exitCode === 0) return;
+
+        // check from remote if `git pull` is not necessarily ran.
+        const origin = await x(
+          "git",
+          ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`],
+          { nodeOptions: { cwd: this.cwd } },
+        );
+
+        if (origin.exitCode === 0) return;
+        return "pending";
       });
     },
     async afterPublishAll({ plan }) {
@@ -104,19 +117,12 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
         });
 
         if (gitOut.exitCode !== 0) {
+          // this can happen in two concurrent runs: one of it pushed the tags, while another one just passed `git tag` but not pushed yet.
+          if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
+
           throw execFailure(`Failed to push Git tags to origin: ${createdTags.join(", ")}`, gitOut);
         }
       }
     },
   };
-}
-
-async function gitTagExists(cwd: string, tag: string): Promise<boolean> {
-  const result = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
-    nodeOptions: {
-      cwd,
-    },
-  });
-
-  return result.exitCode === 0;
 }
