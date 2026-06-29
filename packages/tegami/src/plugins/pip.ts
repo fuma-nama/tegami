@@ -127,10 +127,7 @@ export function pip({
     },
     async publish({ pkg }) {
       if (!(pkg instanceof PipPackage)) return;
-
-      if (!pkg.version || (await isPackagePublished(pkg.name, pkg.version))) {
-        return { type: "skipped" };
-      }
+      if (!pkg.version) return { type: "skipped" };
 
       const result = await x("uv", ["publish"], {
         nodeOptions: { cwd: pkg.path },
