@@ -121,7 +121,6 @@ describe("tegami context", () => {
       [
         "npm",
         "cargo",
-        "pip",
         "pre-a",
         "pre-b",
         "default-a",

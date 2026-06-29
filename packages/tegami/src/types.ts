@@ -3,7 +3,6 @@ import type { Draft, PackageDraft } from "./plans/draft";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
 import type { CargoPluginOptions } from "./providers/cargo";
-import type { PipPluginOptions } from "./providers/pip";
 import type { PackagePublishResult, PublishPlan } from "./plans/publish";
 import type { PublishLock } from "./plans/lock";
 import type { TegamiCliRegistry } from "./cli/core";
@@ -51,7 +50,6 @@ export interface TegamiOptions<Groups extends string = string> {
 
   npm?: NpmPluginOptions;
   cargo?: CargoPluginOptions;
-  pip?: PipPluginOptions;
 }
 
 interface SharedGoOptions {

@@ -83,7 +83,7 @@ export function pip({
 
   return {
     name: "pip",
-    enforce: "pre",
+    enforce: "post",
     async init() {
       await initToml();
     },
