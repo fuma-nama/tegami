@@ -8,10 +8,11 @@ import { formatNpmDistTag } from "./semver";
 
 export async function hasGitChanges(cwd: string): Promise<boolean> {
   const result = await x("git", ["status", "--porcelain"], {
-    nodeOptions: {
-      cwd,
-    },
+    nodeOptions: { cwd },
   });
+  if (result.exitCode !== 0) {
+    throw execFailure("Failed to check git status.", result);
+  }
 
   return result.stdout.trim().length > 0;
 }
