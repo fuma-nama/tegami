@@ -1,0 +1,48 @@
+# .github/workflows/release.yml — replaces the Changesets release workflow.
+#
+# `tegami ci` versions when pending .tegami/*.md changelogs exist (opening a
+# "Version Packages" PR via the github plugin), otherwise it publishes from the
+# committed .tegami/publish-lock.yaml.
+#
+# Adjust the setup steps to your package manager. This example uses Bun; for
+# pnpm use pnpm/action-setup and `cache: pnpm`, then `pnpm tegami ci`.
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write # commit version bumps, push the Version Packages branch
+  id-token: write # npm trusted publishing (OIDC) — no NPM_TOKEN needed
+  pull-requests: write # open the Version Packages PR
+
+jobs:
+  release:
+    name: Version & publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: oven-sh/setup-bun@v2
+      - run: bun i
+
+      # Build packages before publishing if your release ships build output.
+      # Prefer a `willPublish` plugin to build only what's about to publish —
+      # see https://tegami.fuma-nama.dev/ci#build-packages
+      # - run: bun run build
+
+      - name: Version & publish
+        run: bun run tegami ci
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
