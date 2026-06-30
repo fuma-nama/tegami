@@ -8,5 +8,8 @@ export default defineConfig({
   dts: {
     sourcemap: false,
   },
+  deps: {
+    onlyBundle: ["@renovatebot/pep440"],
+  },
   exports: true,
 });

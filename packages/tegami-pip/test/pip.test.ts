@@ -4,7 +4,7 @@ import { join, normalize } from "node:path";
 import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { pip } from "@tegami/pip";
+import { pip } from "../src/index";
 import { isPackagePublished, normalizePyPiName, updateConstraintRange } from "../src/utils";
 import { pyprojectManifestSchema } from "../src/schema";
 import { tegami } from "tegami";

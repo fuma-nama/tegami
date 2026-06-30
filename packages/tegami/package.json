@@ -33,7 +33,7 @@
   "dependencies": {
     "@clack/prompts": "^1.6.0",
     "@rainbowatcher/toml-edit-js": "^0.6.5",
-    "js-yaml": "^5.1.0",
+    "js-yaml": "^5.2.0",
     "package-manager-detector": "^1.6.0",
     "semver": "^7.8.5",
     "tinyexec": "^1.2.4",
@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.0.1",
     "@types/semver": "^7.7.1",
     "tsdown": "^0.22.3",
     "typescript": "6.0.3"
