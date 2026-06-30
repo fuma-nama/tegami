@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { intro, note, outro, spinner } from "@clack/prompts";
+import { intro, note, outro } from "@clack/prompts";
 import { x } from "tinyexec";
 import type { TegamiCliRegistry } from "../../cli/core";
 import type { TegamiContext } from "../../context";
@@ -70,17 +70,16 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
         return;
       }
 
-      note(
-        targets
-          .map(
-            (pkg) =>
-              `${pkg.name}: publish placeholder@${PLACEHOLDER_DIST_TAG}, then npm trust ${options.provider} ${PROJECT_FLAG[options.provider]} ${repo} --file ${options.workflow}`,
-          )
-          .join("\n"),
-        dryRun ? "Dry run" : "Configure trusted publishing",
-      );
+      const prepareLines: string[] = [
+        "Make sure to run login command first, it will publish empty packages.",
+      ];
+      for (const pkg of targets) {
+        prepareLines.push(
+          `${pkg.name}: will publish a placeholder under dist-tag "${PLACEHOLDER_DIST_TAG}", then configure trusted publishing.`,
+        );
+      }
+      note(prepareLines.join("\n"), dryRun ? "Dry run" : "Configure trusted publishing");
 
-      const s = spinner();
       const lines: string[] = [];
 
       for (const pkg of targets) {
@@ -91,19 +90,13 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
           continue;
         }
 
-        s.start(`${pkg.name}: publishing placeholder`);
-        try {
-          await publishPlaceholder(pkg);
-          s.message(`${pkg.name}: configuring trusted publishing`);
-          await npmTrust(context, pkg, options, repo);
-          s.stop(`${pkg.name}: configured`);
-          lines.push(
-            `configured ${pkg.name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
-          );
-        } catch (error) {
-          s.stop(`${pkg.name}: failed`);
-          throw error;
-        }
+        await publishPlaceholder(pkg);
+        console.log(`${pkg.name}: configuring trusted publishing`);
+        await npmTrust(context, pkg, options, repo);
+        console.log(`${pkg.name}: configured`);
+        lines.push(
+          `configured ${pkg.name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
+        );
       }
 
       note(lines.join("\n"), "Result");
@@ -188,10 +181,15 @@ The real package contents will be published via CI with OIDC.
     if (access) args.push("--access", access);
     if (registry) args.push("--registry", registry);
 
-    const result = await x("npm", args, { nodeOptions: { cwd: dir } });
+    const result = await x("npm", args, {
+      nodeOptions: { cwd: dir, stdio: "inherit" },
+    });
     if (result.exitCode !== 0) {
+      const hint = result.stderr.includes("EOTP")
+        ? " Complete npm 2FA in the terminal, or publish with an OTP-capable session."
+        : "";
       throw execFailure(
-        `Failed to publish placeholder ${pkg.name}@${PLACEHOLDER_VERSION} with dist-tag "${PLACEHOLDER_DIST_TAG}".`,
+        `Failed to publish placeholder ${pkg.name}@${PLACEHOLDER_VERSION} with dist-tag "${PLACEHOLDER_DIST_TAG}".${hint}`,
         result,
       );
     }
@@ -220,8 +218,13 @@ async function npmTrust(
     pkg.getRegistry(),
   ];
 
-  const result = await x("npm", args, { nodeOptions: { cwd: context.cwd } });
+  const result = await x("npm", args, {
+    nodeOptions: { cwd: context.cwd, stdio: "inherit" },
+  });
   if (result.exitCode !== 0) {
-    throw execFailure(`Failed to configure trusted publishing for ${pkg.name}.`, result);
+    const hint = result.stderr.includes("EOTP")
+      ? " Complete npm 2FA in the terminal when prompted."
+      : "";
+    throw execFailure(`Failed to configure trusted publishing for ${pkg.name}.${hint}`, result);
   }
 }

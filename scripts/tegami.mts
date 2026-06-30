@@ -21,6 +21,12 @@ const paper = tegami({
       },
     }),
   ],
+  npm: {
+    trustedPublish: {
+      provider: "github",
+      workflow: "publish.yml",
+    },
+  },
   groups: {
     tegami: {
       syncBump: true,
