@@ -17,9 +17,9 @@
     "./plugins/github": "./dist/plugins/github.js",
     "./plugins/gitlab": "./dist/plugins/gitlab.js",
     "./plugins/go": "./dist/plugins/go.js",
-    "./plugins/pip": "./dist/plugins/pip.js",
     "./providers/cargo": "./dist/providers/cargo.js",
     "./providers/npm": "./dist/providers/npm.js",
+    "./utils": "./dist/utils/index.js",
     "./package.json": "./package.json"
   },
   "publishConfig": {

@@ -134,6 +134,37 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  packages/tegami-pip:
+    dependencies:
+      '@rainbowatcher/toml-edit-js':
+        specifier: ^0.6.5
+        version: 0.6.5
+      '@renovatebot/pep440':
+        specifier: ^5.0.0
+        version: 5.0.0
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.0.0
+        version: 26.0.0
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.3
+        version: 0.22.3(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/typescript-config: {}
 
 packages:
@@ -1225,6 +1256,10 @@ packages:
 
   '@rainbowatcher/toml-edit-js@0.6.5':
     resolution: {integrity: sha512-EdALJyTDcp2yOxeVw1OJevOF7NZrlWAbVEnOnQBV7YqycVCI0OcpDy6oLUa8vqSvv2F1RmXW7kz1kgYv2A5h/w==}
+
+  '@renovatebot/pep440@5.0.0':
+    resolution: {integrity: sha512-91cFM32/pnOAvC7W1W1kPPI9QM2y6OrYCeomz7pop4A+3Ksh2XnZXGznUMlzR7YbOQlg7X/MNlF27s9Yt9hhTA==}
+    engines: {node: ^22.11.0 || >=24.10.0, pnpm: '>=10.0.0'}
 
   '@rolldown/binding-android-arm64@1.0.0-rc.12':
     resolution: {integrity: sha512-pv1y2Fv0JybcykuiiD3qBOBdz6RteYojRFY1d+b95WVuzx211CRh+ytI/+9iVyWQ6koTh5dawe4S/yRfOFjgaA==}
@@ -4233,6 +4268,8 @@ snapshots:
   '@radix-ui/rect@1.1.2': {}
 
   '@rainbowatcher/toml-edit-js@0.6.5': {}
+
+  '@renovatebot/pep440@5.0.0': {}
 
   '@rolldown/binding-android-arm64@1.0.0-rc.12':
     optional: true

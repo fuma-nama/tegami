@@ -5,11 +5,11 @@ description: Python workspace support and PyPI publishing.
 
 The pip plugin discovers workspace members from `pyproject.toml`, bumps versions, updates dependency ranges, and publishes to PyPI with `uv publish`.
 
-Add it to your config:
+Install `@tegami/pip` and add it to your config:
 
 ```ts
 import { tegami } from "tegami";
-import { pip } from "tegami/plugins/pip";
+import { pip } from "@tegami/pip";
 
 const paper = tegami({
   plugins: [pip()],

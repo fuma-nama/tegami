@@ -33,7 +33,9 @@ export type {
   PublishOptions,
   PublishPlan,
 } from "./plans/publish";
-export type { PackageGraph, PackageGroup, WorkspacePackage } from "./graph";
+export { PackageGraph, WorkspacePackage, type PackageGroup } from "./graph";
+export type { TegamiContext } from "./context";
+export type { BumpType } from "./utils/semver";
 
 export interface GenerateChangelogOptions extends GenerateFromCommitsOptions {
   /**
