@@ -7,14 +7,10 @@ import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure, isNodeError } from "../utils/error";
+import { execFailure } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
-
-interface TomlTable {
-  [key: string]: TomlValue;
-}
-type TomlValue = string | number | boolean | TomlTable | TomlValue[];
+import { cargoManifestSchema, type CargoDependency, type CargoManifest } from "./cargo/schema";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
@@ -23,19 +19,19 @@ export class CargoPackage extends WorkspacePackage {
 
   constructor(
     readonly path: string,
-    readonly manifest: TomlTable,
+    readonly manifest: CargoManifest,
     private content: string,
-    private readonly workspaceManifest?: TomlTable,
+    private readonly workspaceManifest?: CargoManifest,
   ) {
     super();
   }
 
   get name(): string {
-    return this.packageInfo.name as string;
+    return this.packageInfo.name;
   }
 
   get version() {
-    return stringValue(this.packageInfo.version) ?? this.workspaceVersion;
+    return this.packageInfo.version ?? this.workspaceVersion;
   }
 
   setVersion(version: string): void {
@@ -51,14 +47,12 @@ export class CargoPackage extends WorkspacePackage {
     this.content = edit(this.content, path, value);
   }
 
-  get packageInfo(): TomlTable {
-    this.manifest.package ??= {};
-    return this.manifest.package as TomlTable;
+  get packageInfo() {
+    return this.manifest.package;
   }
 
   private get workspaceVersion(): string | undefined {
-    const workspace = tableValue(this.workspaceManifest?.workspace);
-    return stringValue(tableValue(workspace?.package)?.version);
+    return this.workspaceManifest?.workspace?.package?.version;
   }
 }
 
@@ -107,10 +101,10 @@ export function cargo({
       const wait: string[] = [];
 
       for (const { table } of dependencyTables(pkg.manifest, "")) {
-        for (const [rawName, rawSpec] of Object.entries(table)) {
-          if (!isTableValue(rawSpec) || typeof rawSpec.path !== "string") continue;
+        for (const [rawName, dep] of Object.entries(table)) {
+          if (!dep || typeof dep === "string" || !dep.path) continue;
 
-          const packageName = stringValue(rawSpec.package) ?? rawName;
+          const packageName = dep.package ?? rawName;
           const id = `cargo:${packageName}`;
           const linked = this.graph.get(id);
           if (!linked || !(linked instanceof CargoPackage)) continue;
@@ -286,64 +280,38 @@ async function isPackagePublished(name: string, version: string) {
   );
 }
 
-async function discoverCargoPackages(cwd: string, add: (pkg: CargoPackage) => void): Promise<void> {
-  const root = await readCargoManifest(cwd).catch((error: unknown) => {
-    if (isNodeError(error) && error.code === "ENOENT") return undefined;
-    throw error;
-  });
-  if (!root) return;
-
-  addCargoPackage(cwd, root.manifest, root.content, root.manifest, add);
-
-  const workspace = tableValue(root.manifest.workspace);
-  const members = workspace?.members;
-  if (!workspace || !Array.isArray(members)) return;
-  const exclude = Array.isArray(workspace.exclude)
-    ? workspace.exclude.filter((member): member is string => typeof member === "string")
-    : [];
-
-  const paths = await expandWorkspaceMembers(
-    cwd,
-    members.filter((member): member is string => typeof member === "string"),
-    exclude,
-  );
-  const manifests = await Promise.all(
-    paths.map((path) =>
-      readCargoManifest(path)
-        .then((manifest) => ({ path, manifest }))
-        .catch(() => undefined),
-    ),
-  );
-
-  for (const entry of manifests) {
-    if (entry)
-      addCargoPackage(
-        entry.path,
-        entry.manifest.manifest,
-        entry.manifest.content,
-        root.manifest,
-        add,
-      );
+async function buildEntry(path: string) {
+  try {
+    const content = await readFile(join(path, "Cargo.toml"), "utf8");
+    return { manifest: cargoManifestSchema.parse(parse(content)), content, path };
+  } catch {
+    return;
   }
 }
 
-function addCargoPackage(
-  path: string,
-  manifest: TomlTable,
-  content: string,
-  workspaceManifest: TomlTable,
-  add: (pkg: CargoPackage) => void,
-): void {
-  const packageInfo = tableValue(manifest.package);
-  if (!packageInfo?.name) return;
+async function discoverCargoPackages(cwd: string, add: (pkg: CargoPackage) => void): Promise<void> {
+  const root = await buildEntry(cwd);
+  if (!root) return;
 
-  add(new CargoPackage(path, manifest, content, workspaceManifest));
+  if (root.manifest.package?.name)
+    add(new CargoPackage(cwd, root.manifest, root.content, root.manifest));
+
+  const workspace = root.manifest.workspace;
+  if (!workspace?.members) return;
+
+  const paths = await expandWorkspaceMembers(cwd, workspace.members, workspace.exclude);
+  const manifests = await Promise.all(paths.map(buildEntry));
+
+  for (const entry of manifests) {
+    if (entry?.manifest.package?.name)
+      add(new CargoPackage(entry.path, entry.manifest, entry.content, root.manifest));
+  }
 }
 
 async function expandWorkspaceMembers(
   cwd: string,
   members: string[],
-  exclude: string[],
+  exclude: string[] = [],
 ): Promise<string[]> {
   const paths = members.includes(".") ? [cwd] : [];
   const patterns = members.filter((member) => member !== ".");
@@ -363,26 +331,27 @@ async function expandWorkspaceMembers(
   return paths.map(normalize);
 }
 
-function dependencyTables(manifest: TomlTable, prefix: string) {
-  const tables: { kind: (typeof DEP_FIELDS)[number]; table: TomlTable; path: string }[] = [];
+function dependencyTables(manifest: CargoManifest, prefix: string) {
+  const tables: {
+    kind: (typeof DEP_FIELDS)[number];
+    table: Record<string, CargoDependency>;
+    path: string;
+  }[] = [];
 
   for (const field of DEP_FIELDS) {
-    const table = tableValue(manifest[field]);
+    const table = manifest[field];
     if (table) {
       const path = prefix ? `${prefix}.${field}` : field;
       tables.push({ kind: field, table, path });
     }
   }
 
-  const target = tableValue(manifest.target);
+  const target = manifest.target;
   if (target) {
     for (const [targetKey, targetConfig] of Object.entries(target)) {
-      const targetTable = tableValue(targetConfig);
-      if (!targetTable) continue;
-
       const targetPath = prefix ? `${prefix}.target.${targetKey}` : `target.${targetKey}`;
       for (const field of DEP_FIELDS) {
-        const table = tableValue(targetTable[field]);
+        const table = targetConfig[field];
         if (table) tables.push({ kind: field, table, path: `${targetPath}.${field}` });
       }
     }
@@ -391,7 +360,7 @@ function dependencyTables(manifest: TomlTable, prefix: string) {
   return tables;
 }
 
-function parseSpec(v: TomlValue) {
+function parseSpec(v: CargoDependency) {
   if (typeof v === "string") {
     return {
       version: v,
@@ -401,31 +370,11 @@ function parseSpec(v: TomlValue) {
     };
   }
 
-  if (isTableValue(v)) {
-    return {
-      package: stringValue(v.package),
-      version: v.version as string,
-      setVersion(version: string) {
-        return { ...v, version };
-      },
-    };
-  }
-}
-
-async function readCargoManifest(path: string): Promise<{ manifest: TomlTable; content: string }> {
-  const content = await readFile(join(path, "Cargo.toml"), "utf8");
-  return { manifest: parse(content) as TomlTable, content };
-}
-
-function isTableValue(value: TomlValue): value is TomlTable {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function tableValue(value: TomlValue | undefined): TomlTable | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return value as TomlTable;
-}
-
-function stringValue(value: TomlValue | undefined): string | undefined {
-  return typeof value === "string" ? value : undefined;
+  return {
+    package: v.package,
+    version: v.version,
+    setVersion(version: string) {
+      return { ...v, version };
+    },
+  };
 }

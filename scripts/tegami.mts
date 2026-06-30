@@ -22,9 +22,19 @@ const paper = tegami({
       },
     }),
   ],
+  groups: {
+    tegami: {
+      syncBump: true,
+      syncGitTag: true,
+      prerelease: "beta",
+    },
+  },
   packages: {
     tegami: {
-      prerelease: "beta",
+      group: "tegami",
+    },
+    "@tegami/pip": {
+      group: "tegami",
     },
   },
 });

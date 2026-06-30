@@ -5,6 +5,7 @@ import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
+import { cargoManifestSchema } from "../src/providers/cargo/schema";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
 import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
@@ -75,13 +76,18 @@ Note.
       version: pkg.version,
     }));
 
-    expect(packages).toHaveLength(3);
+    expect(packages).toHaveLength(4);
     expect(packages).toEqual(
       expect.arrayContaining([
         {
           manager: "npm",
           name: "@acme/js",
           version: "1.0.0",
+        },
+        {
+          manager: "cargo",
+          name: "acme_workspace",
+          version: "0.0.0",
         },
         {
           manager: "cargo",
@@ -120,7 +126,7 @@ Note.
       packageIds.push((entry as { id: string }).id);
     }
     expect(packageIds.sort()).toEqual(
-      ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
+      ["cargo:acme_binding", "cargo:acme_core", "cargo:acme_workspace", "npm:@acme/js"].sort(),
     );
   });
 
@@ -148,7 +154,9 @@ Note.
     while ((entry = lock.read("core:packages"))) {
       packageIds.push((entry as { id: string }).id);
     }
-    expect(packageIds.sort()).toEqual(["cargo:pkg-a", "npm:pkg-a"]);
+    expect(packageIds.sort()).toEqual(
+      ["cargo:duplicate_workspace", "cargo:pkg-a", "npm:pkg-a"].sort(),
+    );
   });
 
   test("preserves Cargo.toml formatting and comments when applying a plan", async () => {
@@ -257,7 +265,12 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     await mkdir(join(cwd, "crates/lib"), { recursive: true });
     await writeFile(
       join(cwd, "Cargo.toml"),
-      `[workspace]
+      `[package]
+name = "versionless_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
     );
@@ -276,6 +289,30 @@ name = "acme_lib"
   });
 });
 
+describe("cargo manifest schema", () => {
+  test("requires a package section", () => {
+    expect(() =>
+      cargoManifestSchema.parse(parse(`[workspace]\nmembers = ["crates/*"]\n`)),
+    ).toThrow();
+  });
+
+  test("accepts workspace roots with a virtual package section", () => {
+    const manifest = cargoManifestSchema.parse(
+      parse(`[package]
+name = "acme_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
+members = ["crates/*"]
+`),
+    );
+
+    expect(manifest.package?.name).toBe("acme_workspace");
+    expect(manifest.workspace?.members).toEqual(["crates/*"]);
+  });
+});
+
 async function createMixedWorkspace(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-"));
   await mkdir(join(cwd, "packages/js"), { recursive: true });
@@ -290,7 +327,12 @@ async function createMixedWorkspace(): Promise<string> {
   });
   await writeFile(
     join(cwd, "Cargo.toml"),
-    `[workspace]
+    `[package]
+name = "acme_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
   );
@@ -334,7 +376,12 @@ async function createCircularCargoWorkspace(): Promise<string> {
 
   await writeFile(
     join(cwd, "Cargo.toml"),
-    `[workspace]
+    `[package]
+name = "cycle_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
   );
@@ -386,7 +433,12 @@ async function createDuplicateNameWorkspace(): Promise<string> {
   });
   await writeFile(
     join(cwd, "Cargo.toml"),
-    `[workspace]
+    `[package]
+name = "duplicate_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
   );

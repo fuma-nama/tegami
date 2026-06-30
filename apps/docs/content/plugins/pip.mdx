@@ -16,27 +16,58 @@ const paper = tegami({
 });
 ```
 
+<Callout type='warn' title="Requirements">
+
+[`uv`](https://github.com/astral-sh/uv) must be configured on your Python project.
+
+</Callout>
+
 ## Discovery
 
 Tegami reads the root `pyproject.toml` and expands `[tool.uv.workspace].members`. Packages need a `[project].name` and `version`.
 
-Workspace dependencies linked through `[tool.uv.sources]` are resolved automatically.
+Workspace dependencies must be declared in both `[project].dependencies` and `[tool.uv.sources]` with `{ workspace = true }`, matching [uv's workspace rules](https://docs.astral.sh/uv/concepts/projects/workspaces/).
+
+## Dependency bumping
+
+When a workspace package is released, Tegami can bump its dependents and rewrite their version constraints.
+
+| Dependency kind         | Default dependent bump |
+| ----------------------- | ---------------------- |
+| `dependencies`          | patch                  |
+| `optional-dependencies` | patch                  |
+| `dependency-groups`     | none                   |
+
+For workspace-linked dependencies (`{ workspace = true }`), dependents are bumped and constraints are rewritten even when the old range still accepts the new version. Plain PyPI-style pins only change when the range is no longer satisfied.
 
 ## Configuration
 
 ```ts
 pip({
   updateLockFile: false,
-  bumpDep: ({ kind }) => (kind === "dependencies" ? "patch" : false),
+  publishIndex: "testpypi",
+  bumpDep: ({ kind }) => (kind === "dependency-groups" ? false : "patch"),
 });
 ```
 
-| Option           | Default | Description                                   |
-| ---------------- | ------- | --------------------------------------------- |
-| `updateLockFile` | `true`  | Run `uv lock` after versioning                |
-| `bumpDep`        | —       | Decide how to bump dependents when a package is bumped |
+| Option           | Default | Description                                                   |
+| ---------------- | ------- | ------------------------------------------------------------- |
+| `updateLockFile` | `true`  | Run `uv lock` after versioning                                |
+| `publishIndex`   | —       | Named `[[tool.uv.index]]` entry for publish and status checks |
+| `bumpDep`        | —       | Decide how to bump dependents when a package is bumped        |
 
-Default behavior:
+## Publishing
 
-- `dependencies` → patch bump on the dependent
-- `optional-dependencies` → no automatic bump
+Python has no npm-style `[project].publishConfig`. With uv, registry settings live under `[[tool.uv.index]]` in `pyproject.toml`:
+
+```toml
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+```
+
+Point Tegami at a named index with `publishIndex: "testpypi"`. When a `publish-url` is configured, Tegami passes it directly to `uv publish` so member packages can publish without duplicating the index table.
+
+When `publishIndex` is unset, Tegami uses PyPI for publish-status checks and runs `uv publish` without an index flag.

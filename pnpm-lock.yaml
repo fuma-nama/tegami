@@ -148,6 +148,9 @@ importers:
       tinyglobby:
         specifier: ^0.2.17
         version: 0.2.17
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@repo/typescript-config':
         specifier: workspace:*
