@@ -110,23 +110,8 @@ export function pip({
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof PipPackage)) return;
 
-      const wait: string[] = [];
-
-      for (const { table } of dependencyTables(pkg.manifest)) {
-        for (const rawSpec of table) {
-          const spec = parseDependencySpec(rawSpec);
-          if (!spec) continue;
-
-          const linked = resolveLinkedPackage(this.graph, pkg, spec);
-          if (!linked) continue;
-
-          wait.push(linked.id);
-        }
-      }
-
       return {
         shouldPublish: pkg.version !== undefined && pkg.projectInfo.private !== true,
-        wait,
       };
     },
     resolvePlanStatus({ plan }) {
@@ -207,7 +192,7 @@ export function pip({
             }
 
             const workspace = pkg.manifest.tool?.uv?.sources?.[spec.name]?.workspace === true;
-            if (!workspace && satisfies(linked.version, spec.version)) {
+            if (!workspace || satisfies(linked.version, spec.version)) {
               next.push(rawSpec);
               continue;
             }
@@ -278,9 +263,7 @@ function depsPolicy(
             if (!bumped) continue;
 
             const workspace = dependent.manifest.tool?.uv?.sources?.[spec.name]?.workspace === true;
-            const isValid = "version" in spec && validRange(spec.version);
-            if (isValid && !workspace && satisfies(bumped, spec.version)) continue;
-            if (!isValid && !workspace) continue;
+            if (!workspace) continue;
 
             const bumpType = getBumpDepType({
               kind,

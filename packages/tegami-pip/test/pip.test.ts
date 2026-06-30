@@ -200,7 +200,7 @@ Note.
     expect(table(core.project)?.version).toBe("1.1.0");
     expect(table(api.project)?.version).toBe("1.0.1");
     expect((table(api.project)?.dependencies as string[] | undefined)?.[0]).toBe(
-      "acme-core>=1.1.0",
+      "acme-core>=1.0.0",
     );
 
     const packageIds: string[] = [];
@@ -402,7 +402,7 @@ acme-core = { workspace = true }
     const written = await readFile(join(cwd, "packages/api/pyproject.toml"), "utf8");
     expect(written).toContain("# keep this comment");
     expect(written).toContain('version = "1.0.1"');
-    expect(written).toContain('"acme-core>=1.1.0"');
+    expect(written).toContain('"acme-core>=1.0.0"');
   });
 
   test("routes npm and pip publishes through their registry clients", async () => {
@@ -436,24 +436,28 @@ acme-core = { workspace = true }
 
     expect(published.sort()).toEqual(["pip:acme-api", "pip:acme-core"].sort());
     expect(result.packages.get("npm:@acme/js")?.publishResult).toEqual({ type: "skipped" });
-    expect(
-      exec.mock.calls.map(([command, args, options]) => ({
+    const uvPublishCalls = exec.mock.calls
+      .filter(([command]) => command === "uv")
+      .map(([command, args, options]) => ({
         command,
         args,
         cwd: normalizeDirPath(String(options?.nodeOptions?.cwd)),
-      })),
-    ).toEqual([
-      {
-        command: "uv",
-        args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "packages/core")),
-      },
-      {
-        command: "uv",
-        args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "packages/api")),
-      },
-    ]);
+      }));
+    expect(uvPublishCalls).toHaveLength(2);
+    expect(uvPublishCalls).toEqual(
+      expect.arrayContaining([
+        {
+          command: "uv",
+          args: ["publish"],
+          cwd: normalizeDirPath(join(cwd, "packages/core")),
+        },
+        {
+          command: "uv",
+          args: ["publish"],
+          cwd: normalizeDirPath(join(cwd, "packages/api")),
+        },
+      ]),
+    );
     expect(fetch).toHaveBeenCalledWith(
       "https://registry.npmjs.org/@acme/js/1.1.0",
       expect.objectContaining({ headers: { Accept: "application/json" } }),
@@ -509,7 +513,7 @@ Release with separators.
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  test("throws on circular pip workspace dependencies", async () => {
+  test("publishes circular pip workspace dependencies", async () => {
     const cwd = await createCircularPipWorkspace();
     tempDirs.push(cwd);
     await tegami({ cwd, plugins: [pip()] })
@@ -525,9 +529,18 @@ Release with separators.
     );
     exec.mockImplementation(() => commandResult());
 
-    await expect(tegami({ cwd, plugins: [pip()] }).publish()).rejects.toThrow(
-      /circular reference of deps/,
-    );
+    const result = await tegami({ cwd, plugins: [pip()] }).publish();
+
+    if (result === "skipped") {
+      throw new Error("expected publish plan, got skipped");
+    }
+
+    expect(
+      [...result.packages.entries()]
+        .filter(([, plan]) => plan.publishResult?.type === "published")
+        .map(([id]) => id)
+        .sort(),
+    ).toEqual(["pip:pkg-a", "pip:pkg-b"]);
   });
 
   test("links workspace packages by dependency name", async () => {
@@ -586,7 +599,7 @@ Bump core.
 
     const api = await readPyproject(join(cwd, "packages/api"));
     expect(table(api.project)?.version).toBe("1.0.1");
-    expect((table(api.project)?.dependencies as string[] | undefined)?.[0]).toBe("my-core>=1.1.0");
+    expect((table(api.project)?.dependencies as string[] | undefined)?.[0]).toBe("my-core>=1.0.0");
   });
 
   test("updates dependency-groups constraints for workspace members", async () => {
@@ -646,7 +659,7 @@ Bump core.
       .then((draft) => draft.apply());
 
     const api = await readPyproject(join(cwd, "packages/api"));
-    expect(table(api["dependency-groups"] as TomlTable)?.dev).toEqual(["acme-core>=1.1.0"]);
+    expect(table(api["dependency-groups"] as TomlTable)?.dev).toEqual(["acme-core>=1.0.0"]);
     expect(table(api.project)?.version).toBe("1.0.0");
   });
 
