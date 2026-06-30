@@ -93,25 +93,27 @@ packages: () => ({ group: 'all' }),
 
 Delete the Changesets release workflow and add [`templates/release.yml`](templates/release.yml): it runs `tegami ci` on pushes to the main branch (version when changelogs are pending → opens a Version Packages PR; otherwise publish from the committed lock). Optionally add the PR release-preview pair [`templates/tegami-pr.yml`](templates/tegami-pr.yml) + [`templates/tegami-pr-comment.yml`](templates/tegami-pr-comment.yml) (a capability Changesets needed its GitHub App for).
 
-**Version in the PR title.** Changesets workflows often put the release version in the Version Packages PR title (`chore: release v1.2.3`). Tegami's `github` plugin doesn't by default — restore it with the `versionPr.create()` hook in `scripts/tegami.mts`. The hook receives the `draft`, and `this` is the `TegamiContext` (so `this.graph` is available):
+**Version in the PR title.** Changesets workflows often put the release version in the Version Packages PR title (`chore: release v1.2.3`). Tegami's `github` plugin doesn't by default — restore it with the `versionPr.create()` hook in `scripts/tegami.mts`, where `this` is the `TegamiContext` (so `this.graph` is available):
 
 ```ts
 github({
   repo: 'your-org/your-repo',
   versionPr: {
     base: 'main',
-    create({ draft }) {
-      // Pick the package whose version represents the release. With a shared-version
-      // group, any member works; otherwise use your published package's id.
-      const pkg = this.graph.get('npm:your-package');
-      const version = pkg ? draft.getPackageDraft('npm:your-package')?.bumpVersion(pkg) : undefined;
+    create() {
+      // `create` runs AFTER the draft is applied, so the graph already holds the
+      // bumped versions — read the new version straight off the published package.
+      // With a shared-version group, any member works.
+      const version = this.graph.get('npm:your-package')?.version;
       return { title: version ? `chore: release v${version}` : 'chore: release' };
     },
   },
 }),
 ```
 
-`create()` must be a method (or `function`), not an arrow, so `this` binds to the context. It only does version math — no markdown rendering — so it's safe under any runtime. Note it sets the title at PR-creation time; an already-open Version Packages PR keeps its old title until the next run updates it.
+> **Pitfall:** don't compute the version with `draft.getPackageDraft(id)?.bumpVersion(pkg)` here. `create` fires *after* the draft is applied, so the graph package is already bumped — re-bumping it double-counts (e.g. titles the PR `v0.21.0` while it actually bumps to `v0.20.0`). Read `this.graph.get(id)?.version` instead.
+
+`create()` must be a method (or `function`), not an arrow, so `this` binds to the context. It only reads a version — no markdown rendering — so it's safe under any runtime. Note it sets the title at PR-creation time; an already-open Version Packages PR keeps its old title until the next run updates it.
 
 ### 7. Validate with a dry run — *before removing Changesets*
 

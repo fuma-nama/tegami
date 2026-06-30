@@ -33,9 +33,11 @@ const paper = tegami({
         // OPTIONAL — put the release version in the Version Packages PR title
         // (e.g. "chore: release v1.2.3"), like the old Changesets workflow.
         // Must be a method (not an arrow) so `this` binds to the TegamiContext.
-        // create({ draft }) {
-        //   const pkg = this.graph.get('npm:your-package');
-        //   const version = pkg ? draft.getPackageDraft('npm:your-package')?.bumpVersion(pkg) : undefined;
+        // `create` runs after the draft is applied, so read the bumped version
+        // straight off the graph — do NOT re-bump with bumpVersion() (it would
+        // double-count, titling the PR one release ahead of the actual bump).
+        // create() {
+        //   const version = this.graph.get('npm:your-package')?.version;
         //   return { title: version ? `chore: release v${version}` : 'chore: release' };
         // },
       },
