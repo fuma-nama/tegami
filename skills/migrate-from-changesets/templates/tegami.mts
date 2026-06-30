@@ -29,6 +29,15 @@ const paper = tegami({
       repo: 'your-org/your-repo',
       versionPr: {
         base: 'main',
+
+        // OPTIONAL — put the release version in the Version Packages PR title
+        // (e.g. "chore: release v1.2.3"), like the old Changesets workflow.
+        // Must be a method (not an arrow) so `this` binds to the TegamiContext.
+        // create({ draft }) {
+        //   const pkg = this.graph.get('npm:your-package');
+        //   const version = pkg ? draft.getPackageDraft('npm:your-package')?.bumpVersion(pkg) : undefined;
+        //   return { title: version ? `chore: release v${version}` : 'chore: release' };
+        // },
       },
     }),
   ],

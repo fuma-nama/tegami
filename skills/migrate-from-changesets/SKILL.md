@@ -95,6 +95,26 @@ packages: () => ({ group: 'all' }),
 
 Delete the Changesets release workflow and add [`templates/release.yml`](templates/release.yml): it runs `tegami ci` on pushes to the main branch (version when changelogs are pending → opens a Version Packages PR; otherwise publish from the committed lock). Optionally add the PR release-preview pair [`templates/tegami-pr.yml`](templates/tegami-pr.yml) + [`templates/tegami-pr-comment.yml`](templates/tegami-pr-comment.yml) (a capability Changesets needed its GitHub App for).
 
+**Version in the PR title.** Changesets workflows often put the release version in the Version Packages PR title (`chore: release v1.2.3`). Tegami's `github` plugin doesn't by default — restore it with the `versionPr.create()` hook in `scripts/tegami.mts`. The hook receives the `draft`, and `this` is the `TegamiContext` (so `this.graph` is available):
+
+```ts
+github({
+  repo: 'your-org/your-repo',
+  versionPr: {
+    base: 'main',
+    create({ draft }) {
+      // Pick the package whose version represents the release. With a shared-version
+      // group, any member works; otherwise use your published package's id.
+      const pkg = this.graph.get('npm:your-package');
+      const version = pkg ? draft.getPackageDraft('npm:your-package')?.bumpVersion(pkg) : undefined;
+      return { title: version ? `chore: release v${version}` : 'chore: release' };
+    },
+  },
+}),
+```
+
+`create()` must be a method (or `function`), not an arrow, so `this` binds to the context. It only does version math — no markdown rendering — so it's safe under any runtime. Note it sets the title at PR-creation time; an already-open Version Packages PR keeps its old title until the next run updates it.
+
 ### 7. Validate with a dry run — *before removing Changesets*
 
 This is the most important step and the technique most people miss. Tegami has no global `version --dry-run`, so simulate a release and revert it:
@@ -144,6 +164,7 @@ Run `tegami init-agent` to append changelog instructions to `AGENTS.md`, and upd
 - **Release tag format is `<pkg-name>@<version>`** (or `<group>@<version>` with `syncGitTag`). If other workflows parse release tags (e.g. a post-release smoke test), confirm the format still matches.
 - **Private packages are versioned by default.** To exclude them entirely (the Changesets `privatePackages.version: false` behavior), add them to `ignore`.
 - **`tegami ci` on an empty repo state is a safe no-op** — no pending changelogs and no publish lock means it does nothing, so merging the migration PR won't accidentally publish.
+- **The Changesets *GitHub App* (`changeset-bot`) is separate from the workflow.** Deleting `.changeset/` and the workflow does not stop the `changeset-bot[bot]` "⚠️ No Changeset found" PR comments — that's an account-level App installation. It keeps commenting on every PR (harmless but confusing, and easy to mistake for Tegami) until you uninstall it: github.com/settings/installations → **changeset-bot** → remove the repo or uninstall.
 
 ## Cleanup checklist
 
@@ -151,6 +172,7 @@ Run `tegami init-agent` to append changelog instructions to `AGENTS.md`, and upd
 - [ ] `@changesets/cli` removed from `devDependencies`
 - [ ] `changeset*` npm scripts removed
 - [ ] Changesets release workflow removed; `release.yml` added
+- [ ] `changeset-bot` GitHub App uninstalled (stops "No Changeset found" PR comments)
 - [ ] Custom sync/version scripts removed (replaced by a group if needed)
 - [ ] Empty placeholder `CHANGELOG.md` files removed
 - [ ] npm trusted-publisher workflow filename updated
