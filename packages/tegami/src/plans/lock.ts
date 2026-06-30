@@ -38,8 +38,19 @@ export class PublishLock {
     arr.push(data);
   }
 
-  read(namespace: string): unknown | undefined {
+  /**
+   * Take the next entry from a namespace.
+   *
+   * This is intentionally destructive because publish-lock namespaces are consumed
+   * as ordered queues while rebuilding a publish plan.
+   */
+  take(namespace: string): unknown | undefined {
     return this.data.get(namespace)?.shift();
+  }
+
+  /** @deprecated use `take()` to make destructive reads explicit. */
+  read(namespace: string): unknown | undefined {
+    return this.take(namespace);
   }
 
   size(namespace: string) {

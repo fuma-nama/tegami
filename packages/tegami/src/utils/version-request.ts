@@ -13,6 +13,10 @@ export async function hasGitChanges(cwd: string): Promise<boolean> {
     },
   });
 
+  if (result.exitCode !== 0) {
+    throw execFailure("Failed to check for git changes.", result);
+  }
+
   return result.stdout.trim().length > 0;
 }
 

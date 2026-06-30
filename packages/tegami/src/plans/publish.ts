@@ -56,7 +56,7 @@ export async function initPublishPlan(
   const packages = new Map<string, PackagePublishPlan>();
   const changelogs = new Map<string, ChangelogEntry>();
 
-  while ((data = lock.read("core:changelogs"))) {
+  while ((data = lock.take("core:changelogs"))) {
     const entry = changelogStoreSchema.safeParse(data).data;
     if (!entry) continue;
     const parsed = parseChangelogFile(entry.filename, entry.content);
@@ -65,7 +65,7 @@ export async function initPublishPlan(
     changelogs.set(parsed.id, parsed);
   }
 
-  while ((data = lock.read("core:packages"))) {
+  while ((data = lock.take("core:packages"))) {
     const parsed = packageStoreSchema.safeParse(data).data;
     if (!parsed) continue;
     if (!context.graph.get(parsed.id)) continue;
@@ -96,7 +96,7 @@ export async function initPublishPlan(
 function resolvePublishTargets(plan: PublishPlan): string[] {
   const ordered: string[] = [];
 
-  function scan(id: string, stack = new Set<string>()) {
+  function scan(id: string, stack: Set<string>) {
     const preflight = plan.packages.get(id)?.preflight;
     if (!preflight || !preflight.shouldPublish) return;
 
@@ -115,7 +115,7 @@ function resolvePublishTargets(plan: PublishPlan): string[] {
     ordered.push(id);
   }
 
-  for (const id of plan.packages.keys()) scan(id);
+  for (const id of plan.packages.keys()) scan(id, new Set<string>());
   return ordered;
 }
 

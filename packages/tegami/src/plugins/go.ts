@@ -201,7 +201,7 @@ export function go({
       if (!active) return;
 
       let data: unknown;
-      while ((data = lock.read("go:packages"))) {
+      while ((data = lock.take("go:packages"))) {
         const parsed = packageLockSchema.safeParse(data).data;
         if (!parsed) continue;
 

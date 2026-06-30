@@ -116,7 +116,7 @@ Note.
 
     const packageIds: string[] = [];
     let entry: unknown;
-    while ((entry = lock.read("core:packages"))) {
+    while ((entry = lock.take("core:packages"))) {
       packageIds.push((entry as { id: string }).id);
     }
     expect(packageIds.sort()).toEqual(
@@ -145,7 +145,7 @@ Note.
 
     const packageIds: string[] = [];
     let entry: unknown;
-    while ((entry = lock.read("core:packages"))) {
+    while ((entry = lock.take("core:packages"))) {
       packageIds.push((entry as { id: string }).id);
     }
     expect(packageIds.sort()).toEqual(["cargo:pkg-a", "npm:pkg-a"]);

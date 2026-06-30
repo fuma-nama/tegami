@@ -162,6 +162,44 @@ describe("publish plan status", () => {
 
     await expect(publishPlanStatus(plan, context)).resolves.toBe("pending");
   });
+
+  test("reuses npm registry checks across status and publish", async () => {
+    const context = await createTestContext();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
+    );
+    const plan = await loadPlan(context);
+    const pkg = context.graph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
+
+    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
+    await expect(npmPlugin.publish?.call(context, { pkg, plan })).resolves.toEqual({
+      type: "skipped",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("updates the npm registry cache after publishing", async () => {
+    const context = await createTestContext();
+    fetchMock.mockResolvedValueOnce(new Response("Not found", { status: 404 })).mockResolvedValueOnce(
+      new Response("Not found", { status: 404 }),
+    );
+    exec.mockResolvedValue(execResult());
+    const plan = await loadPlan(context);
+    const pkg = context.graph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
+
+    await expect(publishPlanStatus(plan, context)).resolves.toBe("pending");
+    await expect(npmPlugin.publish?.call(context, { pkg, plan })).resolves.toEqual({
+      type: "published",
+    });
+    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 async function createTestContext() {

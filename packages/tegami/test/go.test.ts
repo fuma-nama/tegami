@@ -156,7 +156,7 @@ Note.
 
     const goVersions: Array<{ id: string; version: string }> = [];
     let entry: unknown;
-    while ((entry = lock.read("go:packages"))) {
+    while ((entry = lock.take("go:packages"))) {
       goVersions.push(entry as { id: string; version: string });
     }
 

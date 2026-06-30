@@ -211,6 +211,7 @@ export function npm({
 }: NpmPluginOptions = {}): TegamiPlugin {
   let active = false;
   let client: AgentName;
+  const publishedPackages = new Map<string, Promise<boolean>>();
 
   return {
     name: "npm",
@@ -245,7 +246,12 @@ export function npm({
 
         if (!(pkg instanceof NpmPackage) || !pkg.version) return;
         if (
-          !(await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry))
+          !(await isPackagePublished(
+            publishedPackages,
+            pkg.name,
+            pkg.version,
+            pkg.manifest.publishConfig?.registry,
+          ))
         )
           return "pending";
       });
@@ -263,7 +269,7 @@ export function npm({
     initPublishPlan({ lock, plan }) {
       let data: unknown;
 
-      while ((data = lock.read("npm:packages"))) {
+      while ((data = lock.take("npm:packages"))) {
         const parsed = packageLockSchema.safeParse(data).data;
         if (!parsed) continue;
         const packagePlan = plan.packages.get(parsed.id);
@@ -277,7 +283,7 @@ export function npm({
     async publish({ pkg, plan }) {
       if (!(pkg instanceof NpmPackage)) return;
 
-      return publish(client, pkg, plan.packages.get(pkg.id)?.npm?.distTag);
+      return publish(client, pkg, plan.packages.get(pkg.id)?.npm?.distTag, publishedPackages);
     },
     initDraft(plan) {
       if (!active) return;
@@ -431,11 +437,18 @@ function depsPolicy(
 async function publish(
   client: AgentName,
   pkg: NpmPackage,
-  distTag?: string,
+  distTag: string | undefined,
+  publishedPackages: Map<string, Promise<boolean>>,
 ): Promise<PackagePublishResult> {
   if (
     !pkg.version ||
-    (await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry))
+    (await isPackagePublished(
+      publishedPackages,
+      pkg.name,
+      pkg.version,
+      pkg.manifest.publishConfig?.registry,
+      { revalidateMissing: true },
+    ))
   ) {
     return { type: "skipped" };
   }
@@ -491,6 +504,7 @@ async function publish(
         ).message,
       };
     }
+    markPackagePublished(publishedPackages, pkg.name, pkg.version, pkg.manifest.publishConfig?.registry);
     return {
       type: "published",
     };
@@ -525,17 +539,55 @@ async function publish(
     };
   }
 
+  markPackagePublished(publishedPackages, pkg.name, pkg.version, pkg.manifest.publishConfig?.registry);
   return {
     type: "published",
   };
 }
 
 async function isPackagePublished(
+  cache: Map<string, Promise<boolean>>,
   name: string,
   version: string,
   registry = "https://registry.npmjs.org",
+  options: { revalidateMissing?: boolean } = {},
 ): Promise<boolean> {
+  const key = packagePublishedCacheKey(registry, name, version);
   const base = registry.replace(/\/$/, "");
+  const cached = cache.get(key);
+  if (cached) {
+    const published = await cached;
+    if (published || !options.revalidateMissing) return published;
+    cache.delete(key);
+  }
+
+  const pending = fetchPackagePublished(base, name, version, registry).catch((error: unknown) => {
+    cache.delete(key);
+    throw error;
+  });
+  cache.set(key, pending);
+  return pending;
+}
+
+function markPackagePublished(
+  cache: Map<string, Promise<boolean>>,
+  name: string,
+  version: string,
+  registry = "https://registry.npmjs.org",
+): void {
+  cache.set(packagePublishedCacheKey(registry, name, version), Promise.resolve(true));
+}
+
+function packagePublishedCacheKey(registry: string, name: string, version: string): string {
+  return `${registry.replace(/\/$/, "")}/${name}/${version}`;
+}
+
+async function fetchPackagePublished(
+  base: string,
+  name: string,
+  version: string,
+  registry: string,
+): Promise<boolean> {
   const response = await fetch(`${base}/${name}/${version}`, {
     headers: { Accept: "application/json" },
   });
