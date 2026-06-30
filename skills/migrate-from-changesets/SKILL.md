@@ -38,13 +38,11 @@ Note in particular:
 
 ### 1. Install Tegami
 
-Until v1 is released, install from the **`beta`** dist-tag. The API this skill uses (`tegami/cli`'s `createCli`, the `github` plugin, `tegami ci`) ships on the `1.x` line, which is published under `beta`; the `latest` tag still points at the older `0.2.x` line with a different API, so a plain `npm install tegami` will install the wrong one.
-
 ```bash
-pnpm add -D -w tegami@beta     # npm install tegami@beta -D / bun add -D tegami@beta
+pnpm add -D -w tegami     # npm install tegami -D / bun add -D tegami
 ```
 
-Requires Node.js 24+. Because this is a prerelease, expect possible API changes; the install pins the resolved beta in your lockfile. Once Tegami reaches a stable `1.0.0`, drop `@beta` and install normally.
+Requires Node.js 24+.
 
 ### 2. Create the config script
 
