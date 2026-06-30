@@ -8,14 +8,14 @@ import { readChangelogEntries } from "../../changelog/parse";
 import type { TegamiCliRegistry } from "../../cli/core";
 import type { TegamiContext } from "../../context";
 import { createDraft, type Draft } from "../../plans/draft";
-import { isCI } from "../../utils/common";
+import { isCI, joinPath } from "../../utils/common";
 import { execFailure } from "../../utils/error";
 import { formatNpmDistTag } from "../../utils/semver";
 import {
   createMergeRequestComment,
   findMergeRequestCommentByPrefix,
   getMergeRequest,
-  gitlabWebUrl,
+  type GitLabRequestOptions,
   updateMergeRequestComment,
 } from "./api";
 
@@ -190,7 +190,7 @@ export async function postMrComment(
   body: string,
   options: MrPreviewOptions = {},
 ): Promise<void> {
-  const { repo } = context.gitlab ?? {};
+  const { repo, apiUrl, token } = context.gitlab!;
   if (!repo) {
     outro("GITLAB_REPOSITORY or CI_PROJECT_PATH is required.");
     return;
@@ -206,10 +206,7 @@ export async function postMrComment(
     return;
   }
 
-  const api = {
-    apiUrl: context.gitlab?.apiUrl,
-    token: context.gitlab?.token,
-  };
+  const api: GitLabRequestOptions = { apiUrl, token };
   const markedBody = `${COMMENT_MARKER}\n${body}`;
   const existingId = await findMergeRequestCommentByPrefix(repo, number, COMMENT_MARKER, api);
 
@@ -225,14 +222,11 @@ async function resolveMergeRequest(
   context: TegamiContext,
   options: MrPreviewOptions,
 ): Promise<MergeRequestRef> {
-  const { repo } = context.gitlab ?? {};
+  const { repo, apiUrl, token } = context.gitlab!;
   if (!repo) {
     throw new Error("GITLAB_REPOSITORY or CI_PROJECT_PATH is required.");
   }
-  const api = {
-    apiUrl: context.gitlab?.apiUrl,
-    token: context.gitlab?.token,
-  };
+  const api: GitLabRequestOptions = { apiUrl, token };
 
   if (options.number !== undefined) {
     const data = await getMergeRequest(repo, options.number, api);
@@ -303,7 +297,7 @@ function createChangelogUrl(
   const branchPath = branch.split("/").map(encodeURIComponent).join("/");
   const params = new URLSearchParams({ file_name: filePath });
 
-  return `${gitlabWebUrl(context.gitlab?.webUrl)}/${repo}/-/new/${branchPath}?${params}`;
+  return joinPath(context.gitlab!.webUrl, repo, "-/new", branchPath) + `?${params}`;
 }
 
 function parsePositiveInt(value: string, option: string): number {

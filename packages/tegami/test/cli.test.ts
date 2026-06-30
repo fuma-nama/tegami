@@ -20,10 +20,17 @@ describe("cli registry", () => {
     tempDirs.push(cwd);
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await createCli(tegami({ cwd, plugins: [github(), gitlab()] })).parseAsync(["--help"]);
+    await createCli(
+      tegami({
+        cwd,
+        npm: { trustedPublish: { provider: "github", workflow: "publish.yml" } },
+        plugins: [github(), gitlab()],
+      }),
+    ).parseAsync(["--help"]);
 
     expect(log).toHaveBeenCalledWith(expect.stringContaining("pr preview"));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("mr preview"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("npm pretrust"));
   });
 
   test("prints command options in subcommand help", async () => {
@@ -41,7 +48,7 @@ describe("cli registry", () => {
   test("parses string options that do not define short flags", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-string-option-"));
     tempDirs.push(cwd);
-    const action = vi.fn(async () => {});
+    const action = vi.fn(async (_values: { artifact?: string }) => {});
 
     await createCli(
       tegami({

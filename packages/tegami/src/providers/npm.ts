@@ -15,6 +15,8 @@ import type { DraftPolicy, PackageDraft } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
 import z from "zod";
 import type { PackagePublishResult } from "../plans/publish";
+import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
+import { joinPath } from "../utils/common";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -55,6 +57,10 @@ export class NpmPackage extends WorkspacePackage {
     };
 
     return defaults;
+  }
+
+  getRegistry(): string {
+    return this.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
   }
 
   configureDraft(draft: PackageDraft, group?: PackageGroup): void {
@@ -185,6 +191,9 @@ export interface NpmPluginOptions {
 
   /** update lockfile after applying a draft @default true */
   updateLockFile?: boolean;
+
+  /** Configure `tegami npm pretrust`, disabled by default. */
+  trustedPublish?: TrustedPublishOptions;
 }
 
 const packageLockSchema = z.object({
@@ -196,6 +205,7 @@ export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
   updateLockFile = true,
+  trustedPublish,
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -244,10 +254,7 @@ export function npm({
         const pkg = this.graph.get(id)!;
 
         if (!(pkg instanceof NpmPackage) || !pkg.version) return;
-        if (
-          !(await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry))
-        )
-          return "pending";
+        if (!(await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) return "pending";
       });
     },
     initPublishLock({ lock, draft }) {
@@ -363,6 +370,11 @@ export function npm({
         throw execFailure("Failed to update lockfile.", result);
       }
     },
+    initCli(cli) {
+      if (!trustedPublish) return;
+
+      registerNpmCli(cli, trustedPublish);
+    },
   };
 }
 
@@ -433,10 +445,7 @@ async function publish(
   pkg: NpmPackage,
   distTag?: string,
 ): Promise<PackagePublishResult> {
-  if (
-    !pkg.version ||
-    (await isPackagePublished(pkg.name, pkg.version, pkg.manifest.publishConfig?.registry))
-  ) {
+  if (!pkg.version || (await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) {
     return { type: "skipped" };
   }
 
@@ -533,10 +542,9 @@ async function publish(
 async function isPackagePublished(
   name: string,
   version: string,
-  registry = "https://registry.npmjs.org",
+  registry: string,
 ): Promise<boolean> {
-  const base = registry.replace(/\/$/, "");
-  const response = await fetch(`${base}/${name}/${version}`, {
+  const response = await fetch(joinPath(registry, name, version), {
     headers: { Accept: "application/json" },
   });
 

@@ -480,12 +480,13 @@ function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x
   } as unknown as ReturnType<typeof x>;
 }
 
-function mockGit(handler: (args: string[]) => ReturnType<typeof x> | undefined) {
-  return (_command: string, args: string[] = []) => {
-    const result = handler(args);
+function mockGit(handler: (args: readonly string[]) => ReturnType<typeof x> | undefined) {
+  return (_command: string, args?: readonly string[]) => {
+    const argv = args ?? [];
+    const result = handler(argv);
     if (result) return result;
 
-    throw new Error(`Unexpected command: ${args.join(" ")}`);
+    throw new Error(`Unexpected command: ${argv.join(" ")}`);
   };
 }
 

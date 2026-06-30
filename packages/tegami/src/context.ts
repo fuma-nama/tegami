@@ -27,8 +27,8 @@ export interface TegamiContext {
   gitlab?: {
     repo?: string;
     token?: GitLabToken;
-    apiUrl?: string;
-    webUrl?: string;
+    apiUrl: string;
+    webUrl: string;
   };
   /** additional context when npm plugin is configured */
   npm?: {

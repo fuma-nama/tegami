@@ -34,6 +34,21 @@ export async function somePromise<T>(
   });
 }
 
+export function joinPath(...paths: string[]): string {
+  let out = "";
+  for (const path of paths) {
+    if (path.length === 0) continue;
+    if (!out) {
+      out = path;
+      continue;
+    }
+
+    if (!out.endsWith("/") && !path.startsWith("/")) out += "/";
+    out += path;
+  }
+  return out;
+}
+
 export function cached<Args extends unknown[], V>(
   cacheKey: (...args: Args) => string,
   fn: (...args: Args) => Awaitable<V>,

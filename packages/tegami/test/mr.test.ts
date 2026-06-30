@@ -50,6 +50,8 @@ afterEach(async () => {
   delete process.env.CI_COMMIT_SHA;
 });
 
+const testGitLabApi = { apiUrl: "https://gitlab.com/api/v4" };
+
 describe("mr", () => {
   test("renders release preview from GitLab merge request environment", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-mr-preview-"));
@@ -105,7 +107,7 @@ packages: ["@acme/core"]
     expect(body).toContain(
       "[**Create a changelog →**](https://gitlab.com/fork/repo/-/new/feature/test?file_name=.tegami%2F",
     );
-    expect(getMergeRequest).toHaveBeenCalledWith("acme/repo", 7, {});
+    expect(getMergeRequest).toHaveBeenCalledWith("acme/repo", 7, testGitLabApi);
   });
 
   test("requires merge request event or number", async () => {
@@ -182,7 +184,7 @@ packages: ["@acme/core"]
       "acme/repo",
       42,
       "<!-- tegami -->\n### Tegami\n",
-      {},
+      testGitLabApi,
     );
     expect(updateMergeRequestComment).not.toHaveBeenCalled();
   });
@@ -200,7 +202,7 @@ packages: ["@acme/core"]
       42,
       12345,
       "<!-- tegami -->\n### Tegami\n",
-      {},
+      testGitLabApi,
     );
     expect(createMergeRequestComment).not.toHaveBeenCalled();
   });
@@ -229,6 +231,8 @@ function createTestContext(packages: WorkspacePackage[], cwd?: string): TegamiCo
     graph: new PackageGraph(packages),
     gitlab: {
       repo: process.env.CI_PROJECT_PATH,
+      apiUrl: "https://gitlab.com/api/v4",
+      webUrl: "https://gitlab.com",
     },
   };
 }

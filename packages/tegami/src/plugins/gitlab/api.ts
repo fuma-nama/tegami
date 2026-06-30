@@ -1,3 +1,5 @@
+import { joinPath } from "../../utils/common";
+
 export function parseGitLabRepo(repo: string): { projectPath: string; encodedProjectPath: string } {
   const projectPath = repo.replace(/^\/+|\/+$/g, "");
   if (!projectPath || !projectPath.includes("/")) {
@@ -8,14 +10,6 @@ export function parseGitLabRepo(repo: string): { projectPath: string; encodedPro
     projectPath,
     encodedProjectPath: encodeURIComponent(projectPath),
   };
-}
-
-export function gitlabApiUrl(apiUrl = "https://gitlab.com/api/v4"): string {
-  return apiUrl.replace(/\/+$/, "");
-}
-
-export function gitlabWebUrl(webUrl = "https://gitlab.com"): string {
-  return webUrl.replace(/\/+$/, "");
 }
 
 export interface GitLabToken {
@@ -42,7 +36,7 @@ async function gitlabRequest(
     );
   }
 
-  return fetch(`${gitlabApiUrl(options.apiUrl)}${path}`, { ...init, headers });
+  return fetch(joinPath(options.apiUrl ?? "https://gitlab.com/api/v4", path), { ...init, headers });
 }
 
 export async function releaseExistsByTag(

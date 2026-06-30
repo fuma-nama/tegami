@@ -34,6 +34,15 @@ const updateMergeRequest = vi.mocked(gitlabClient.updateMergeRequest);
 const createMergeRequest = vi.mocked(gitlabClient.createMergeRequest);
 const listMergeRequestsForCommit = vi.mocked(gitlabClient.listMergeRequestsForCommit);
 const testToken = { value: "test-token", type: "private-token" as const };
+const testGitLabApi = {
+  apiUrl: "https://gitlab.com/api/v4",
+  token: testToken,
+};
+const testGitlab = {
+  repo: "acme/repo",
+  ...testGitLabApi,
+  webUrl: "https://gitlab.com",
+} satisfies NonNullable<TegamiContext["gitlab"]>;
 
 beforeEach(() => {
   exec.mockReset();
@@ -75,13 +84,12 @@ describe("gitlab release plugin", () => {
       ]),
     });
 
-    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", {
-      token: testToken,
-    });
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", testGitLabApi);
     expect(createGitLabRelease).toHaveBeenCalledWith("acme/repo", {
       tag: "@acme/core@1.0.1",
       title: "Release 1.0.1",
       notes: "Notes for @acme/core",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -93,16 +101,14 @@ describe("gitlab release plugin", () => {
 
     const context = {
       ...publishContext(),
-      gitlab: { repo: "acme/repo", token: testToken },
+      gitlab: testGitlab,
     };
 
     await plugin.afterPublishAll?.call(context, {
       plan: releasePlan(context, [{}]),
     });
 
-    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", {
-      token: testToken,
-    });
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", testGitLabApi);
     expect(createGitLabRelease).not.toHaveBeenCalled();
   });
 
@@ -217,9 +223,7 @@ describe("gitlab release plugin", () => {
       plan: releasePlan(context, [{ publishResult: { type: "skipped" } }]),
     });
 
-    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", {
-      token: testToken,
-    });
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", testGitLabApi);
     expect(createGitLabRelease).toHaveBeenCalledTimes(1);
   });
 
@@ -244,6 +248,7 @@ describe("gitlab release plugin", () => {
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes: "### Add proxy server\n\nSome description.",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -263,7 +268,7 @@ describe("gitlab release plugin", () => {
 
     const context = {
       ...publishContext(),
-      gitlab: { repo: "acme/repo", token: testToken },
+      gitlab: testGitlab,
     };
 
     await plugin.afterPublishAll?.call(context, {
@@ -284,6 +289,7 @@ describe("gitlab release plugin", () => {
       title: "@acme/core@1.0.1",
       notes:
         "### Add proxy server ([abc1234](https://gitlab.com/acme/repo/-/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -305,7 +311,7 @@ describe("gitlab release plugin", () => {
     const plugin = gitlabPlugin({ repo: "acme/repo" });
     const context = {
       ...publishContext(),
-      gitlab: { repo: "acme/repo", token: testToken },
+      gitlab: testGitlab,
     };
 
     await plugin.afterPublishAll?.call(context, {
@@ -324,13 +330,14 @@ describe("gitlab release plugin", () => {
     expect(listMergeRequestsForCommit).toHaveBeenCalledWith(
       "acme/repo",
       "abc1234567890abcdef1234567890abcdef123456",
-      { token: testToken },
+      testGitLabApi,
     );
     expect(createGitLabRelease).toHaveBeenCalledWith("acme/repo", {
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes:
         "### Add proxy server ([abc1234](https://gitlab.com/acme/repo/-/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.\n\n<details>\n<summary>Merge request & contributors</summary>\n\n- [!42 Add proxy server](https://gitlab.com/acme/repo/-/merge_requests/42) by @alice\n\n</details>",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -354,6 +361,7 @@ describe("gitlab release plugin", () => {
       tag: "@acme/core@1.0.1-beta.0",
       title: "@acme/core@1.0.1-beta.0",
       notes: "Published @acme/core@1.0.1-beta.0.",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -379,6 +387,7 @@ describe("gitlab release plugin", () => {
       tag: "acme@1.0.1",
       title: "acme@1.0.1",
       notes: "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -440,6 +449,7 @@ describe("gitlab release plugin", () => {
       tag: "acme@1.0.1",
       title: "Group release @acme/core",
       notes: "@acme/core, @acme/ui",
+      apiUrl: "https://gitlab.com/api/v4",
       token: testToken,
     });
   });
@@ -546,11 +556,13 @@ describe("gitlab version merge request", () => {
         title: "Version Packages",
         body: expect.stringContaining("Merge this MR to publish the versioned packages."),
         base: "main",
+        apiUrl: "https://gitlab.com/api/v4",
         token: testToken,
       });
       expect(findOpenMergeRequest).toHaveBeenCalledWith("acme/repo", {
         head: "tegami/version-packages",
         base: "main",
+        apiUrl: "https://gitlab.com/api/v4",
         token: testToken,
       });
       expect(createMergeRequest).not.toHaveBeenCalled();
@@ -642,6 +654,7 @@ describe("gitlab version merge request", () => {
         body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages",
         base: "main",
+        apiUrl: "https://gitlab.com/api/v4",
         token: testToken,
       });
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
@@ -766,7 +779,7 @@ function publishContext(packages: TestPackage[] = [testPackage()]): TegamiContex
     options: {},
     plugins: [],
     graph: new PackageGraph(packages),
-    gitlab: { repo: "acme/repo", token: testToken },
+    gitlab: testGitlab,
   };
 }
 

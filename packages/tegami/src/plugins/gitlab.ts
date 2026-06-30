@@ -7,7 +7,7 @@ import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatPackageVersion } from "../utils/semver";
 import { git, type GitPluginOptions } from "./git";
-import { cached, isCI } from "../utils/common";
+import { cached, isCI, joinPath } from "../utils/common";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
@@ -25,7 +25,6 @@ import {
   type GitLabToken,
   type MergeRequestSummary,
   type GitLabRequestOptions,
-  gitlabWebUrl,
 } from "./gitlab/api";
 import { registerMrCli } from "./gitlab/cli";
 
@@ -131,8 +130,16 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       this.gitlab = {
         repo: options.repo ?? process.env.GITLAB_REPOSITORY ?? process.env.CI_PROJECT_PATH,
         token: resolveGitLabToken(options.token),
-        apiUrl: options.apiUrl ?? process.env.GITLAB_API_URL ?? process.env.CI_API_V4_URL,
-        webUrl: options.webUrl ?? process.env.GITLAB_SERVER_URL ?? process.env.CI_SERVER_URL,
+        apiUrl:
+          options.apiUrl ??
+          process.env.GITLAB_API_URL ??
+          process.env.CI_API_V4_URL ??
+          "https://gitlab.com/api/v4",
+        webUrl:
+          options.webUrl ??
+          process.env.GITLAB_SERVER_URL ??
+          process.env.CI_SERVER_URL ??
+          "https://gitlab.com",
       };
     },
     async resolvePlanStatus({ plan }) {
@@ -214,7 +221,7 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
     async initCli(cli) {
       registerMrCli(cli);
       if (!isCI()) return;
-      const { repo, token, webUrl } = this.gitlab ?? {};
+      const { repo, token, webUrl } = this.gitlab!;
       if (!token || !repo) return;
 
       const origin = gitlabRemoteUrl(repo, token, webUrl);
@@ -291,7 +298,6 @@ interface ChangelogEntryMeta {
 function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
   const { repo, webUrl } = context.gitlab!;
   const api = gitLabApiOptions(context.gitlab);
-  const baseUrl = gitlabWebUrl(webUrl);
 
   const resolveFileCommit = cached(
     (filename: string) => filename,
@@ -329,7 +335,7 @@ function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
     const lines: string[] = [];
     for (const mr of meta.mergeRequests) {
       let line = repo
-        ? `- [!${mr.number} ${mr.title}](${baseUrl}/${repo}/-/merge_requests/${mr.number})`
+        ? `- [!${mr.number} ${mr.title}](${joinPath(webUrl, repo, "-/merge_requests", String(mr.number))})`
         : `- #${mr.number} ${mr.title}`;
       if (mr.user) line += ` by @${mr.user.login}`;
       lines.push(line);
@@ -351,7 +357,9 @@ function createChangelogRenderer(context: TegamiContext): ChangelogRenderer {
 
     if (meta.commit) {
       const short = meta.commit.slice(0, 7);
-      const link = repo ? `[${short}](${baseUrl}/${repo}/-/commit/${meta.commit})` : `\`${short}\``;
+      const link = repo
+        ? `[${short}](${joinPath(webUrl, repo, "-/commit", meta.commit)})`
+        : `\`${short}\``;
       commitSuffix += ` (${link})`;
     }
 
@@ -436,12 +444,9 @@ function resolveGitLabToken(optionToken?: string): GitLabToken | undefined {
   }
 }
 
-function gitlabRemoteUrl(repo: string, token: GitLabToken, webUrl?: string): string {
+function gitlabRemoteUrl(repo: string, token: GitLabToken, webUrl: string): string {
   const username = token.type === "job-token" ? "gitlab-ci-token" : "oauth2";
-  const authenticatedUrl = gitlabWebUrl(webUrl).replace(
-    /^https?:\/\//,
-    `https://${username}:${token.value}@`,
-  );
+  const authenticatedUrl = webUrl.replace(/^https?:\/\//, `https://${username}:${token.value}@`);
 
-  return `${authenticatedUrl}/${repo}.git`;
+  return joinPath(authenticatedUrl, `${repo}.git`);
 }
