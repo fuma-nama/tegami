@@ -23,6 +23,8 @@ export type ChangelogPackageConfig = z.output<typeof changelogPackageConfigSchem
 export function renderChangelog(
   frontmatter: z.input<typeof changelogFrontmatterSchema>,
   body: string,
+  newline = "\n",
 ): string {
-  return ["---", dump(frontmatter).trim(), "---", "", body.trim(), ""].join("\n");
+  const matter = dump(frontmatter).trim().replaceAll("\n", newline);
+  return ["---", matter, "---", "", body.trim(), ""].join(newline);
 }

@@ -9,7 +9,8 @@ import {
 } from "../src/utils/conventional-commit";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { tegami } from "../src";
-import type { CommitChangelog } from "../src/changelog/generate";
+import { changelogFilename, type CommitChangelog } from "../src/changelog/generate";
+import { parseChangelogFile } from "../src/changelog/parse";
 import { getPendingPackageIds } from "./helpers/draft";
 
 vi.mock("tinyexec", () => ({
@@ -101,6 +102,35 @@ describe("conventional commits", () => {
       breaking: false,
       title: "change",
     });
+  });
+});
+
+describe("changelog files", () => {
+  test("generates unique filenames even within the same millisecond", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+
+    expect(new Set([changelogFilename(), changelogFilename(), changelogFilename()]).size).toBe(3);
+    now.mockRestore();
+  });
+
+  test("preserves CRLF line endings when re-rendering parsed changelogs", () => {
+    const entry = parseChangelogFile(
+      "change.md",
+      [
+        "---",
+        "packages:",
+        "  '@acme/core': patch",
+        "---",
+        "",
+        "### Fix button",
+        "",
+        "Body line.",
+        "",
+      ].join("\r\n"),
+    );
+
+    expect(entry?.getRawContent()).toContain("\r\n---\r\n\r\n### Fix button");
+    expect(entry?.getRawContent()).not.toContain("\n---\n\n### Fix button");
   });
 });
 
@@ -259,7 +289,7 @@ function normalizeFile(file: Pick<CommitChangelog, "packages" | "changes" | "con
   return {
     packages: file.packages,
     changes: file.changes.length,
-    content: file.content.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md/g, "<stamp>.md"),
+    content: file.content.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.md/g, "<stamp>.md"),
   };
 }
 
@@ -276,7 +306,7 @@ async function normalizePlan(
         {
           type: plan.type,
           changelogIds: (plan.changelogs ?? []).map((item) =>
-            item.id.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9]+\.md/g, "<stamp>.md"),
+            item.id.replaceAll(/\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.md/g, "<stamp>.md"),
           ),
         },
       ];

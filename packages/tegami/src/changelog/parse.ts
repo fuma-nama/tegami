@@ -48,6 +48,7 @@ export async function readChangelogEntries(context: TegamiContext): Promise<Chan
 /** Parse one changelog markdown file into release entries. */
 export function parseChangelogFile(filename: string, content: string): ChangelogEntry | undefined {
   const parsed = frontmatter(content);
+  const newline = detectLineEnding(content);
   const { success, data } = changelogFrontmatterSchema.safeParse(parsed.data);
   if (!success || !data.packages) return;
 
@@ -91,6 +92,7 @@ export function parseChangelogFile(filename: string, content: string): Changelog
   if (packages.size === 0) return;
   const entry: ChangelogEntry & {
     _raw_body: string;
+    _newline: string;
   } = {
     id: filename,
     filename,
@@ -98,6 +100,7 @@ export function parseChangelogFile(filename: string, content: string): Changelog
     packages,
     sections,
     _raw_body: parsed.content,
+    _newline: newline,
     getRawContent() {
       return renderChangelog(
         {
@@ -105,6 +108,7 @@ export function parseChangelogFile(filename: string, content: string): Changelog
           packages: Object.fromEntries(this.packages.entries()),
         },
         entry._raw_body,
+        entry._newline,
       );
     },
   };
@@ -151,6 +155,10 @@ interface MarkdownSection {
   depth: number;
   title: string;
   content: string;
+}
+
+function detectLineEnding(content: string): string {
+  return content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
 }
 
 function parseMarkdownSections(markdown: string): MarkdownSection[] {

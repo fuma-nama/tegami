@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import { bumpDepth, maxBump, type BumpType } from "../utils/semver";
@@ -7,6 +8,8 @@ import {
 } from "../utils/conventional-commit";
 import { execFailure } from "../utils/error";
 import { type ChangelogPackageConfig, renderChangelog } from "./shared";
+
+let changelogFilenameCounter = 0;
 
 export interface GenerateFromCommitsOptions {
   /** Start revision. Defaults to the latest reachable git tag, or all history if none exists. */
@@ -139,7 +142,8 @@ export function changelogFilename(disambiguator = 0): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
-  const hash = (Date.now() + disambiguator).toString(36);
+  const counter = changelogFilenameCounter++;
+  const hash = `${(Date.now() + disambiguator).toString(36)}-${counter.toString(36)}-${randomBytes(4).toString("hex")}`;
 
   return `${yyyy}-${mm}-${dd}-${hash}.md`;
 }
