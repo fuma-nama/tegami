@@ -255,6 +255,8 @@ export function npm({
       };
     },
     resolvePlanStatus({ plan }) {
+      if (!active) return;
+
       return Array.from(plan.packages, async ([id, { preflight }]) => {
         if (!preflight!.shouldPublish) return;
         const pkg = this.graph.get(id)!;

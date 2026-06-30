@@ -5,7 +5,8 @@ import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import { cargoManifestSchema } from "../src/providers/cargo/schema";
+import { cargo } from "../src/plugins/cargo";
+import { cargoManifestSchema } from "../src/plugins/cargo/schema";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
 import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
@@ -21,6 +22,10 @@ vi.mock("tinyexec", () => ({
 
 const tempDirs: string[] = [];
 const exec = vi.mocked(x);
+
+function withCargo(options: Parameters<typeof tegami>[0] = {}) {
+  return tegami({ ...options, plugins: [cargo(), ...(options.plugins ?? [])] });
+}
 
 beforeEach(() => {
   exec.mockReset();
@@ -69,7 +74,7 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const graph = (await tegami({ cwd })._internal.context()).graph;
+    const graph = (await withCargo({ cwd })._internal.context()).graph;
     const packages = graph.getPackages().map((pkg) => ({
       manager: pkg.manager,
       name: pkg.name,
@@ -107,7 +112,7 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const draft = await tegami({ cwd }).draft();
+    const draft = await withCargo({ cwd }).draft();
     await draft.apply();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/js/package.json"), "utf8"));
@@ -134,7 +139,7 @@ Note.
     const cwd = await createDuplicateNameWorkspace();
     tempDirs.push(cwd);
 
-    const paper = tegami({ cwd });
+    const paper = withCargo({ cwd });
     const draft = await paper.draft();
     await draft.apply();
 
@@ -172,7 +177,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
 `;
     await writeFile(join(cwd, "crates/binding/Cargo.toml"), bindingManifest);
 
-    await tegami({ cwd })
+    await withCargo({ cwd })
       .draft()
       .then((draft) => draft.apply());
 
@@ -186,7 +191,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
   test("routes npm and cargo publishes through their registry clients", async () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
-    await tegami({ cwd })
+    await withCargo({ cwd })
       .draft()
       .then((draft) => draft.apply());
 
@@ -202,7 +207,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     );
     exec.mockImplementation(() => commandResult());
 
-    const result = await tegami({ cwd, npm: { client: "npm" } }).publish();
+    const result = await withCargo({ cwd, npm: { client: "npm" } }).publish();
 
     if (result === "skipped") {
       throw new Error("expected publish plan, got skipped");
@@ -243,7 +248,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
   test("throws on circular cargo workspace dependencies", async () => {
     const cwd = await createCircularCargoWorkspace();
     tempDirs.push(cwd);
-    await tegami({ cwd })
+    await withCargo({ cwd })
       .draft()
       .then((draft) => draft.apply());
 
@@ -256,7 +261,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     );
     exec.mockImplementation(() => commandResult());
 
-    await expect(tegami({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
+    await expect(withCargo({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
   });
 
   test("includes cargo crates without a version field in the graph", async () => {
@@ -281,7 +286,7 @@ name = "acme_lib"
 `,
     );
 
-    const graph = (await tegami({ cwd })._internal.context()).graph;
+    const graph = (await withCargo({ cwd })._internal.context()).graph;
     const pkg = graph.get("cargo:acme_lib");
 
     expect(pkg).toBeDefined();

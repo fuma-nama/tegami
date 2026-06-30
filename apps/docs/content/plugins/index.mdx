@@ -28,20 +28,35 @@ const paper = tegami({
 
 ## Built-in plugins
 
-Tegami enables npm and Cargo support automatically. Configure them through top-level options:
+Tegami enables npm support automatically. Configure it through the top-level `npm` option:
 
 | Plugin | Role                                      |
 | ------ | ----------------------------------------- |
 | npm    | Discover npm/pnpm/yarn workspace packages |
-| cargo  | Discover Cargo workspace packages         |
 
 ```ts
 const paper = tegami({
   npm: {
     updateLockFile: true,
   },
-  cargo: {},
 });
 ```
 
-Other plugins such as [pip](/plugins/pip), [git](/plugins/git), [GitHub](/plugins/github), and [Go](/plugins/go) are opt-in — add them to the `plugins` array.
+Other plugins are opt-in, add them to the `plugins` array:
+
+| Plugin                    | Role                                                                   |
+| ------------------------- | ---------------------------------------------------------------------- |
+| [Cargo](/plugins/cargo)   | Discover Cargo workspace packages and publish to crates.io             |
+| [pip](/plugins/pip)       | Discover Python workspace packages and publish to PyPI (`@tegami/pip`) |
+| [git](/plugins/git)       | Create git tags after publishing                                       |
+| [GitHub](/plugins/github) | Version Packages PRs and GitHub releases                               |
+| [Go](/plugins/go)         | Discover Go modules and publish via git tags                           |
+
+```ts
+import { cargo } from "tegami/plugins/cargo";
+import { github } from "tegami/plugins/github";
+
+const paper = tegami({
+  plugins: [cargo(), github({ repo: "your-org/your-repo" })],
+});
+```

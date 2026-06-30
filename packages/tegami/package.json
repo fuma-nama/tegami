@@ -16,8 +16,8 @@
     "./plugins/git": "./dist/plugins/git.js",
     "./plugins/github": "./dist/plugins/github.js",
     "./plugins/gitlab": "./dist/plugins/gitlab.js",
+    "./plugins/cargo": "./dist/plugins/cargo.js",
     "./plugins/go": "./dist/plugins/go.js",
-    "./providers/cargo": "./dist/providers/cargo.js",
     "./providers/npm": "./dist/providers/npm.js",
     "./utils": "./dist/utils/index.js",
     "./package.json": "./package.json"

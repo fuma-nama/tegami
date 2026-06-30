@@ -3,7 +3,16 @@ title: Cargo
 description: Rust workspace support and crates.io publishing.
 ---
 
-The Cargo plugin is enabled by default. It discovers workspace members from `Cargo.toml`, bumps versions, updates dependency ranges, and publishes to crates.io.
+The Cargo plugin discovers workspace members from `Cargo.toml`, bumps versions, updates dependency ranges, and publishes to crates.io.
+
+```ts
+import { tegami } from "tegami";
+import { cargo } from "tegami/plugins/cargo";
+
+const paper = tegami({
+  plugins: [cargo()],
+});
+```
 
 ## Discovery
 
@@ -13,10 +22,12 @@ Tegami reads the root `Cargo.toml` and expands `[workspace].members` (respecting
 
 ```ts
 const paper = tegami({
-  cargo: {
-    updateLockFile: false,
-    bumpDep: ({ kind }) => (kind === "dependencies" ? "patch" : false),
-  },
+  plugins: [
+    cargo({
+      updateLockFile: false,
+      bumpDep: ({ kind }) => (kind === "dependencies" ? "patch" : false),
+    }),
+  ],
 });
 ```
 

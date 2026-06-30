@@ -251,6 +251,8 @@ export function go({
       };
     },
     resolvePlanStatus({ plan }) {
+      if (!active) return;
+
       return Array.from(plan.packages, async ([id, { preflight }]) => {
         if (!preflight!.shouldPublish) return;
 

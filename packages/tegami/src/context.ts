@@ -1,6 +1,5 @@
 import path from "node:path";
 import type { PackageOptions, TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
-import { cargo } from "./providers/cargo";
 import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
@@ -46,7 +45,7 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
       ? path.resolve(cwd, options.lockPath)
       : path.join(changelogDir, "publish-lock.yaml"),
     options,
-    plugins: resolvePlugins([npm(options.npm), cargo(options.cargo), ...(options.plugins ?? [])]),
+    plugins: resolvePlugins([npm(options.npm), ...(options.plugins ?? [])]),
     graph: new PackageGraph(),
   };
 
