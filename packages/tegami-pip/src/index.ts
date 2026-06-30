@@ -1,15 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join, normalize, resolve } from "node:path";
 import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
-import * as semver from "semver";
+import { satisfies, validRange } from "@renovatebot/pep440";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { TegamiContext } from "../context";
-import type { DraftPolicy } from "../plans/draft";
-import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure, isNodeError } from "../utils/error";
-import { PackageGraph, WorkspacePackage } from "../graph";
-import type { BumpType } from "../utils/semver";
+import type { TegamiContext } from "tegami/context";
+import { PackageGraph, WorkspacePackage } from "tegami/graph";
+import type { DraftPolicy } from "tegami/plans/draft";
+import type { TegamiPlugin } from "tegami";
+import { execFailure, isNodeError } from "tegami/utils/error";
+import type { BumpType } from "tegami/utils/semver";
 
 interface TomlTable {
   [key: string]: TomlValue;
@@ -150,7 +150,7 @@ export function pip({
       if (!active) return;
 
       const { graph } = this;
-      const writes: Awaitable<void>[] = [];
+      const writes: Promise<void>[] = [];
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof PipPackage)) continue;
@@ -168,7 +168,7 @@ export function pip({
 
           for (const rawSpec of table) {
             const spec = parseDependencySpec(String(rawSpec));
-            if (!spec?.version || !semver.validRange(spec.version)) {
+            if (!spec?.version || !validRange(spec.version)) {
               next.push(String(rawSpec));
               continue;
             }
@@ -183,8 +183,8 @@ export function pip({
             if (
               !workspace &&
               spec.version &&
-              semver.validRange(spec.version) &&
-              semver.satisfies(linked.version, spec.version)
+              validRange(spec.version) &&
+              satisfies(linked.version, spec.version)
             ) {
               next.push(String(rawSpec));
               continue;
@@ -261,9 +261,7 @@ function depsPolicy(
 
             if (
               getUvSource(dependent.manifest, spec.name)?.workspace !== true &&
-              (!spec.version ||
-                !semver.validRange(spec.version) ||
-                semver.satisfies(bumped, spec.version))
+              (!spec.version || !validRange(spec.version) || satisfies(bumped, spec.version))
             ) {
               continue;
             }
@@ -371,7 +369,7 @@ function dependencyTables(manifest: TomlTable) {
   }[] = [];
 
   for (const field of DEP_FIELDS) {
-    const raw = project[field === "dependencies" ? "dependencies" : "optional-dependencies"];
+    const raw = project[field];
     if (field === "dependencies" && Array.isArray(raw)) {
       tables.push({ kind: field, table: raw, path: "project.dependencies" });
       continue;
@@ -447,8 +445,9 @@ function resolveFileUrl(basePath: string, url: string): string {
   return normalize(resolve(basePath, decodeURIComponent(raw)));
 }
 
-function normalizePyPiName(name: string): string {
-  return name.replaceAll("_", "-").toLowerCase();
+/** PEP 503 name normalization for PyPI JSON API URLs. */
+export function normalizePyPiName(name: string): string {
+  return name.replace(/[-_.]+/g, "-").toLowerCase();
 }
 
 async function readPyprojectManifest(path: string) {

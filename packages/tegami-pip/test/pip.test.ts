@@ -4,11 +4,10 @@ import { join, normalize } from "node:path";
 import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { tegami } from "../src";
-import { pip } from "../src/plugins/pip";
-import { parsePublishLock } from "../src/plans/lock";
-import { getPendingPackageIds } from "./helpers/draft";
-import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
+import { pip, normalizePyPiName } from "@tegami/pip";
+import { tegami } from "tegami";
+import { parsePublishLock } from "../../tegami/src/plans/lock";
+import { installRegistryFetchMock, mockRegistryMissing } from "../../tegami/test/helpers/registry-fetch";
 
 initSync();
 
@@ -30,6 +29,14 @@ beforeEach(() => {
 afterEach(async () => {
   vi.unstubAllGlobals();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
+});
+
+describe("normalizePyPiName", () => {
+  test("collapses separator runs per PEP 503", () => {
+    expect(normalizePyPiName("My.Package")).toBe("my-package");
+    expect(normalizePyPiName("acme_core")).toBe("acme-core");
+    expect(normalizePyPiName("foo---bar")).toBe("foo-bar");
+  });
 });
 
 describe("pip packages", () => {
@@ -124,6 +131,66 @@ Note.
     );
   });
 
+  test("updates compatible-release constraints with PEP 440 semantics", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-pep440-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/api"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+
+    await writeFile(
+      join(cwd, "pyproject.toml"),
+      `[project]
+name = "pep440-workspace"
+version = "0.0.0"
+
+[tool.uv.workspace]
+members = ["packages/core", "packages/api"]
+`,
+    );
+    await writeFile(
+      join(cwd, "packages/core/pyproject.toml"),
+      `[project]
+name = "acme-core"
+version = "1.0.0"
+`,
+    );
+    await writeFile(
+      join(cwd, "packages/api/pyproject.toml"),
+      `[project]
+name = "acme-api"
+version = "1.0.0"
+dependencies = ["acme-core~=1.0.0"]
+
+[tool.uv.sources]
+acme-core = { workspace = true }
+`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["acme-core"]
+---
+
+## Core release
+
+Bump core.
+`,
+    );
+
+    exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
+      ReturnType<typeof x>
+    >);
+    await tegami({ cwd, plugins: [pip()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const core = await readPyproject(join(cwd, "packages/core"));
+    const api = await readPyproject(join(cwd, "packages/api"));
+    expect(table(core.project)?.version).toBe("1.1.0");
+    expect((table(api.project)?.dependencies as string[])[0]).toBe("acme-core~=1.1.0");
+  });
+
   test("allows npm packages and python projects with the same name", async () => {
     const cwd = await createDuplicateNameWorkspace();
     tempDirs.push(cwd);
@@ -136,10 +203,17 @@ Note.
     const project = await readPyproject(join(cwd, "packages/py-pkg-a"));
     const lock = parsePublishLock(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8"));
 
-    expect(getPendingPackageIds(draft, (await paperInstance._internal.context()).graph).sort()).toEqual([
-      "npm:pkg-a",
-      "pip:pkg-a",
-    ]);
+    const graph = await paperInstance._internal.context();
+    expect(
+      graph.graph
+        .getPackages()
+        .filter((pkg) => {
+          const plan = draft.getPackageDraft(pkg.id);
+          return plan && plan.bumpVersion(pkg) !== pkg.version;
+        })
+        .map((pkg) => pkg.id)
+        .sort(),
+    ).toEqual(["npm:pkg-a", "pip:pkg-a"]);
     expect(npmPackage.version).toBe("1.1.0");
     expect(table(project.project)?.version).toBe("1.1.0");
 
@@ -232,6 +306,46 @@ acme-core = { workspace = true }
     );
     expect(fetch).toHaveBeenCalledWith("https://pypi.org/pypi/acme-core/1.1.0/json");
     expect(fetch).toHaveBeenCalledWith("https://pypi.org/pypi/acme-api/1.0.1/json");
+  });
+
+  test("normalizes dotted PyPI project names in publish status checks", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-dotted-name-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+
+    await writeFile(
+      join(cwd, "pyproject.toml"),
+      `[project]
+name = "My.Package"
+version = "1.0.0"
+`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["My.Package"]
+---
+
+## Dotted name
+
+Release with separators.
+`,
+    );
+
+    await tegami({ cwd, plugins: [pip()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://pypi.org/pypi/my-package/1.1.0/json");
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    exec.mockImplementation(() => commandResult());
+
+    await tegami({ cwd, plugins: [pip()] }).publish();
+
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   test("throws on circular pip workspace dependencies", async () => {
