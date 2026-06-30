@@ -163,6 +163,21 @@ describe("publish plan status", () => {
     await expect(publishPlanStatus(plan, context)).resolves.toBe("pending");
   });
 
+  test("treats undefined resolvePlanStatus results as success", async () => {
+    const context = await createTestContext();
+    context.plugins = [
+      {
+        name: "noop-status",
+        resolvePlanStatus() {
+          return undefined;
+        },
+      },
+    ];
+    const plan = await loadPlan(context);
+
+    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
+  });
+
   test("reuses npm registry checks across status and publish", async () => {
     const context = await createTestContext();
     fetchMock.mockResolvedValue(

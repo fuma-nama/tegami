@@ -146,6 +146,9 @@ export interface TegamiPlugin {
    * Resolve publish plan status, used to check if the plan is finished successfully, or needs retries.
    *
    * Each plugin should only report the status of its own tasks, Tegami will summarize the results from all plugins.
+   * Return `"pending"` for work that still needs to finish. Return `"success"`, `undefined`, or `void`
+   * when the plugin has no pending work; `undefined`/`void` are intentionally accepted for plugins that
+   * have nothing to report for a package or plan.
    */
   resolvePlanStatus?(
     this: TegamiContext,
