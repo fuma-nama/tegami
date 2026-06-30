@@ -28,7 +28,7 @@
     "tinyglobby": "^0.2.17"
   },
   "peerDependencies": {
-    "tegami": ">=1.0.0-beta.4"
+    "tegami": "workspace:*"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
