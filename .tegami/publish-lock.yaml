@@ -1,12 +1,15 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Remove dependency for parsing\n\nReplace extra dependencies with `util:parseArgs`.\n"
-    filename: 2026-06-29-mqy5nzrz.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Fix CLI parsing for options without short flags\n\nRelease preview workflows failed when passing `--artifact` because Node's argument parser rejects `short: undefined`.\n"
+    filename: 2026-06-29-cli-artifact-fix.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Allow plugins to add CLI commands\n\nPlugins can now hook on `runCli` hook to add custom commands.\n"
-    filename: 2026-06-29-mqz0vmbb.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Strict checks for Git tags\n\nHandle concurrent runs & without `git pull`.\n"
+    filename: 2026-06-29-mqzdjsbe.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Move request preview commands into plugins\n\nThe GitHub plugin now provides `tegami pr`, and the GitLab plugin provides `tegami mr` for merge request previews and comments.\n\nPlugin CLI commands now register through the `initCli` hook, so `tegami --help` and grouped help output include plugin-provided commands.\n"
-    filename: 2026-06-29-mrprcmds.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support `no-checks` option in `version` command\n\nAllows to skip publish plan status checks.\n"
+    filename: 2026-06-29-mqze0dsn.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n### Add pip plugin\n\nTegami now includes an opt-in pip plugin at `@tegami/pip` for Python monorepos. It discovers packages from `pyproject.toml`, supports uv workspaces, bumps dependency ranges, runs `uv lock` after versioning, and publishes to PyPI with `uv publish`.\n"
+    filename: 2026-06-29-pipplugin.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -14,10 +17,13 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-06-29-mqy5nzrz.md
-      - 2026-06-29-mqz0vmbb.md
-      - 2026-06-29-mrprcmds.md
+      - 2026-06-29-cli-artifact-fix.md
+      - 2026-06-29-mqzdjsbe.md
+      - 2026-06-29-mqze0dsn.md
+      - 2026-06-29-pipplugin.md
     id: npm:tegami
+    updated: true
+  - id: npm:@tegami/pip
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
@@ -26,4 +32,6 @@ npm:packages:
   - id: npm:docs
   - distTag: beta
     id: npm:tegami
+  - distTag: beta
+    id: npm:@tegami/pip
   - id: npm:@repo/typescript-config

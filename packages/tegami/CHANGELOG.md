@@ -1,3 +1,21 @@
+## tegami@1.0.0-beta.5 (beta)
+
+### Fix CLI parsing for options without short flags
+
+Release preview workflows failed when passing `--artifact` because Node's argument parser rejects `short: undefined`.
+
+### Strict checks for Git tags
+
+Handle concurrent runs & without `git pull`.
+
+### Support `no-checks` option in `version` command
+
+Allows to skip publish plan status checks.
+
+### Add pip plugin
+
+Tegami now includes an opt-in pip plugin at `@tegami/pip` for Python monorepos. It discovers packages from `pyproject.toml`, supports uv workspaces, bumps dependency ranges, runs `uv lock` after versioning, and publishes to PyPI with `uv publish`.
+
 ## tegami@1.0.0-beta.4 (beta)
 
 ### Remove dependency for parsing
