@@ -10,6 +10,11 @@ on:
     workflows: ['Tegami PR']
     types: [completed]
 
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
 jobs:
   comment:
     name: Post preview comment
@@ -18,26 +23,30 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: 24
+          cache: pnpm
 
-      - uses: oven-sh/setup-bun@v2
-      - run: bun i
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - uses: actions/download-artifact@v4
+      - name: Download preview
+        uses: actions/download-artifact@v4
         with:
           name: tegami-pr-preview
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
       - name: Post preview comment
-        run: bun run tegami pr comment tegami-pr-preview.md
+        run: pnpm tegami pr comment tegami-pr-preview.md
         env:
           GITHUB_TOKEN: ${{ github.token }}

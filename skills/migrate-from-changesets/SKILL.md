@@ -15,7 +15,7 @@ A field-tested, end-to-end procedure for replacing [`@changesets/cli`](https://g
 
 ## When to use
 
-The repo has a `.changeset/` directory and `@changesets/cli` in `devDependencies`, and the user wants to move to Tegami. Works for npm, Cargo, and mixed monorepos; the examples below assume an npm/Bun workspace.
+The repo has a `.changeset/` directory and `@changesets/cli` in `devDependencies`, and the user wants to move to Tegami. Works for npm, Cargo, and mixed monorepos; the examples below assume a pnpm workspace (swap in your package manager as needed).
 
 ## Before you start — survey the existing setup
 
@@ -41,7 +41,7 @@ Note in particular:
 Until v1 is released, install from the **`beta`** dist-tag. The API this skill uses (`tegami/cli`'s `createCli`, the `github` plugin, `tegami ci`) ships on the `1.x` line, which is published under `beta`; the `latest` tag still points at the older `0.2.x` line with a different API, so a plain `npm install tegami` will install the wrong one.
 
 ```bash
-npm install tegami@beta -D -w     # bun add -D tegami@beta / pnpm add -D -w tegami@beta
+pnpm add -D -w tegami@beta     # npm install tegami@beta -D / bun add -D tegami@beta
 ```
 
 Requires Node.js 24+. Because this is a prerelease, expect possible API changes; the install pins the resolved beta in your lockfile. Once Tegami reaches a stable `1.0.0`, drop `@beta` and install normally.
@@ -54,7 +54,7 @@ Tegami is configured by a Node script, not a JSON file. Copy [`templates/tegami.
 { "scripts": { "tegami": "node scripts/tegami.mts" } }
 ```
 
-(Use `bun scripts/tegami.mts` in a Bun repo — Tegami runs fine under Bun; see gotchas.)
+Invoke it as `pnpm tegami` (the npm script runs the config under Node). Tegami also runs fine under Bun (`bun scripts/tegami.mts`) — see gotchas.
 
 ### 3. Map `.changeset/config.json` to `tegami()` options
 
@@ -123,16 +123,16 @@ This is the most important step and the technique most people miss. Tegami has n
 # back up the pending changelogs first — `version` consumes (deletes) them
 cp .tegami/*.md /tmp/tegami-backup/ 2>/dev/null || true
 
-node scripts/tegami.mts version          # inspect the release plan it prints
-grep '"version"' **/package.json         # confirm the bumps are what you expect
+pnpm tegami version            # inspect the release plan it prints
+grep '"version"' **/package.json  # confirm the bumps are what you expect
 head -20 path/to/published/CHANGELOG.md  # confirm the changelog output
-node scripts/tegami.mts publish --dry-run # validate the publish lock end-to-end
+pnpm tegami publish --dry-run  # validate the publish lock end-to-end
 
 # revert everything the dry run touched, keeping your config edits
 git checkout -- . ':(exclude)scripts/tegami.mts'
 rm -f .tegami/publish-lock.yaml
 cp /tmp/tegami-backup/*.md .tegami/ 2>/dev/null || true
-<your-install-cmd>                       # restore the lockfile
+pnpm install                   # restore the lockfile
 ```
 
 Confirm: the right packages bump, only publishable packages appear in the publish plan, and no stray `CHANGELOG.md` files are generated for private packages.
@@ -140,7 +140,7 @@ Confirm: the right packages bump, only publishable packages appear in the publis
 ### 8. Remove Changesets
 
 ```bash
-npm remove @changesets/cli               # bun remove / pnpm remove
+pnpm remove @changesets/cli              # npm remove / bun remove
 git rm -r .changeset
 git rm .github/workflows/<changesets-workflow>.yml
 git rm scripts/<custom-sync-script>      # if any (now handled by the group)

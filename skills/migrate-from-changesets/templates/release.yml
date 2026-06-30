@@ -3,15 +3,12 @@
 # `tegami ci` versions when pending .tegami/*.md changelogs exist (opening a
 # "Version Packages" PR via the github plugin), otherwise it publishes from the
 # committed .tegami/publish-lock.yaml.
-#
-# Adjust the setup steps to your package manager. This example uses Bun; for
-# pnpm use pnpm/action-setup and `cache: pnpm`, then `pnpm tegami ci`.
 name: Release
 
 on:
   push:
     branches:
-      - main
+      - main # your repo's default / release branch
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -25,24 +22,30 @@ jobs:
     name: Version & publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: 24
+          cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: oven-sh/setup-bun@v2
-      - run: bun i
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      # Build packages before publishing if your release ships build output.
-      # Prefer a `willPublish` plugin to build only what's about to publish —
-      # see https://tegami.fuma-nama.dev/ci#build-packages
-      # - run: bun run build
+      # Build before publishing if your release ships build output. Prefer a
+      # willPublish plugin to build only what's about to publish:
+      # https://tegami.fuma-nama.dev/ci#build-packages
+      # - run: pnpm build
 
       - name: Version & publish
-        run: bun run tegami ci
+        run: pnpm tegami ci
         env:
           GITHUB_TOKEN: ${{ github.token }}

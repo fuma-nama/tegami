@@ -1,7 +1,7 @@
 // scripts/tegami.mts — Tegami versioning + publishing config.
 //
 // Run via a package script: { "tegami": "node scripts/tegami.mts" }
-// (use `bun scripts/tegami.mts` in a Bun repo).
+// and invoke as `pnpm tegami` (or `bun scripts/tegami.mts` in a Bun repo).
 import { tegami } from 'tegami';
 import { createCli } from 'tegami/cli';
 import { github } from 'tegami/plugins/github';
@@ -20,8 +20,8 @@ const paper = tegami({
   // packages: () => ({ group: 'all' }),
 
   npm: {
-    // 'bun' | 'pnpm' | 'npm' | 'yarn' — match your repo's package manager.
-    client: 'npm',
+    // 'pnpm' | 'npm' | 'yarn' | 'bun' — match your repo's package manager.
+    client: 'pnpm',
   },
 
   plugins: [

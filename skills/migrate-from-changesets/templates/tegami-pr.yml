@@ -17,21 +17,28 @@ jobs:
     name: Release preview
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: 24
+          cache: pnpm
 
-      - uses: oven-sh/setup-bun@v2
-      - run: bun i
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Build release preview
-        run: bun run tegami pr preview --artifact tegami-pr-preview.md
+      - name: Release preview
+        run: pnpm tegami pr preview --artifact tegami-pr-preview.md
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload preview
+        uses: actions/upload-artifact@v4
         with:
           name: tegami-pr-preview
           path: tegami-pr-preview.md
