@@ -41,3 +41,7 @@ export const pyprojectManifestSchema = z.object({
 
 export type PyprojectManifest = z.infer<typeof pyprojectManifestSchema>;
 export type UvIndex = z.infer<typeof uvIndexSchema>;
+
+export const simpleIndexProjectSchema = z.object({
+  files: z.array(z.object({ filename: z.string() })).optional(),
+});

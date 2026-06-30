@@ -3,9 +3,13 @@ title: pip
 description: Python workspace support and PyPI publishing.
 ---
 
+## Installation
+
 The pip plugin discovers workspace members from `pyproject.toml`, bumps versions, updates dependency ranges, and publishes to PyPI with `uv publish`.
 
-Install `@tegami/pip` and add it to your config:
+```npm
+npm istall @tegami/pip
+```
 
 ```ts
 import { tegami } from "tegami";
@@ -56,7 +60,7 @@ pip({
 | `publishIndex`   | —       | Named `[[tool.uv.index]]` entry for publish and status checks |
 | `bumpDep`        | —       | Decide how to bump dependents when a package is bumped        |
 
-## Publishing
+### Publishing
 
 Python has no npm-style `[project].publishConfig`. With uv, registry settings live under `[[tool.uv.index]]` in `pyproject.toml`:
 

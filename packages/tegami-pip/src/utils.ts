@@ -1,4 +1,5 @@
 import { RANGE_PATTERN } from "@renovatebot/pep440";
+import { simpleIndexProjectSchema } from "./schema";
 
 const COMPARATOR = new RegExp(`^${RANGE_PATTERN}$`, "i");
 
@@ -27,7 +28,8 @@ export function updateConstraintRange(range: string, version: string): string {
 
 export async function isPackagePublished(name: string, version: string, indexUrl: string) {
   const base = indexUrl.endsWith("/") ? indexUrl : `${indexUrl}/`;
-  const response = await fetch(`${base}${encodeURIComponent(normalizePyPiName(name))}/`, {
+  const normalized = normalizePyPiName(name);
+  const response = await fetch(`${base}${encodeURIComponent(normalized)}/`, {
     headers: { Accept: "application/vnd.pypi.simple.v1+json" },
   });
 
@@ -38,10 +40,10 @@ export async function isPackagePublished(name: string, version: string, indexUrl
     );
   }
 
-  const data = (await response.json()) as { files?: { filename: string }[] };
-  if (!data.files) return false;
+  const { data } = simpleIndexProjectSchema.safeParse(await response.json());
+  if (!data?.files || data.files.length === 0) return false;
 
-  const dist = escapeRegex(normalizePyPiName(name));
+  const dist = escapeRegex(normalized);
   const ver = escapeRegex(version);
   const wheel = new RegExp(`^${dist}-${ver}(?:-\\d[^-]*)?-.+\\.whl$`, "i");
   const sdist = new RegExp(`^${dist}-${ver}\\.(?:tar\\.gz|tar\\.bz2|tar\\.xz|tar|zip)$`, "i");
