@@ -201,6 +201,10 @@ const packageLockSchema = z.object({
   distTag: z.string().optional(),
 });
 
+const markLatestLockSchema = z.object({
+  id: z.string(),
+});
+
 export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
@@ -280,11 +284,47 @@ export function npm({
           distTag: parsed.distTag,
         };
       }
+
+      while ((data = lock.read("npm:mark-latest"))) {
+        const parsed = markLatestLockSchema.safeParse(data).data;
+        if (!parsed) continue;
+        const packagePlan = plan.packages.get(parsed.id);
+        if (!packagePlan) continue;
+
+        packagePlan.npm ??= {};
+        packagePlan.npm.markLatest = true;
+      }
     },
     async publish({ pkg, plan }) {
       if (!(pkg instanceof NpmPackage)) return;
+      const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
 
-      return publish(client, pkg, plan.packages.get(pkg.id)?.npm?.distTag);
+      const result = await publish(client, pkg, distTag);
+      if (result.type === "published" && markLatest) {
+        const tagResult = await x(
+          "npm",
+          [
+            "dist-tag",
+            "add",
+            `${pkg.name}@${pkg.version}`,
+            "latest",
+            "--registry",
+            pkg.getRegistry(),
+          ],
+          {
+            nodeOptions: { cwd: pkg.path },
+          },
+        );
+
+        if (tagResult.exitCode !== 0) {
+          return {
+            type: "failed",
+            error: execFailure("Failed to mark package as latest", tagResult).message,
+          };
+        }
+      }
+
+      return result;
     },
     initDraft(plan) {
       if (!active) return;
@@ -559,7 +599,6 @@ async function isPackagePublished(
 }
 
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
-  let patterns: string[];
   const rootManifest = await readManifest(cwd).catch(() => undefined);
   const pnpmPatterns = await readFile(path.join(cwd, "pnpm-workspace.yaml"), "utf8")
     .then((content) => pnpmWorkspaceSchema.parse(load(content) ?? {}))
@@ -568,11 +607,12 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
       throw error;
     });
 
-  if (pnpmPatterns) {
-    patterns = pnpmPatterns.packages ?? [];
-  } else {
-    patterns = rootManifest?.workspaces ?? [];
+  if (rootManifest?.name) {
+    add(new NpmPackage(cwd, rootManifest));
   }
+
+  const patterns = pnpmPatterns?.packages ?? rootManifest?.workspaces;
+  if (!patterns || patterns.length === 0) return;
 
   const candidatePaths = await expandWorkspacePatterns(cwd, patterns);
   const manifests = await Promise.all(
@@ -582,10 +622,6 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
         .catch(() => undefined),
     ),
   );
-
-  if (rootManifest?.name) {
-    add(new NpmPackage(cwd, rootManifest));
-  }
 
   for (const entry of manifests) {
     if (!entry) continue;

@@ -32,6 +32,9 @@ export interface PackagePublishPlan {
   npm?: {
     /** dist tag to use if published */
     distTag?: string;
+
+    /** point latest tag to it if published */
+    markLatest?: boolean;
   };
 
   /** publish result, generated for all packages in publish plan after publishing */

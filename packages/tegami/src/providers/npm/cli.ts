@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { intro, note, outro } from "@clack/prompts";
@@ -9,6 +9,7 @@ import { initPublishPlan, runPreflights } from "../../plans/publish";
 import { execFailure } from "../../utils/error";
 import { NpmPackage } from "../npm";
 import { joinPath } from "../../utils/common";
+import { parsePublishLock, type PublishLock } from "../../plans/lock";
 
 const PLACEHOLDER_VERSION = "0.0.0-tegami-trusted-publish-setup";
 const PLACEHOLDER_DIST_TAG = "temp";
@@ -81,6 +82,11 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
       note(prepareLines.join("\n"), dryRun ? "Dry run" : "Configure trusted publishing");
 
       const lines: string[] = [];
+      let lock: PublishLock | undefined;
+      if (!dryRun)
+        try {
+          lock = parsePublishLock(await fs.readFile(context.lockPath, "utf8"));
+        } catch {}
 
       for (const pkg of targets) {
         if (dryRun) {
@@ -97,8 +103,12 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
         lines.push(
           `configured ${pkg.name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
         );
+        lock?.write("npm:mark-latest", {
+          id: pkg.id,
+        });
       }
 
+      if (lock) await fs.writeFile(context.lockPath, lock.serialize());
       note(lines.join("\n"), "Result");
       outro(
         dryRun
@@ -153,9 +163,9 @@ async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
   const registry = pkg.getRegistry();
   const access = pkg.manifest.publishConfig?.access;
 
-  const dir = await mkdtemp(join(tmpdir(), "tegami-npm-placeholder-"));
+  const dir = await fs.mkdtemp(join(tmpdir(), "tegami-npm-placeholder-"));
   try {
-    await writeFile(
+    await fs.writeFile(
       join(dir, "package.json"),
       `${JSON.stringify(
         {
@@ -167,7 +177,7 @@ async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
         2,
       )}\n`,
     );
-    await writeFile(
+    await fs.writeFile(
       join(dir, "README.md"),
       `# Placeholder package
 
@@ -177,9 +187,15 @@ The real package contents will be published via CI with OIDC.
 `,
     );
 
-    const args = ["publish", "--tag", PLACEHOLDER_DIST_TAG, "--ignore-scripts"];
+    const args = [
+      "publish",
+      "--tag",
+      PLACEHOLDER_DIST_TAG,
+      "--ignore-scripts",
+      "--registry",
+      registry,
+    ];
     if (access) args.push("--access", access);
-    if (registry) args.push("--registry", registry);
 
     const result = await x("npm", args, {
       nodeOptions: { cwd: dir, stdio: "inherit" },
@@ -194,7 +210,7 @@ The real package contents will be published via CI with OIDC.
       );
     }
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
   }
 }
 
