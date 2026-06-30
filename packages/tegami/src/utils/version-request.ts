@@ -49,21 +49,15 @@ export async function commitVersionBranchChanges(
 }
 
 /**
- * Default title for a Version Packages pull/merge request.
- *
- * When every released package lands on the same version — a single-package
- * repo, or a group with `syncBump`/`syncGitTag` — the version is included
- * (e.g. `Version Packages v1.2.3`). When packages are released at independent
- * versions there is no single number to show, so the bare title is kept.
- *
- * Only packages whose version actually changed are considered, matching the
- * rows rendered by {@link createVersionRequestBody}.
+ * The single version every released package landed on, or `undefined` when the
+ * release is empty or spans independent versions. Only packages whose version
+ * changed count, matching the rows in {@link createVersionRequestBody}.
  */
-export function defaultVersionRequestTitle(
+function sharedReleaseVersion(
   draft: Draft,
   context: TegamiContext,
   snapshots: Map<string, string | undefined>,
-): string {
+): string | undefined {
   const versions = new Set<string>();
 
   for (const id of draft.getPackageDrafts().keys()) {
@@ -76,12 +70,33 @@ export function defaultVersionRequestTitle(
     versions.add(pkg.version);
   }
 
-  if (versions.size === 1) {
-    const [version] = versions;
-    return `Version Packages v${version}`;
+  return versions.size === 1 ? versions.values().next().value : undefined;
+}
+
+/**
+ * Resolve the Version Packages PR/MR title.
+ *
+ * - `template` set: its `{version}` token is replaced with the shared release
+ *   version. Templates that reference `{version}` fall back to the default when
+ *   the release has no single version; static templates are used verbatim.
+ * - no `template`: `Version Packages v<version>` for a single shared version
+ *   (single package or synced group), otherwise the bare `Version Packages`.
+ */
+export function resolveVersionRequestTitle(
+  template: string | undefined,
+  draft: Draft,
+  context: TegamiContext,
+  snapshots: Map<string, string | undefined>,
+): string {
+  const version = sharedReleaseVersion(draft, context, snapshots);
+
+  if (template) {
+    if (!template.includes("{version}")) return template;
+    if (version) return template.replace(/\{version\}/g, version);
+    return "Version Packages";
   }
 
-  return "Version Packages";
+  return version ? `Version Packages v${version}` : "Version Packages";
 }
 
 export function createVersionRequestBody(

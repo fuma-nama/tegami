@@ -9,7 +9,7 @@ import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
-import { defaultVersionRequestTitle } from "../src/utils/version-request";
+import { resolveVersionRequestTitle } from "../src/utils/version-request";
 import { somePromise } from "../src/utils/common";
 import { createTegamiCliRegistry } from "../src/cli/core";
 
@@ -708,10 +708,10 @@ describe("github version pull request", () => {
   });
 });
 
-describe("defaultVersionRequestTitle", () => {
-  function applied(
-    packages: Array<{ name: string; from: string; to: string; type: "major" | "minor" | "patch" }>,
-  ) {
+describe("resolveVersionRequestTitle", () => {
+  type Released = { name: string; from: string; to: string; type: "major" | "minor" | "patch" };
+
+  function resolve(packages: Released[], template?: string) {
     const context = publishContext(packages.map((p) => testPackage(p.name, p.from)));
     const draft = new Draft(context);
     draft.addChangelog(
@@ -725,29 +725,38 @@ describe("defaultVersionRequestTitle", () => {
     for (const p of packages) {
       (context.graph.get(`test:${p.name}`) as TestPackage).setVersion(p.to);
     }
-    return defaultVersionRequestTitle(draft, context, snapshots);
+    return resolveVersionRequestTitle(template, draft, context, snapshots);
   }
 
-  test("includes the version when every released package shares one", () => {
-    expect(applied([{ name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" }])).toBe(
-      "Version Packages v1.1.0",
-    );
-    // A synced group lands all members on the same version.
-    expect(
-      applied([
-        { name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" },
-        { name: "@acme/ui", from: "1.0.0", to: "1.1.0", type: "minor" },
-      ]),
-    ).toBe("Version Packages v1.1.0");
+  const single: Released[] = [{ name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" }];
+  const syncedGroup: Released[] = [
+    { name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" },
+    { name: "@acme/ui", from: "1.0.0", to: "1.1.0", type: "minor" },
+  ];
+  const independent: Released[] = [
+    { name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" },
+    { name: "@acme/utils", from: "2.0.0", to: "2.0.1", type: "patch" },
+  ];
+
+  test("default: includes the version when every released package shares one", () => {
+    expect(resolve(single)).toBe("Version Packages v1.1.0");
+    expect(resolve(syncedGroup)).toBe("Version Packages v1.1.0");
   });
 
-  test("falls back to the bare title for independent versions", () => {
-    expect(
-      applied([
-        { name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" },
-        { name: "@acme/utils", from: "2.0.0", to: "2.0.1", type: "patch" },
-      ]),
-    ).toBe("Version Packages");
+  test("default: falls back to the bare title for independent versions", () => {
+    expect(resolve(independent)).toBe("Version Packages");
+  });
+
+  test("template: interpolates {version} with the shared version", () => {
+    expect(resolve(single, "chore: release v{version}")).toBe("chore: release v1.1.0");
+  });
+
+  test("template: {version} falls back to the default for independent versions", () => {
+    expect(resolve(independent, "chore: release v{version}")).toBe("Version Packages");
+  });
+
+  test("template: a static title without {version} is used verbatim", () => {
+    expect(resolve(independent, "Release")).toBe("Release");
   });
 });
 

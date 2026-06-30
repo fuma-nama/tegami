@@ -14,8 +14,8 @@ import { WorkspacePackage } from "../graph";
 import {
   commitVersionBranchChanges,
   createVersionRequestBody,
-  defaultVersionRequestTitle,
   hasGitChanges,
+  resolveVersionRequestTitle,
 } from "../utils/version-request";
 import {
   createPullRequest,
@@ -65,6 +65,13 @@ interface VersionPullRequestOptions {
    * @default "main"
    */
   base?: string;
+  /**
+   * Pull request title template. The `{version}` token is replaced with the
+   * shared release version (e.g. `"chore: release v{version}"`). Falls back to
+   * the default title when the release spans independent versions. Ignored when
+   * `create` returns a title.
+   */
+  title?: string;
 
   /** Override details for "Version Packages" PR. */
   create?: (this: TegamiContext, opts: { draft: Draft }) => Awaitable<VersionPullRequest>;
@@ -241,7 +248,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       const { branch = "tegami/version-packages", base = "main" } = config;
       const basePR = await config.create?.call(this, { draft });
       const pr: Required<VersionPullRequest> = {
-        title: basePR?.title ?? defaultVersionRequestTitle(draft, this, cliSnapshots),
+        title: basePR?.title ?? resolveVersionRequestTitle(config.title, draft, this, cliSnapshots),
         body:
           basePR?.body ??
           createVersionRequestBody(
