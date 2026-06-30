@@ -4,12 +4,8 @@ import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import { satisfies, validRange } from "@renovatebot/pep440";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { TegamiContext } from "tegami/context";
-import { PackageGraph, WorkspacePackage } from "tegami/graph";
-import type { DraftPolicy } from "tegami/plans/draft";
-import type { TegamiPlugin } from "tegami";
-import { execFailure, isNodeError } from "tegami/utils/error";
-import type { BumpType } from "tegami/utils/semver";
+import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
+import { WorkspacePackage, execFailure, isNodeError } from "tegami";
 
 interface TomlTable {
   [key: string]: TomlValue;

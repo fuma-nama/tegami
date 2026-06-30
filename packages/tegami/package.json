@@ -12,18 +12,13 @@
   "exports": {
     ".": "./dist/index.js",
     "./cli": "./dist/cli/index.js",
-    "./context": "./dist/context.js",
     "./generators/simple": "./dist/generators/simple.js",
-    "./graph": "./dist/graph.js",
-    "./plans/draft": "./dist/plans/draft.js",
     "./plugins/git": "./dist/plugins/git.js",
     "./plugins/github": "./dist/plugins/github.js",
     "./plugins/gitlab": "./dist/plugins/gitlab.js",
     "./plugins/go": "./dist/plugins/go.js",
     "./providers/cargo": "./dist/providers/cargo.js",
     "./providers/npm": "./dist/providers/npm.js",
-    "./utils/error": "./dist/utils/error.js",
-    "./utils/semver": "./dist/utils/semver.js",
     "./package.json": "./package.json"
   },
   "publishConfig": {
