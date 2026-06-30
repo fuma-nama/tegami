@@ -37,7 +37,6 @@ const paper = tegami({
     tegami: {
       syncBump: true,
       syncGitTag: true,
-      prerelease: "beta",
     },
   },
   packages: {
