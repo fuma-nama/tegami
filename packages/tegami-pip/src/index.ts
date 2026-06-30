@@ -5,7 +5,8 @@ import { satisfies, validRange } from "@renovatebot/pep440";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage, execFailure, isNodeError } from "tegami";
+import { WorkspacePackage } from "tegami";
+import { execFailure } from "tegami/utils";
 
 interface TomlTable {
   [key: string]: TomlValue;
@@ -458,4 +459,8 @@ function tableValue(value: TomlValue | undefined): TomlTable | undefined {
 
 function stringValue(value: TomlValue | undefined): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }

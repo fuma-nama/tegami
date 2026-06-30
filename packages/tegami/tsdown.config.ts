@@ -7,6 +7,7 @@ export default defineConfig({
     "src/generators/simple.ts",
     "src/plugins/*",
     "src/providers/*",
+    "src/utils/index.ts",
   ],
   platform: "node",
   fixedExtension: false,
