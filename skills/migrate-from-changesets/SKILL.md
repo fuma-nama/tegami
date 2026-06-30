@@ -11,7 +11,7 @@ license: MIT
 
 # Migrate from Changesets to Tegami
 
-A field-tested, end-to-end procedure for replacing [`@changesets/cli`](https://github.com/changesets/changesets) with [Tegami](https://tegami.fuma-nama.dev). The official reference is [Migrating from Changesets](https://tegami.fuma-nama.dev/migrating-from-changesets); this skill is the *procedure* — the ordered steps, the validation technique, and the non-obvious traps — for an agent driving the migration in someone's repo.
+A field-tested, end-to-end procedure for replacing [`@changesets/cli`](https://github.com/changesets/changesets) with [Tegami](https://tegami.fuma-nama.dev). The official reference is [Migrating from Changesets](https://tegami.fuma-nama.dev/migrating-from-changesets); this skill is the _procedure_ — the ordered steps, the validation technique, and the non-obvious traps — for an agent driving the migration in someone's repo.
 
 ## When to use
 
@@ -56,13 +56,13 @@ Invoke it as `pnpm tegami` (the npm script runs the config under Node). Tegami a
 
 ### 3. Map `.changeset/config.json` to `tegami()` options
 
-| Changesets `config.json` | Tegami |
-| --- | --- |
-| `access` | `publishConfig.access` in each `package.json` |
-| `baseBranch` | `github({ versionPr: { base } })` |
-| `ignore` | `ignore: [names \| /regex/]` |
-| `fixed` / `linked` | a `group` with `syncBump` / `syncGitTag` (step 5) |
-| `updateInternalDependencies` | `npm.bumpDep` |
+| Changesets `config.json`         | Tegami                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `access`                         | `publishConfig.access` in each `package.json`                                        |
+| `baseBranch`                     | `github({ versionPr: { base } })`                                                    |
+| `ignore`                         | `ignore: [names \| /regex/]`                                                         |
+| `fixed` / `linked`               | a `group` with `syncBump` / `syncGitTag` (step 5)                                    |
+| `updateInternalDependencies`     | `npm.bumpDep`                                                                        |
 | `privatePackages.version: false` | add those private packages to `ignore` (Tegami versions private packages by default) |
 
 ### 4. Convert pending changesets
@@ -87,7 +87,7 @@ groups: { all: { syncBump: true } },
 packages: () => ({ group: 'all' }),
 ```
 
-`syncBump` applies the **same bump type** to all members, so they stay aligned **only if they already share a version today** — verify that first (`grep '"version"' **/package.json`). It does **not** force identical version *strings* the way a sync script does; a package that has drifted won't snap back on its own.
+`syncBump` applies the **same bump type** to all members, so they stay aligned **only if they already share a version today** — verify that first (`grep '"version"' **/package.json`). It does **not** force identical version _strings_ the way a sync script does; a package that has drifted won't snap back on its own.
 
 ### 6. Replace the CI workflow
 
@@ -111,11 +111,11 @@ github({
 }),
 ```
 
-> **Pitfall:** don't compute the version with `draft.getPackageDraft(id)?.bumpVersion(pkg)` here. `create` fires *after* the draft is applied, so the graph package is already bumped — re-bumping it double-counts (e.g. titles the PR `v0.21.0` while it actually bumps to `v0.20.0`). Read `this.graph.get(id)?.version` instead.
+> **Pitfall:** don't compute the version with `draft.getPackageDraft(id)?.bumpVersion(pkg)` here. `create` fires _after_ the draft is applied, so the graph package is already bumped — re-bumping it double-counts (e.g. titles the PR `v0.21.0` while it actually bumps to `v0.20.0`). Read `this.graph.get(id)?.version` instead.
 
 `create()` must be a method (or `function`), not an arrow, so `this` binds to the context. It only reads a version — no markdown rendering — so it's safe under any runtime. Note it sets the title at PR-creation time; an already-open Version Packages PR keeps its old title until the next run updates it.
 
-### 7. Validate with a dry run — *before removing Changesets*
+### 7. Validate with a dry run — _before removing Changesets_
 
 This is the most important step and the technique most people miss. Tegami has no global `version --dry-run`, so simulate a release and revert it:
 
@@ -158,13 +158,13 @@ Run `tegami init-agent` to append changelog instructions to `AGENTS.md`, and upd
 
 ## Gotchas (field-tested)
 
-- **npm trusted publishing is pinned to the workflow filename.** If the old workflow published via OIDC (`id-token: write`, no `NPM_TOKEN`), npm's trusted-publisher config names the *old* workflow file. Renaming the workflow (e.g. `changesets.yml` → `release.yml`) **breaks publishing** until you update the trusted publisher on npmjs.com to the new filename. This is the easiest thing to forget.
+- **npm trusted publishing is pinned to the workflow filename.** If the old workflow published via OIDC (`id-token: write`, no `NPM_TOKEN`), npm's trusted-publisher config names the _old_ workflow file. Renaming the workflow (e.g. `changesets.yml` → `release.yml`) **breaks publishing** until you update the trusted publisher on npmjs.com to the new filename. This is the easiest thing to forget.
 - **Bun works, even though every doc example uses pnpm/npm.** Set `npm: { client: 'bun' }`. Tegami runs `prepack`/`prepare` via `bun run`, packs with `bun pm pack`, and publishes the tarball with `npm publish` (so OIDC/provenance still work).
-- **`syncBump` ≠ Changesets `linked`.** It equalizes the bump *delta*, not the version *string*. Only reliable when members already share a version.
+- **`syncBump` ≠ Changesets `linked`.** It equalizes the bump _delta_, not the version _string_. Only reliable when members already share a version.
 - **Release tag format is `<pkg-name>@<version>`** (or `<group>@<version>` with `syncGitTag`). If other workflows parse release tags (e.g. a post-release smoke test), confirm the format still matches.
 - **Private packages are versioned by default.** To exclude them entirely (the Changesets `privatePackages.version: false` behavior), add them to `ignore`.
 - **`tegami ci` on an empty repo state is a safe no-op** — no pending changelogs and no publish lock means it does nothing, so merging the migration PR won't accidentally publish.
-- **The Changesets *GitHub App* (`changeset-bot`) is separate from the workflow.** Deleting `.changeset/` and the workflow does not stop the `changeset-bot[bot]` "⚠️ No Changeset found" PR comments — that's an account-level App installation. It keeps commenting on every PR (harmless but confusing, and easy to mistake for Tegami) until you uninstall it: github.com/settings/installations → **changeset-bot** → remove the repo or uninstall.
+- **The Changesets _GitHub App_ (`changeset-bot`) is separate from the workflow.** Deleting `.changeset/` and the workflow does not stop the `changeset-bot[bot]` "⚠️ No Changeset found" PR comments — that's an account-level App installation. It keeps commenting on every PR (harmless but confusing, and easy to mistake for Tegami) until you uninstall it: github.com/settings/installations → **changeset-bot** → remove the repo or uninstall.
 
 ## Cleanup checklist
 

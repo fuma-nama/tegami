@@ -7,7 +7,7 @@ name: Tegami PR Comment
 
 on:
   workflow_run:
-    workflows: ['Tegami PR']
+    workflows: ["Tegami PR"]
     types: [completed]
 
 permissions:

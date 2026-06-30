@@ -2,9 +2,9 @@
 //
 // Run via a package script: { "tegami": "node scripts/tegami.mts" }
 // and invoke as `pnpm tegami` (or `bun scripts/tegami.mts` in a Bun repo).
-import { tegami } from 'tegami';
-import { createCli } from 'tegami/cli';
-import { github } from 'tegami/plugins/github';
+import { tegami } from "tegami";
+import { createCli } from "tegami/cli";
+import { github } from "tegami/plugins/github";
 
 const paper = tegami({
   // Exclude packages from the version graph entirely. Use this for private
@@ -21,14 +21,14 @@ const paper = tegami({
 
   npm: {
     // 'pnpm' | 'npm' | 'yarn' | 'bun' — match your repo's package manager.
-    client: 'pnpm',
+    client: "pnpm",
   },
 
   plugins: [
     github({
-      repo: 'your-org/your-repo',
+      repo: "your-org/your-repo",
       versionPr: {
-        base: 'main',
+        base: "main",
 
         // OPTIONAL — put the release version in the Version Packages PR title
         // (e.g. "chore: release v1.2.3"), like the old Changesets workflow.
