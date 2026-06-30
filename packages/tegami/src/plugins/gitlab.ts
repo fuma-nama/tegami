@@ -13,6 +13,7 @@ import { WorkspacePackage } from "../graph";
 import {
   commitVersionBranchChanges,
   createVersionRequestBody,
+  defaultVersionRequestTitle,
   hasGitChanges,
 } from "../utils/version-request";
 import {
@@ -247,7 +248,7 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       const { branch = "tegami/version-packages", base = "main" } = config;
       const baseMR = await config.create?.call(this, { draft });
       const mr: Required<VersionMergeRequest> = {
-        title: baseMR?.title ?? "Version Packages",
+        title: baseMR?.title ?? defaultVersionRequestTitle(draft, this, cliOriginalPackageVersions),
         body:
           baseMR?.body ??
           createVersionRequestBody(

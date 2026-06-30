@@ -9,6 +9,7 @@ import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
+import { defaultVersionRequestTitle } from "../src/utils/version-request";
 import { somePromise } from "../src/utils/common";
 import { createTegamiCliRegistry } from "../src/cli/core";
 
@@ -504,7 +505,7 @@ describe("github version pull request", () => {
       await runVersionPullRequest(plugin, context, draft);
 
       expect(updatePullRequest).toHaveBeenCalledWith("acme/repo", 42, {
-        title: "Version Packages",
+        title: "Version Packages v1.1.0",
         body: expect.stringContaining("Merge this PR to publish the versioned packages."),
         token: "test-token",
       });
@@ -543,7 +544,7 @@ describe("github version pull request", () => {
             "args": [
               "commit",
               "-m",
-              "Version Packages",
+              "Version Packages v1.1.0",
             ],
             "command": "git",
             "cwd": "/repo",
@@ -593,7 +594,7 @@ describe("github version pull request", () => {
       await runVersionPullRequest(plugin, context, draft);
 
       expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
-        title: "Version Packages",
+        title: "Version Packages v1.1.0",
         body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages",
         base: "main",
@@ -633,7 +634,7 @@ describe("github version pull request", () => {
             "args": [
               "commit",
               "-m",
-              "Version Packages",
+              "Version Packages v1.1.0",
             ],
             "command": "git",
             "cwd": "/repo",
@@ -704,6 +705,49 @@ describe("github version pull request", () => {
       if (previousCi === undefined) delete process.env.CI;
       else process.env.CI = previousCi;
     }
+  });
+});
+
+describe("defaultVersionRequestTitle", () => {
+  function applied(
+    packages: Array<{ name: string; from: string; to: string; type: "major" | "minor" | "patch" }>,
+  ) {
+    const context = publishContext(packages.map((p) => testPackage(p.name, p.from)));
+    const draft = new Draft(context);
+    draft.addChangelog(
+      testChangelogEntry({
+        packages: new Map(packages.map((p) => [p.name, { type: p.type }])),
+        sections: [{ title: "Change", content: "Description.", depth: 2 }],
+      }),
+    );
+
+    const snapshots = new Map(context.graph.getPackages().map((pkg) => [pkg.id, pkg.version]));
+    for (const p of packages) {
+      (context.graph.get(`test:${p.name}`) as TestPackage).setVersion(p.to);
+    }
+    return defaultVersionRequestTitle(draft, context, snapshots);
+  }
+
+  test("includes the version when every released package shares one", () => {
+    expect(applied([{ name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" }])).toBe(
+      "Version Packages v1.1.0",
+    );
+    // A synced group lands all members on the same version.
+    expect(
+      applied([
+        { name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" },
+        { name: "@acme/ui", from: "1.0.0", to: "1.1.0", type: "minor" },
+      ]),
+    ).toBe("Version Packages v1.1.0");
+  });
+
+  test("falls back to the bare title for independent versions", () => {
+    expect(
+      applied([
+        { name: "@acme/core", from: "1.0.0", to: "1.1.0", type: "minor" },
+        { name: "@acme/utils", from: "2.0.0", to: "2.0.1", type: "patch" },
+      ]),
+    ).toBe("Version Packages");
   });
 });
 

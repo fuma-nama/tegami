@@ -14,6 +14,7 @@ import { WorkspacePackage } from "../graph";
 import {
   commitVersionBranchChanges,
   createVersionRequestBody,
+  defaultVersionRequestTitle,
   hasGitChanges,
 } from "../utils/version-request";
 import {
@@ -240,7 +241,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       const { branch = "tegami/version-packages", base = "main" } = config;
       const basePR = await config.create?.call(this, { draft });
       const pr: Required<VersionPullRequest> = {
-        title: basePR?.title ?? "Version Packages",
+        title: basePR?.title ?? defaultVersionRequestTitle(draft, this, cliSnapshots),
         body:
           basePR?.body ??
           createVersionRequestBody(

@@ -48,6 +48,42 @@ export async function commitVersionBranchChanges(
   }
 }
 
+/**
+ * Default title for a Version Packages pull/merge request.
+ *
+ * When every released package lands on the same version — a single-package
+ * repo, or a group with `syncBump`/`syncGitTag` — the version is included
+ * (e.g. `Version Packages v1.2.3`). When packages are released at independent
+ * versions there is no single number to show, so the bare title is kept.
+ *
+ * Only packages whose version actually changed are considered, matching the
+ * rows rendered by {@link createVersionRequestBody}.
+ */
+export function defaultVersionRequestTitle(
+  draft: Draft,
+  context: TegamiContext,
+  snapshots: Map<string, string | undefined>,
+): string {
+  const versions = new Set<string>();
+
+  for (const id of draft.getPackageDrafts().keys()) {
+    const pkg = context.graph.get(id);
+    if (!pkg?.version) continue;
+
+    const originalVersion = snapshots.get(pkg.id);
+    if (!originalVersion || originalVersion === pkg.version) continue;
+
+    versions.add(pkg.version);
+  }
+
+  if (versions.size === 1) {
+    const [version] = versions;
+    return `Version Packages v${version}`;
+  }
+
+  return "Version Packages";
+}
+
 export function createVersionRequestBody(
   draft: Draft,
   context: TegamiContext,
