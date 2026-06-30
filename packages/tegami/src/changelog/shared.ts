@@ -1,6 +1,7 @@
 import z from "zod";
-import { bumpTypeSchema } from "../schemas";
 import { dump } from "js-yaml";
+
+const bumpTypeSchema = z.enum(["major", "minor", "patch"]);
 
 const changelogPackageConfigSchema = z.object({
   type: bumpTypeSchema.optional(),

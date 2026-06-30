@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { x } from "tinyexec";
-import { createTegamiContext } from "../src/context";
+import { createTegamiContext, resolveGraph } from "../src/context";
 import { initPublishPlan, runPreflights, publishPlanStatus } from "../src/plans/publish";
 import { NpmPackage } from "../src/providers/npm";
 import { writePublishLock } from "./helpers/lock";
@@ -34,32 +34,31 @@ afterEach(async () => {
 });
 
 describe("npm registry preflight", () => {
-  test("reads the registry from the graph during preflight", async () => {
+  test("reads the registry from the graph during resolvePlanStatus", async () => {
     const context = await createContext("pnpm", "https://registry.example.test");
 
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
     );
 
-    await loadPlan(context);
+    const plan = await loadPlan(context);
 
+    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
     expect(fetchMock).toHaveBeenCalledWith(
       npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
       { headers: { Accept: "application/json" } },
     );
   });
 
-  test("returns publish true for missing package versions", async () => {
+  test("returns shouldPublish true for missing package versions", async () => {
     const context = await createContext("npm", undefined, "9.9.9");
     const pkg = context.graph.get("npm:@acme/core");
     if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
 
-    fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
-
     await expect(
       npmPlugin.publishPreflight?.call(context, { pkg, plan: await loadPlan(context) }),
-    ).resolves.toEqual({ publish: true });
+    ).resolves.toEqual({ shouldPublish: true });
   });
 
   test("publishes with yarn publish", async () => {
@@ -184,7 +183,7 @@ async function createTestContext() {
     )}\n`,
   );
 
-  return createTegamiContext({
+  return createResolvedContext({
     cwd,
     npm: { client: "npm" },
   });
@@ -225,7 +224,7 @@ async function createContext(
       2,
     )}\n`,
   );
-  const context = await createTegamiContext({
+  const context = await createResolvedContext({
     cwd,
     npm: { client },
   });
@@ -233,6 +232,12 @@ async function createContext(
     packages: [{ id: "npm:@acme/core", updated: true }],
     npm: [{ id: "npm:@acme/core", distTag: "latest" }],
   });
+  return context;
+}
+
+async function createResolvedContext(options: Parameters<typeof createTegamiContext>[0]) {
+  const context = await createTegamiContext(options);
+  await resolveGraph(context);
   return context;
 }
 

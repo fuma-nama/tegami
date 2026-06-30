@@ -2,9 +2,9 @@ import type { TegamiContext } from "./context";
 import type { Draft, PackageDraft } from "./plans/draft";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
-import type { CargoPluginOptions } from "./providers/cargo";
 import type { PackagePublishResult, PublishPlan } from "./plans/publish";
 import type { PublishLock } from "./plans/lock";
+import type { TegamiCliRegistry } from "./cli/core";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -27,8 +27,10 @@ export interface TegamiOptions<Groups extends string = string> {
   lockPath?: string;
   /** Changelog generator used when applying a draft. */
   generator?: LogGenerator;
-  /** Per-package release and publish options keyed by package name. */
-  packages?: Record<string, PackageOptions<NoInfer<Groups>>>;
+  /** Per-package options keyed by package name or a function. */
+  packages?:
+    | Record<string, PackageOptions<NoInfer<Groups>>>
+    | ((pkg: WorkspacePackage) => PackageOptions<NoInfer<Groups>> | undefined);
   plugins?: TegamiPluginOption[];
 
   groups?: Record<Groups, GroupOptions>;
@@ -46,7 +48,20 @@ export interface TegamiOptions<Groups extends string = string> {
   conventionalCommits?: boolean;
 
   npm?: NpmPluginOptions;
-  cargo?: CargoPluginOptions;
+}
+
+interface SharedGoOptions {
+  /**
+   * Whether to publish this module (create git tags).
+   *
+   * @default true
+   */
+  publish?: boolean;
+}
+
+interface SharedNpmOptions {
+  /** npm dist-tag used when publishing. */
+  distTag?: string;
 }
 
 export interface GroupOptions {
@@ -60,10 +75,10 @@ export interface GroupOptions {
   syncGitTag?: boolean;
 
   /** npm-specific options. */
-  npm?: {
-    /** npm dist-tag used when publishing. */
-    distTag?: string;
-  };
+  npm?: SharedNpmOptions;
+
+  /** go-specific options. */
+  go?: SharedGoOptions;
 }
 
 export interface PackageOptions<Group extends string = string> {
@@ -73,10 +88,10 @@ export interface PackageOptions<Group extends string = string> {
   group?: Group;
 
   /** npm-specific options. */
-  npm?: {
-    /** npm dist-tag used when publishing. */
-    distTag?: string;
-  };
+  npm?: SharedNpmOptions;
+
+  /** go-specific options. */
+  go?: SharedGoOptions;
 }
 
 export type TegamiPluginOption = TegamiPlugin | TegamiPluginOption[];
@@ -84,8 +99,13 @@ export type TegamiPluginOption = TegamiPlugin | TegamiPluginOption[];
 export interface TegamiPlugin {
   name: string;
   enforce?: "pre" | "default" | "post";
-  /** when Tegami initializes */
+
+  /** When Tegami initializes. */
   init?(this: TegamiContext): Awaitable<void>;
+
+  /** When Tegami CLI initializes, this runs before `resolve()`. */
+  initCli?(this: TegamiContext, cli: TegamiCliRegistry): Awaitable<void>;
+
   /** Resolve workspace packages and dependency metadata into the shared graph. */
   resolve?(this: TegamiContext): Awaitable<void>;
 
@@ -104,7 +124,11 @@ export interface TegamiPlugin {
     opts: { lock: PublishLock; plan: PublishPlan },
   ): Awaitable<void>;
 
-  /** Collect data before publishing a package, will be merged if multiple plugins return preflight data for this package. */
+  /**
+   * Collect data before publishing a package.
+   *
+   * If multiple plugins return preflight data for the same package, only the first plugin will be considered.
+   */
   publishPreflight?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage; plan: PublishPlan },
@@ -124,7 +148,9 @@ export interface TegamiPlugin {
   resolvePlanStatus?(
     this: TegamiContext,
     opts: { plan: PublishPlan },
-  ): Awaitable<"success" | "pending" | undefined | void>;
+  ): Awaitable<
+    "success" | "pending" | undefined | void | Awaitable<"success" | "pending" | undefined>[]
+  >;
 
   /** Called before a package will be published, return `false` to prevent from publishing. */
   willPublish?(
@@ -132,7 +158,7 @@ export interface TegamiPlugin {
     opts: { pkg: WorkspacePackage },
   ): Awaitable<false | void | undefined>;
 
-  /** Called after a package is published, skipped, or failed. */
+  /** Called after a package is published successfully, or failed. */
   afterPublish?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage; plan: PublishPlan },
@@ -141,24 +167,22 @@ export interface TegamiPlugin {
   /** Called after all publishing finishes. */
   afterPublishAll?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
 
-  /** CLI lifecycle hooks. */
-  cli?: {
-    /** Called once before a CLI command runs. */
-    init?(this: TegamiContext): Awaitable<void>;
+  /** Called after `tegami version` returns a draft. */
+  initCliDraft?(this: TegamiContext, draft: Draft): Awaitable<void>;
 
-    /** Called after `tegami version` returns a draft. */
-    draftCreated?(this: TegamiContext, draft: Draft): Awaitable<void>;
-
-    /** Called after `tegami version` applies a draft. */
-    draftApplied?(this: TegamiContext, draft: Draft): Awaitable<void>;
-  };
+  /** Called after `tegami version` applies a draft. */
+  applyCliDraft?(this: TegamiContext, draft: Draft): Awaitable<void>;
 }
 
 export type Awaitable<T> = T | Promise<T>;
 
 export interface PublishPreflight {
-  /** if the package should be published. */
-  publish: boolean;
+  /**
+   * Whether the package should be published, the state **must not** be changed across different runs.
+   *
+   * To note if the package is already published, hook `resolvePlanStatus` on plugins, or skip at publish-time.
+   */
+  shouldPublish: boolean;
 
   /**
    * Package ids that must be published before this one, this will automatically disallow circular dependency.

@@ -1,0 +1,81 @@
+---
+title: pip
+description: Python workspace support and PyPI publishing.
+---
+
+## Installation
+
+The pip plugin discovers workspace members from `pyproject.toml`, bumps versions, updates workspace dependency ranges, and publishes to PyPI with `uv publish`.
+
+```npm
+npm install @tegami/pip
+```
+
+```ts
+import { tegami } from "tegami";
+import { pip } from "@tegami/pip";
+
+const paper = tegami({
+  plugins: [pip()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+[`uv`](https://github.com/astral-sh/uv) must be configured on your Python project.
+
+</Callout>
+
+## Discovery
+
+Tegami reads the root `pyproject.toml` and expands `[tool.uv.workspace].members`. Packages need a `[project].name` and `version`.
+
+Workspace dependencies must be declared in both `[project].dependencies` and `[tool.uv.sources]` with `{ workspace = true }`, matching [uv's workspace rules](https://docs.astral.sh/uv/concepts/projects/workspaces/).
+
+## Dependency bumping
+
+Tegami only auto-bumps dependents and rewrites constraints for dependencies declared with `{ workspace = true }` in `[tool.uv.sources]`.
+
+| Dependency kind         | Default dependent bump |
+| ----------------------- | ---------------------- |
+| `dependencies`          | patch                  |
+| `optional-dependencies` | patch                  |
+| `dependency-groups`     | none                   |
+
+**Dependent version bumps**: when a workspace-linked package is released, its workspace dependents are patch-bumped even if the old range still accepts the new version.
+
+**Constraint rewrites**: only for workspace-linked dependencies, and only when the range no longer accepts the new version.
+
+To release a path-linked package without `{ workspace = true }`, add it to a changelog explicitly.
+
+## Configuration
+
+```ts
+pip({
+  updateLockFile: false,
+  publishIndex: "testpypi",
+  bumpDep: ({ kind }) => (kind === "dependency-groups" ? false : "patch"),
+});
+```
+
+| Option           | Default | Description                                                      |
+| ---------------- | ------- | ---------------------------------------------------------------- |
+| `updateLockFile` | `true`  | Run `uv lock` after versioning                                   |
+| `publishIndex`   | —       | Named `[[tool.uv.index]]` entry for publish and status checks    |
+| `bumpDep`        | —       | Decide how to bump workspace dependents when a package is bumped |
+
+### Publishing
+
+Python has no npm-style `[project].publishConfig`. With uv, registry settings live under `[[tool.uv.index]]` in `pyproject.toml`:
+
+```toml
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+```
+
+Point Tegami at a named index with `publishIndex: "testpypi"`. When a `publish-url` is configured, Tegami passes it directly to `uv publish` so member packages can publish without duplicating the index table.
+
+When `publishIndex` is unset, Tegami uses PyPI for publish-status checks and runs `uv publish` without an index flag.

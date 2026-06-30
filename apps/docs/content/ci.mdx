@@ -195,10 +195,10 @@ The "Generate Comment" step **must** use `pull_request` over `pull_request_targe
 
 ## Custom CLI hooks
 
-`createCli` accepts optional hooks to replace the default `draft()` or `publish()` behavior:
+`runCli` accepts optional hooks to replace the default `draft()` or `publish()` behavior:
 
 ```ts
-createCli(paper, {
+await runCli(paper, {
   version: async () => {
     const draft = await paper.draft();
     // customize the draft before apply

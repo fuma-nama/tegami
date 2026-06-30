@@ -5,9 +5,10 @@ import { bumpVersion } from "./utils/semver";
 /** Package discovered in the workspace. */
 export abstract class WorkspacePackage {
   abstract readonly name: string;
+  /** absolute path */
   abstract readonly path: string;
   abstract readonly manager: string;
-  abstract readonly version: string;
+  abstract readonly version: string | undefined;
 
   get id(): string {
     return `${this.manager}:${this.name}`;
@@ -28,6 +29,7 @@ export abstract class WorkspacePackage {
   initDraft(): PackageDraft {
     return {
       bumpVersion(pkg) {
+        if (!pkg.version) return;
         return bumpVersion(pkg.version, this.type, this.prerelease);
       },
     };
@@ -35,17 +37,9 @@ export abstract class WorkspacePackage {
 
   /** configure an initial draft to match script-level configs. */
   configureDraft(draft: PackageDraft, group?: PackageGroup): void {
-    const groupOptions = group?.options;
-    const {
-      prerelease = groupOptions?.prerelease,
-      npm: { distTag = groupOptions?.npm?.distTag } = {},
-    } = this.opts;
+    const { prerelease = group?.options?.prerelease } = this.opts;
 
     if (prerelease !== undefined) draft.prerelease = prerelease;
-    if (distTag) {
-      draft.npm ??= {};
-      draft.npm.distTag = distTag;
-    }
   }
 }
 

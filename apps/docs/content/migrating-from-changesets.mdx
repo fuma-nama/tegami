@@ -37,7 +37,7 @@ npm i tegami -D -w
 
 ```ts title="scripts/tegami.mts"
 import { tegami } from "tegami";
-import { createCli } from "tegami/cli";
+import { runCli } from "tegami/cli";
 import { github } from "tegami/plugins/github";
 
 const paper = tegami({
@@ -48,7 +48,7 @@ const paper = tegami({
   ],
 });
 
-void createCli(paper).parseAsync();
+await runCli(paper);
 ```
 
 ```json title="package.json"
@@ -324,7 +324,7 @@ Run `tegami init-agent` to append `AGENTS.md` instructions for writing `.tegami/
 
 Features Changesets does not cover out of the box:
 
-- **Cross-registry monorepos** — npm and Cargo in one graph ([npm](/plugins/npm), [cargo](/plugins/cargo)).
+- **Cross-registry monorepos** — unify release pipeline for npm, Cargo, Python, and more.
 - **Configurable dependency bump policy** — especially for `workspace:` peer dependencies ([npm plugin](/plugins/npm#dependency-bumps)).
 - **Publish lock in git** — `.tegami/publish-lock.yaml` makes failed publishes safe to retry ([CI Setup](/ci)).
 - **Programmatic API** — `generateChangelog()`, `draft()`, `publish()` for custom tooling ([API](/advanced/api)).

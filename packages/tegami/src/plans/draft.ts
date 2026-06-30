@@ -28,8 +28,8 @@ export interface PackageDraft {
     distTag?: string;
   };
 
-  /** get the bumped version of a package */
-  bumpVersion: (pkg: WorkspacePackage) => string;
+  /** get the bumped version of a package, return `undefined` if the package doesn't have a `version` field */
+  bumpVersion: (pkg: WorkspacePackage) => string | undefined;
 }
 
 export const changelogStoreSchema = z.object({
@@ -44,9 +44,18 @@ export const packageStoreSchema = z.object({
   changelogIds: z.array(z.string()).optional(),
 });
 
+type SnapshotMap = Map<string, { version: string | undefined }>;
+
+enum DraftStatus {
+  Ready,
+  Applied,
+  Applying,
+  Failed,
+}
+
 /** a draft describes all operations to perform before the actual publishing, such as version bumps. */
 export class Draft {
-  #applied = false;
+  #status = DraftStatus.Ready;
   /** package id -> draft */
   private readonly packages = new Map<string, PackageDraft>();
   /** id -> changelog */
@@ -120,6 +129,7 @@ export class Draft {
     return false;
   }
 
+  /** get all changelogs, note that this includes replay-only changelogs, as long as they are in the `.tegami` folder. */
   getChangelogs() {
     return Array.from(this.changelogs.values());
   }
@@ -150,71 +160,88 @@ export class Draft {
 
   /** Apply version bumps, lock file, and changelog files. */
   async apply(): Promise<void> {
-    if (this.#applied) {
-      throw new Error("This draft has already been applied.");
+    switch (this.#status) {
+      case DraftStatus.Applied:
+        throw new Error("This draft has already been applied.");
+      case DraftStatus.Applying:
+        throw new Error("There is already a previous apply() run.");
+      case DraftStatus.Failed:
+        throw new Error(
+          "The previous apply() run failed, please clear your local git changes and try again.",
+        );
     }
     const { graph } = this.context;
-    this.#applied = true;
 
-    const snapshots = new Map<string, { version: string }>();
-    for (const pkg of graph.getPackages()) {
-      snapshots.set(pkg.id, { version: pkg.version });
-    }
-
-    for (const plugin of this.context.plugins) {
-      await handlePluginError(plugin, "applyDraft", () =>
-        plugin.applyDraft?.call(this.context, this),
-      );
-    }
-
-    const updatedChangelogs = this.applyReplays(snapshots);
-    const writes: Awaitable<void>[] = [];
-
-    for (const [id, packageDraft] of this.packages) {
-      const pkg = graph.get(id);
-      if (!pkg) continue;
-      writes.push(this.appendChangelog(pkg, packageDraft));
-    }
-
-    for (const entry of this.changelogs.values()) {
-      const updated = updatedChangelogs.get(entry.id);
-      const filePath = path.join(this.context.changelogDir, entry.filename);
-
-      if (updated) {
-        writes.push(
-          mkdir(this.context.changelogDir, { recursive: true }).then(() =>
-            writeFile(filePath, updated.getRawContent()),
-          ),
-        );
-      } else if (!entry.virtual) {
-        writes.push(rm(filePath, { force: true }));
+    try {
+      const snapshots: SnapshotMap = new Map();
+      for (const pkg of graph.getPackages()) {
+        snapshots.set(pkg.id, { version: pkg.version });
       }
-    }
 
-    writes.push(this.writeLockFile(snapshots));
-    await Promise.all(writes);
+      for (const plugin of this.context.plugins) {
+        await handlePluginError(plugin, "applyDraft", () =>
+          plugin.applyDraft?.call(this.context, this),
+        );
+      }
+
+      const updatedChangelogs = this.applyReplays(snapshots);
+      const writes: Awaitable<void>[] = [];
+
+      for (const [id, packageDraft] of this.packages) {
+        const pkg = graph.get(id);
+        if (!pkg) continue;
+        writes.push(this.appendChangelog(pkg, packageDraft));
+      }
+
+      for (const entry of this.changelogs.values()) {
+        const updated = updatedChangelogs.get(entry.id);
+        const filePath = path.join(this.context.changelogDir, entry.filename);
+
+        if (updated) {
+          writes.push(
+            mkdir(this.context.changelogDir, { recursive: true }).then(() =>
+              writeFile(filePath, updated.getRawContent()),
+            ),
+          );
+        } else if (!entry.virtual) {
+          writes.push(rm(filePath, { force: true }));
+        }
+      }
+
+      writes.push(this.writeLockFile(snapshots));
+      await Promise.all(writes);
+      this.#status = DraftStatus.Applied;
+    } catch (e) {
+      this.#status = DraftStatus.Failed;
+      throw e;
+    }
   }
 
   /** write persistent data to publish lock */
-  private async writeLockFile(snapshots: Map<string, { version: string }>) {
+  private async writeLockFile(snapshots: SnapshotMap) {
     const lock = new PublishLock();
-    for (const entry of this.getChangelogs()) {
+    const changelogs = new Set<ChangelogEntry>();
+    for (const pkg of this.context.graph.getPackages()) {
+      const draft = this.getPackageDraft(pkg.id);
+      const snapshot = snapshots.get(pkg.id);
+      if (!snapshot) continue;
+
+      for (const entry of draft?.changelogs ?? []) {
+        changelogs.add(entry);
+      }
+
+      lock.write("core:packages", {
+        id: pkg.id,
+        updated: draft !== undefined && snapshot.version !== pkg.version,
+        changelogIds: draft?.changelogs?.map((entry) => entry.id),
+      } satisfies z.input<typeof packageStoreSchema>);
+    }
+    for (const entry of changelogs) {
       lock.write("core:changelogs", {
         v: "0.0.0",
         filename: entry.filename,
         content: entry.getRawContent(),
       } satisfies z.input<typeof changelogStoreSchema>);
-    }
-    for (const pkg of this.context.graph.getPackages()) {
-      const draft = this.getPackageDraft(pkg.id);
-      const snapshot = snapshots.get(pkg.id);
-
-      lock.write("core:packages", {
-        id: pkg.id,
-        updated:
-          draft !== undefined && (snapshot === undefined || snapshot.version !== pkg.version),
-        changelogIds: draft?.changelogs?.map((entry) => entry.id),
-      } satisfies z.input<typeof packageStoreSchema>);
     }
     for (const plugin of this.context.plugins) {
       await handlePluginError(plugin, "initPublishLock", () =>
@@ -236,19 +263,33 @@ export class Draft {
   }
 
   canApply() {
-    return !this.#applied;
+    return this.#status === DraftStatus.Ready;
   }
 
   /** Attach replaying changelog entries to packages (already bumped), and return the updated changelog entries. */
-  private applyReplays(snapshots: Map<string, { version: string }>): Map<string, ChangelogEntry> {
+  private applyReplays(snapshots: SnapshotMap): Map<string, ChangelogEntry> {
     const updated = new Map<string, ChangelogEntry>();
     const { graph } = this.context;
+
+    const defaultReplays = (name: string) => {
+      const replay: string[] = [];
+
+      for (const pkg of graph.getByName(name)) {
+        const draft = this.packages.get(pkg.id);
+
+        if (draft?.prerelease) {
+          replay.push(`exit prerelease: ${pkg.id}`);
+        }
+      }
+
+      return replay;
+    };
 
     const isMatch = (condition: ParsedReplayCondition) => {
       if (condition.type === "on-exit-prerelease") {
         return graph.getByName(condition.name).some((pkg) => {
           const previous = snapshots.get(pkg.id);
-          return previous && semver.inc(previous.version, "release") === pkg.version;
+          return previous?.version && semver.inc(previous.version, "release") === pkg.version;
         });
       }
 
@@ -260,9 +301,14 @@ export class Draft {
       const matchedNames = new Set<string>();
 
       for (const [name, config] of entry.packages) {
-        if (!config.replay || config.replay.length === 0) continue;
+        let replay = config.replay;
+        if (config.type) {
+          replay ??= defaultReplays(name);
+        }
 
-        const replay = config.replay.filter((item) => {
+        if (!replay || replay.length === 0) continue;
+
+        replay = replay.filter((item) => {
           const condition = parseReplayCondition(item);
           if (condition && isMatch(condition)) {
             matchedNames.add(name);

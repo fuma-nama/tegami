@@ -6,8 +6,15 @@ export function formatNpmDistTag(distTag?: string): string {
   return distTag && distTag !== "latest" ? ` (${distTag})` : "";
 }
 
-export function formatPackageVersion(name: string, version: string, distTag?: string): string {
-  return `${name}@${version}${formatNpmDistTag(distTag)}`;
+export function formatPackageVersion(
+  name: string,
+  version: string | undefined,
+  distTag?: string,
+): string {
+  let out = name;
+  if (version) out += `@${version}`;
+  out += formatNpmDistTag(distTag);
+  return out;
 }
 
 const WEIGHTS = {
@@ -55,7 +62,9 @@ export function bumpVersion(version: string, type?: BumpType, prerelease?: strin
   if (!parsed) {
     next = null;
   } else if (prerelease) {
-    if (parsed.prerelease[0] === prerelease && type) {
+    if (parsed.prerelease[0] === prerelease) {
+      next = type ? inc(parsed, "prerelease", prerelease) : version;
+    } else if (parsed.prerelease[0]) {
       next = inc(parsed, "prerelease", prerelease);
     } else if (type) {
       next = inc(parsed, PRE[type], prerelease);

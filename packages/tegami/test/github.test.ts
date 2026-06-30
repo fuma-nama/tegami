@@ -4,10 +4,13 @@ import type { ChangelogEntry } from "../src/changelog/parse";
 import { Draft } from "../src/plans/draft";
 import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../src/plans/publish";
 import * as githubClient from "../src/plugins/github/api";
+import { tegami } from "../src";
 import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
+import { somePromise } from "../src/utils/common";
+import { createTegamiCliRegistry } from "../src/cli/core";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -19,6 +22,7 @@ vi.mock("../src/plugins/github/api", () => ({
   findOpenPullRequest: vi.fn(),
   updatePullRequest: vi.fn(),
   createPullRequest: vi.fn(),
+  listPullRequestsForCommit: vi.fn(),
 }));
 
 const exec = vi.mocked(x);
@@ -27,6 +31,7 @@ const createGitHubRelease = vi.mocked(githubClient.createRelease);
 const findOpenPullRequest = vi.mocked(githubClient.findOpenPullRequest);
 const updatePullRequest = vi.mocked(githubClient.updatePullRequest);
 const createPullRequest = vi.mocked(githubClient.createPullRequest);
+const listPullRequestsForCommit = vi.mocked(githubClient.listPullRequestsForCommit);
 
 beforeEach(() => {
   exec.mockReset();
@@ -41,6 +46,8 @@ beforeEach(() => {
   updatePullRequest.mockResolvedValue(undefined);
   createPullRequest.mockReset();
   createPullRequest.mockResolvedValue(undefined);
+  listPullRequestsForCommit.mockReset();
+  listPullRequestsForCommit.mockResolvedValue([]);
 });
 
 describe("github release plugin", () => {
@@ -141,11 +148,14 @@ describe("github release plugin", () => {
     const plugin = githubPlugin({ repo: "acme/repo" });
     const context = publishContext();
 
-    await expect(
-      plugin.resolvePlanStatus?.call(context, {
-        plan: releasePlan(context, [{}]),
-      }),
-    ).resolves.toBe("pending");
+    const status = await plugin.resolvePlanStatus?.call(context, {
+      plan: releasePlan(context, [{}]),
+    });
+
+    expect(Array.isArray(status)).toBe(true);
+    expect(
+      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
+    ).toBe(true);
   });
 
   test("ignores missing releases when npm preflight is complete", async () => {
@@ -155,9 +165,9 @@ describe("github release plugin", () => {
 
     await expect(
       plugin.resolvePlanStatus?.call(context, {
-        plan: releasePlan(context, [{ preflight: { publish: false } }]),
+        plan: releasePlan(context, [{ preflight: { shouldPublish: false } }]),
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual([]);
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
   });
@@ -193,6 +203,18 @@ describe("github release plugin", () => {
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
     expect(createGitHubRelease).not.toHaveBeenCalled();
+  });
+
+  test("creates GitHub releases for skipped publish results", async () => {
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext();
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [{ publishResult: { type: "skipped" } }]),
+    });
+
+    expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
+    expect(createGitHubRelease).toHaveBeenCalledTimes(1);
   });
 
   test("uses changelog entries for default notes", async () => {
@@ -257,6 +279,54 @@ describe("github release plugin", () => {
       title: "@acme/core@1.0.1",
       notes:
         "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.",
+      prerelease: false,
+      token: "test-token",
+    });
+  });
+
+  test("shows related pull requests and contributors in release notes", async () => {
+    exec.mockImplementation((command, args = []) => {
+      if (command === "git" && args[0] === "log") {
+        return commandResult({
+          stdout: "abc1234567890abcdef1234567890abcdef123456\n",
+        });
+      }
+
+      return commandResult();
+    });
+    listPullRequestsForCommit.mockResolvedValue([
+      { number: 42, title: "Add proxy server", user: { login: "alice" } },
+    ]);
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = {
+      ...publishContext(),
+      github: { repo: "acme/repo", token: "test-token" },
+    };
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: releasePlan(context, [
+        {
+          changelogs: [
+            testChangelogEntry({
+              packages: new Map([["@acme/core", { type: "minor" }]]),
+              sections: [{ title: "Add proxy server", content: "Some description.", depth: 2 }],
+            }),
+          ],
+        },
+      ]),
+    });
+
+    expect(listPullRequestsForCommit).toHaveBeenCalledWith(
+      "acme/repo",
+      "abc1234567890abcdef1234567890abcdef123456",
+      "test-token",
+    );
+    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+      tag: "@acme/core@1.0.1",
+      title: "@acme/core@1.0.1",
+      notes:
+        "### Add proxy server ([abc1234](https://github.com/acme/repo/commit/abc1234567890abcdef1234567890abcdef123456))\n\nSome description.\n\n<details>\n<summary>Pull request & contributors</summary>\n\n- [#42 Add proxy server](https://github.com/acme/repo/pull/42) by @alice\n\n</details>",
       prerelease: false,
       token: "test-token",
     });
@@ -388,7 +458,7 @@ describe("github version pull request", () => {
       exec.mockImplementation(() => commandResult());
 
       await plugin.init?.call(context);
-      await plugin.cli?.init?.call(context);
+      await plugin.initCli?.call(context, createTegamiCliRegistry(tegami({ cwd: "/repo" })));
 
       expect(exec).toHaveBeenCalledWith(
         "git",
@@ -524,7 +594,7 @@ describe("github version pull request", () => {
 
       expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
         title: "Version Packages",
-        body: expect.stringContaining("Merge this PR to publish the versioned packages."),
+        body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages",
         base: "main",
         token: "test-token",
@@ -705,9 +775,9 @@ async function runVersionPullRequest(
   const pkg = context.graph.get("test:@acme/core");
   if (!(pkg instanceof TestPackage)) throw new Error("missing package");
 
-  await plugin.cli?.draftCreated?.call(context, draft);
+  await plugin.initCliDraft?.call(context, draft);
   pkg.setVersion("1.1.0");
-  await plugin.cli?.draftApplied?.call(context, draft);
+  await plugin.applyCliDraft?.call(context, draft);
 }
 
 function releasePlan(
@@ -734,7 +804,7 @@ function releasePlan(
       updated: true,
       git: "git" in entry ? entry.git : { tag: `${name}@${pkg.version}` },
       npm: entry.npm ?? { distTag: "latest" },
-      preflight: entry.preflight ?? { publish: true },
+      preflight: entry.preflight ?? { shouldPublish: true },
       publishResult: entry.publishResult ?? { type: "published" },
     });
   }

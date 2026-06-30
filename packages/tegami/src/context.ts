@@ -1,10 +1,10 @@
 import path from "node:path";
-import type { TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
-import { cargo } from "./providers/cargo";
+import type { PackageOptions, TegamiOptions, TegamiPlugin, TegamiPluginOption } from "./types";
 import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
 import type { AgentName } from "package-manager-detector";
+import type { GitLabToken } from "./plugins/gitlab/api";
 
 export interface TegamiContext {
   /** absolute path */
@@ -22,6 +22,13 @@ export interface TegamiContext {
     repo?: string;
     token?: string;
   };
+  /** additional context when GitLab plugin is configured */
+  gitlab?: {
+    repo?: string;
+    token?: GitLabToken;
+    apiUrl: string;
+    webUrl: string;
+  };
   /** additional context when npm plugin is configured */
   npm?: {
     client: AgentName;
@@ -31,7 +38,6 @@ export interface TegamiContext {
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const changelogDir = path.resolve(cwd, options.changelogDir ?? ".tegami");
-  const graph = new PackageGraph();
   const ctx: TegamiContext = {
     cwd,
     changelogDir,
@@ -39,13 +45,19 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
       ? path.resolve(cwd, options.lockPath)
       : path.join(changelogDir, "publish-lock.yaml"),
     options,
-    plugins: resolvePlugins([npm(options.npm), cargo(options.cargo), ...(options.plugins ?? [])]),
-    graph,
+    plugins: resolvePlugins([npm(options.npm), ...(options.plugins ?? [])]),
+    graph: new PackageGraph(),
   };
 
   for (const plugin of ctx.plugins) {
     await handlePluginError(plugin, "init", () => plugin.init?.call(ctx));
   }
+
+  return ctx;
+}
+
+export async function resolveGraph(ctx: TegamiContext) {
+  const { options, graph } = ctx;
 
   for (const plugin of ctx.plugins) {
     await handlePluginError(plugin, "resolve", () => plugin.resolve?.call(ctx));
@@ -63,13 +75,21 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
     graph.registerGroup(name, groupOptions);
   }
 
+  let getPackageOptions: ((pkg: WorkspacePackage) => PackageOptions | undefined) | undefined;
+  if (typeof options.packages === "function") {
+    getPackageOptions = options.packages;
+  } else if (options.packages) {
+    const packages = options.packages;
+    getPackageOptions = (pkg) => packages[pkg.id] ?? packages[pkg.name];
+  }
+
   for (const pkg of graph.getPackages()) {
-    if (ignoreMatchers?.length && ignoreMatchers.some((matcher) => matcher(pkg))) {
+    if (ignoreMatchers && ignoreMatchers.some((matcher) => matcher(pkg))) {
       graph.delete(pkg.id);
       continue;
     }
 
-    const packageOptions = options.packages?.[pkg.id] ?? options.packages?.[pkg.name];
+    const packageOptions = getPackageOptions?.(pkg);
     if (!packageOptions) continue;
 
     pkg.setPackageOptions(packageOptions);
@@ -78,8 +98,6 @@ export async function createTegamiContext(options: TegamiOptions = {}): Promise<
       graph.addGroupMember(packageOptions.group, pkg.id);
     }
   }
-
-  return ctx;
 }
 
 const PLUGIN_ORDER = {

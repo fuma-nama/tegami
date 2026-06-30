@@ -5,16 +5,18 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "../schemas";
+import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "./npm/schema";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { WorkspacePackage } from "../graph";
+import { PackageGroup, WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
 import type { BumpType } from "../utils/semver";
-import type { DraftPolicy } from "../plans/draft";
+import type { DraftPolicy, PackageDraft } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
 import z from "zod";
 import type { PackagePublishResult } from "../plans/publish";
+import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
+import { joinPath } from "../utils/common";
 
 const DEP_FIELDS = [
   "dependencies",
@@ -37,8 +39,8 @@ export class NpmPackage extends WorkspacePackage {
     return this.manifest.name;
   }
 
-  get version(): string {
-    return this.manifest.version ?? "0.0.0";
+  get version(): string | undefined {
+    return this.manifest.version;
   }
 
   async write(): Promise<void> {
@@ -50,13 +52,30 @@ export class NpmPackage extends WorkspacePackage {
 
   initDraft() {
     const defaults = super.initDraft();
-
-    if (this.manifest.publishConfig?.tag) {
-      defaults.npm ??= {};
-      defaults.npm.distTag ??= this.manifest.publishConfig.tag;
-    }
+    defaults.npm = {
+      distTag: this.manifest.publishConfig?.tag,
+    };
 
     return defaults;
+  }
+
+  getRegistry(): string {
+    return this.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
+  }
+
+  configureDraft(draft: PackageDraft, group?: PackageGroup): void {
+    super.configureDraft(draft, group);
+
+    const { distTag = group?.options?.npm?.distTag } = this.getPackageOptions().npm ?? {};
+
+    if (distTag) {
+      draft.npm ??= {};
+      draft.npm.distTag = distTag;
+    } else if (draft.prerelease) {
+      draft.npm ??= {};
+      // `npm publish` requires tag for prerelease versions
+      draft.npm.distTag ??= draft.prerelease;
+    }
   }
 }
 
@@ -145,6 +164,13 @@ function formatDependencySpec(spec: DependencySpec): string {
   return spec.range;
 }
 
+interface DependentRef {
+  dependent: NpmPackage;
+  kind: (typeof DEP_FIELDS)[number];
+  name: string;
+  spec: DependencySpec;
+}
+
 export interface NpmPluginOptions {
   /** Package manager command used for npm registry operations. */
   client?: AgentName;
@@ -152,11 +178,7 @@ export interface NpmPluginOptions {
   /**
    * Decide how to bump the dependents of a bumped package.
    */
-  bumpDep?: (opts: {
-    kind: (typeof DEP_FIELDS)[number];
-    name: string;
-    spec: DependencySpec;
-  }) => BumpType | false;
+  bumpDep?: (opts: DependentRef) => BumpType | false;
 
   /**
    * What to do when a workspace dependency's version has gone beyond peer dependency constraints:
@@ -171,6 +193,9 @@ export interface NpmPluginOptions {
 
   /** update lockfile after applying a draft @default true */
   updateLockFile?: boolean;
+
+  /** Configure `tegami npm pretrust`, disabled by default. */
+  trustedPublish?: TrustedPublishOptions;
 }
 
 const packageLockSchema = z.object({
@@ -178,10 +203,15 @@ const packageLockSchema = z.object({
   distTag: z.string().optional(),
 });
 
+const markLatestLockSchema = z.object({
+  id: z.string(),
+});
+
 export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
   updateLockFile = true,
+  trustedPublish,
   bumpDep: getBumpDepType = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -221,8 +251,19 @@ export function npm({
       if (!(pkg instanceof NpmPackage)) return;
 
       return {
-        publish: pkg.manifest.private !== true && !(await isPackagePublished(pkg)),
+        shouldPublish: pkg.version !== undefined && pkg.manifest.private !== true,
       };
+    },
+    resolvePlanStatus({ plan }) {
+      if (!active) return;
+
+      return Array.from(plan.packages, async ([id, { preflight }]) => {
+        if (!preflight!.shouldPublish) return;
+        const pkg = this.graph.get(id)!;
+
+        if (!(pkg instanceof NpmPackage) || !pkg.version) return;
+        if (!(await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) return "pending";
+      });
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {
@@ -247,11 +288,47 @@ export function npm({
           distTag: parsed.distTag,
         };
       }
+
+      while ((data = lock.read("npm:mark-latest"))) {
+        const parsed = markLatestLockSchema.safeParse(data).data;
+        if (!parsed) continue;
+        const packagePlan = plan.packages.get(parsed.id);
+        if (!packagePlan) continue;
+
+        packagePlan.npm ??= {};
+        packagePlan.npm.markLatest = true;
+      }
     },
     async publish({ pkg, plan }) {
       if (!(pkg instanceof NpmPackage)) return;
+      const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
 
-      return publish(client, pkg, plan.packages.get(pkg.id)?.npm?.distTag);
+      const result = await publish(client, pkg, distTag);
+      if (result.type === "published" && markLatest) {
+        const tagResult = await x(
+          "npm",
+          [
+            "dist-tag",
+            "add",
+            `${pkg.name}@${pkg.version}`,
+            "latest",
+            "--registry",
+            pkg.getRegistry(),
+          ],
+          {
+            nodeOptions: { cwd: pkg.path },
+          },
+        );
+
+        if (tagResult.exitCode !== 0) {
+          return {
+            type: "failed",
+            error: execFailure("Failed to mark package as latest", tagResult).message,
+          };
+        }
+      }
+
+      return result;
     },
     initDraft(plan) {
       if (!active) return;
@@ -265,10 +342,8 @@ export function npm({
 
       for (const pkg of graph.getPackages()) {
         if (!(pkg instanceof NpmPackage)) continue;
-        const plan = draft.getPackageDraft(pkg.id);
-        if (plan) {
-          pkg.manifest.version = plan.bumpVersion(pkg);
-        }
+        const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
+        if (bumped) pkg.manifest.version = bumped;
       }
 
       for (const pkg of graph.getPackages()) {
@@ -285,13 +360,15 @@ export function npm({
               continue;
             // Ignore special syntax like "latest"
             if (!semver.validRange(spec.range)) continue;
-            if (semver.satisfies(spec.linked.version, spec.range)) continue;
+            if (!spec.linked.version || semver.satisfies(spec.linked.version, spec.range)) continue;
 
             let updatedRange: string;
             const isPeer = field === "peerDependencies";
             if (isPeer && onBreakPeerDep === "ignore") {
               continue;
-            } else if (isPeer && onBreakPeerDep === "set") {
+            }
+
+            if (isPeer && onBreakPeerDep === "set") {
               updatedRange = spec.linked.version;
             } else if (isPeer && onBreakPeerDep === "error") {
               throw new Error(
@@ -314,30 +391,33 @@ export function npm({
 
       await Promise.all(writes);
     },
-    cli: {
-      async draftApplied() {
-        if (!active || !updateLockFile) return;
+    async applyCliDraft() {
+      if (!active || !updateLockFile) return;
 
-        let args: string[];
-        if (client === "npm") {
-          args = ["ci"];
-        } else if (client === "yarn") {
-          args = ["install", "--immutable"];
-        } else if (client === "bun") {
-          args = ["install", "--frozen-lockfile"];
-        } else {
-          args = ["install", "--frozen-lockfile"];
-        }
+      let args: string[];
+      if (client === "npm") {
+        args = ["ci"];
+      } else if (client === "yarn") {
+        args = ["install", "--immutable"];
+      } else if (client === "bun") {
+        args = ["install", "--frozen-lockfile"];
+      } else {
+        args = ["install", "--frozen-lockfile"];
+      }
 
-        const result = await x(client, args, {
-          nodeOptions: {
-            cwd: this.cwd,
-          },
-        });
-        if (result.exitCode !== 0) {
-          throw execFailure("Failed to update lockfile.", result);
-        }
-      },
+      const result = await x(client, args, {
+        nodeOptions: {
+          cwd: this.cwd,
+        },
+      });
+      if (result.exitCode !== 0) {
+        throw execFailure("Failed to update lockfile.", result);
+      }
+    },
+    initCli(cli) {
+      if (!trustedPublish) return;
+
+      registerNpmCli(cli, trustedPublish);
     },
   };
 }
@@ -347,6 +427,25 @@ function depsPolicy(
   getBumpDepType: NonNullable<NpmPluginOptions["bumpDep"]>,
 ): DraftPolicy {
   const { graph } = context;
+  const dependentMap = new Map<string, DependentRef[]>();
+
+  for (const pkg of graph.getPackages()) {
+    if (!(pkg instanceof NpmPackage)) continue;
+
+    for (const kind of DEP_FIELDS) {
+      const dependencies = pkg.manifest[kind];
+      if (!dependencies) continue;
+
+      for (const [name, range] of Object.entries(dependencies)) {
+        const spec = parseDependencySpec(context, pkg, name, range);
+        if (!spec?.linked) continue;
+
+        const refs = dependentMap.get(spec.linked.id);
+        if (refs) refs.push({ dependent: pkg, kind, name, spec });
+        else dependentMap.set(spec.linked.id, [{ dependent: pkg, kind, name, spec }]);
+      }
+    }
+  }
 
   function needsUpdate(spec: DependencySpec, target: string): boolean {
     if (spec.linked && spec.protocol === "workspace") {
@@ -373,31 +472,28 @@ function depsPolicy(
     id: "npm:deps",
     onUpdate({ pkg, packageDraft: plan }) {
       if (!(pkg instanceof NpmPackage)) return;
+      const deps = dependentMap.get(pkg.id);
+      if (!deps) return;
+
       const group = graph.getPackageGroup(pkg.id);
+      const bumped = plan.bumpVersion(pkg);
+      if (!bumped) return;
 
-      for (const dependent of graph.getPackages()) {
-        if (!(dependent instanceof NpmPackage)) continue;
-
-        for (const field of DEP_FIELDS) {
-          const dependencies = dependent.manifest[field];
-          if (!dependencies) continue;
-
-          for (const [k, v] of Object.entries(dependencies)) {
-            const spec = parseDependencySpec(context, dependent, k, v);
-            if (!spec || spec.linked !== pkg) continue;
-            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
-              // they will always bump together
-              continue;
-            }
-
-            if (!needsUpdate(spec, plan.bumpVersion(pkg))) continue;
-
-            const bumpType = getBumpDepType({ kind: field, spec, name: k });
-            if (bumpType === false) continue;
-
-            this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
-          }
+      for (const dep of deps) {
+        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+          // they will always bump together
+          continue;
         }
+
+        if (!needsUpdate(dep.spec, bumped)) continue;
+
+        const bumpType = getBumpDepType(dep);
+        if (bumpType === false) continue;
+
+        this.bumpPackage(dep.dependent, {
+          type: bumpType,
+          reason: `update dependency "${dep.name}"`,
+        });
       }
     },
   };
@@ -408,6 +504,10 @@ async function publish(
   pkg: NpmPackage,
   distTag?: string,
 ): Promise<PackagePublishResult> {
+  if (!pkg.version || (await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) {
+    return { type: "skipped" };
+  }
+
   // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
   if (client === "bun") {
     // `npm publish tarball.tgz` does not run lifecycle scripts, we must run it to align with default behaviours
@@ -498,17 +598,19 @@ async function publish(
   };
 }
 
-async function isPackagePublished(pkg: NpmPackage): Promise<boolean> {
-  const registry = pkg.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
-  const base = registry.replace(/\/$/, "");
-  const response = await fetch(`${base}/${pkg.name}/${pkg.version}`, {
+async function isPackagePublished(
+  name: string,
+  version: string,
+  registry: string,
+): Promise<boolean> {
+  const response = await fetch(joinPath(registry, name, version), {
     headers: { Accept: "application/json" },
   });
 
   if (response.status === 404) return false;
   if (!response.ok) {
     throw new Error(
-      `Unable to validate ${pkg.name}@${pkg.version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+      `Unable to validate ${name}@${version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
     );
   }
 
@@ -516,7 +618,6 @@ async function isPackagePublished(pkg: NpmPackage): Promise<boolean> {
 }
 
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
-  let patterns: string[];
   const rootManifest = await readManifest(cwd).catch(() => undefined);
   const pnpmPatterns = await readFile(path.join(cwd, "pnpm-workspace.yaml"), "utf8")
     .then((content) => pnpmWorkspaceSchema.parse(load(content) ?? {}))
@@ -525,11 +626,12 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
       throw error;
     });
 
-  if (pnpmPatterns) {
-    patterns = pnpmPatterns.packages ?? [];
-  } else {
-    patterns = rootManifest?.workspaces ?? [];
+  if (rootManifest?.name) {
+    add(new NpmPackage(cwd, rootManifest));
   }
+
+  const patterns = pnpmPatterns?.packages ?? rootManifest?.workspaces;
+  if (!patterns || patterns.length === 0) return;
 
   const candidatePaths = await expandWorkspacePatterns(cwd, patterns);
   const manifests = await Promise.all(
@@ -540,12 +642,8 @@ async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void):
     ),
   );
 
-  if (rootManifest?.version) {
-    add(new NpmPackage(cwd, rootManifest));
-  }
-
   for (const entry of manifests) {
-    if (!entry?.manifest.version) continue;
+    if (!entry) continue;
     add(new NpmPackage(entry.path, entry.manifest));
   }
 }

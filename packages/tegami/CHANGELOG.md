@@ -1,3 +1,229 @@
+## tegami@1.0.0
+
+### Make Cargo plugin opt-in
+
+The Cargo plugin is no longer enabled by default. Add `cargo()` from `tegami/plugins/cargo` to your `plugins` array for Rust workspace support.
+
+### Support `npm pretrust` command
+
+Useful for publishing new packages with trusted publishing.
+
+### v1 stable
+
+This marks all v1 APIs as stable.
+
+### Generate dist tag for npm in prerelease mode
+
+`npm publish` now requires `tag` for prerelease versions.
+
+### Plugin `afterPublish` no longer fired for skipped packages
+
+The `afterPublish` hook of plugins will no longer be fired for skipped packages.
+
+### Add support for Golang
+
+Experimental plugin available at `/plugins/go`.
+
+### Ready for v1
+
+This marks all existing APIs as stable & safe to use.
+
+### Support function `packages` option
+
+The `packages` option can now return package options dynamically.
+
+### Include packages without `version`
+
+Previously, packages without a version field defined in `package.json` or `Cargo.toml` will be ignored from graph, now those packages will be included.
+
+This may add unwanted packages into versioning, please update your `ignore` config if needed.
+
+### Fix prerelease tag switching
+
+Switch prerelease tag without triggering another bump.
+
+### Auto replay when prerelease is configured
+
+No longer need to write replay conditions manually.
+
+### Handle empty `version` fields in `Cargo.toml` & `package.json`
+
+No longer bump versions when `version` field is not defined.
+
+### Fix replaying changelogs showing in PR body
+
+No longer show replay-only changelogs in PR previews.
+
+### Show bumped packages of each changelog
+
+The PR preview body now show the bumped packages of each changelog, in a collapsible.
+
+### Change behaviour of `publishPreflight` hook
+
+Now only the first handler plugin will be considered, no longer merges results.
+
+### Replace `preflight.publish` with `preflight.shouldPublish`
+
+The publish checking will only happen at publish-time & plan resolve.
+
+### Fix CLI parsing for options without short flags
+
+Release preview workflows failed when passing `--artifact` because Node's argument parser rejects `short: undefined`.
+
+### Improve GitHub release notes
+
+The release notes can now display related PRs & contributors.
+
+### Support `go.publish` option
+
+Decide whether a Go package should be published via the `go.publish` option, default to `true`.
+
+### Drop MDAST dependencies
+
+Tegami only requires extracting headings and preserves formatting, a regex alternative is lighter, better, and faster.
+
+### Remove dependency for parsing
+
+Replace extra dependencies with `util:parseArgs`.
+
+### Add GitLab plugin
+
+Tegami now includes a GitLab plugin with version merge requests, GitLab releases, tag handling, and release note links for commits and related merge requests.
+
+### Allow plugins to add CLI commands
+
+Plugins can now hook on `runCli` hook to add custom commands.
+
+### Strict checks for Git tags
+
+Handle concurrent runs & without `git pull`.
+
+### Support `no-checks` option in `version` command
+
+Allows to skip publish plan status checks.
+
+### Move request preview commands into plugins
+
+The GitHub plugin now provides `tegami pr`, and the GitLab plugin provides `tegami mr` for merge request previews and comments.
+
+Plugin CLI commands now register through the `initCli` hook, so `tegami --help` and grouped help output include plugin-provided commands.
+
+### Add pip plugin
+
+Tegami now includes an opt-in pip plugin at `@tegami/pip` for Python monorepos. It discovers packages from `pyproject.toml`, supports uv workspaces, bumps dependency ranges, runs `uv lock` after versioning, and publishes to PyPI with `uv publish`.
+
+## tegami@1.0.0-beta.5 (beta)
+
+### Fix CLI parsing for options without short flags
+
+Release preview workflows failed when passing `--artifact` because Node's argument parser rejects `short: undefined`.
+
+### Strict checks for Git tags
+
+Handle concurrent runs & without `git pull`.
+
+### Support `no-checks` option in `version` command
+
+Allows to skip publish plan status checks.
+
+### Add pip plugin
+
+Tegami now includes an opt-in pip plugin at `@tegami/pip` for Python monorepos. It discovers packages from `pyproject.toml`, supports uv workspaces, bumps dependency ranges, runs `uv lock` after versioning, and publishes to PyPI with `uv publish`.
+
+## tegami@1.0.0-beta.4 (beta)
+
+### Remove dependency for parsing
+
+Replace extra dependencies with `util:parseArgs`.
+
+### Allow plugins to add CLI commands
+
+Plugins can now hook on `runCli` hook to add custom commands.
+
+### Move request preview commands into plugins
+
+The GitHub plugin now provides `tegami pr`, and the GitLab plugin provides `tegami mr` for merge request previews and comments.
+
+Plugin CLI commands now register through the `initCli` hook, so `tegami --help` and grouped help output include plugin-provided commands.
+
+## tegami@1.0.0-beta.3 (beta)
+
+### Improve GitHub release notes
+
+The release notes can now display related PRs & contributors.
+
+### Support `go.publish` option
+
+Decide whether a Go package should be published via the `go.publish` option, default to `true`.
+
+### Drop MDAST dependencies
+
+Tegami only requires extracting headings and preserves formatting, a regex alternative is lighter, better, and faster.
+
+### Add GitLab plugin
+
+Tegami now includes a GitLab plugin with version merge requests, GitLab releases, tag handling, and release note links for commits and related merge requests.
+
+## tegami@1.0.0-beta.2 (beta)
+
+### Change behaviour of `publishPreflight` hook
+
+Now only the first handler plugin will be considered, no longer merges results.
+
+### Replace `preflight.publish` with `preflight.shouldPublish`
+
+The publish checking will only happen at publish-time & plan resolve.
+
+## tegami@1.0.0-beta.1 (beta)
+
+### Handle empty `version` fields in `Cargo.toml` & `package.json`
+
+No longer bump versions when `version` field is not defined.
+
+### Fix replaying changelogs showing in PR body
+
+No longer show replay-only changelogs in PR previews.
+
+### Show bumped packages of each changelog
+
+The PR preview body now show the bumped packages of each changelog, in a collapsible.
+
+## tegami@1.0.0-beta.0 (beta)
+
+### Generate dist tag for npm in prerelease mode
+
+`npm publish` now requires `tag` for prerelease versions.
+
+### Plugin `afterPublish` no longer fired for skipped packages
+
+The `afterPublish` hook of plugins will no longer be fired for skipped packages.
+
+### Add support for Golang
+
+Experimental plugin available at `/plugins/go`.
+
+### Ready for v1
+
+This marks all existing APIs as stable & safe to use.
+
+### Support function `packages` option
+
+The `packages` option can now return package options dynamically.
+
+### Include packages without `version`
+
+Previously, packages without a version field defined in `package.json` or `Cargo.toml` will be ignored from graph, now those packages will be included.
+
+This may add unwanted packages into versioning, please update your `ignore` config if needed.
+
+### Fix prerelease tag switching
+
+Switch prerelease tag without triggering another bump.
+
+### Auto replay when prerelease is configured
+
+No longer need to write replay conditions manually.
+
 ## tegami@0.2.1
 
 ### Fix failing checks for Git tags

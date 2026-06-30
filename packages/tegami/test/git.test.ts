@@ -4,10 +4,13 @@ import { join } from "node:path";
 import * as tinyexec from "tinyexec";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { tegami } from "../src";
 import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
 import { publishPlan } from "./helpers/plan";
+import { createTegamiCliRegistry } from "../src/cli/core";
+import { somePromise } from "../src/utils/common";
 
 vi.mock("tinyexec", async (importOriginal) => {
   const actual = await importOriginal<typeof tinyexec>();
@@ -38,7 +41,10 @@ describe("git utils", () => {
       const plugin = git();
       exec.mockImplementation(() => commandResult() as ReturnType<typeof x>);
 
-      await plugin.cli?.init?.call(pluginContext());
+      await plugin.initCli?.call(
+        pluginContext(),
+        createTegamiCliRegistry(tegami({ cwd: "/repo" })),
+      );
 
       expect(
         exec.mock.calls.map(([command, args, options]) => ({
@@ -94,45 +100,17 @@ describe("git utils", () => {
       ],
     });
 
-    exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "rev-parse") {
-        return commandResult({
-          exitCode: 1,
-        });
-      }
-
-      if (args.at(0) === "tag") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${args.join(" ")}`);
-    });
+    exec.mockImplementation(
+      mockGit((args) => {
+        if (args.at(0) === "tag") {
+          return commandResult();
+        }
+      }),
+    );
 
     await plugin.afterPublishAll?.call(context, { plan });
     expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
       [
-        {
-          "args": [
-            "rev-parse",
-            "-q",
-            "--verify",
-            "refs/tags/@acme/core@1.0.1",
-          ],
-          "command": "git",
-          "cwd": "/repo",
-          "throwOnError": undefined,
-        },
-        {
-          "args": [
-            "rev-parse",
-            "-q",
-            "--verify",
-            "refs/tags/@acme/ui@1.0.1",
-          ],
-          "command": "git",
-          "cwd": "/repo",
-          "throwOnError": undefined,
-        },
         {
           "args": [
             "tag",
@@ -153,6 +131,34 @@ describe("git utils", () => {
         },
       ]
     `);
+  });
+
+  test("creates git tags for skipped publish results", async () => {
+    const plugin = git();
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    exec.mockImplementation(
+      mockGit((args) => {
+        if (args.at(0) === "tag") {
+          return commandResult();
+        }
+      }),
+    );
+
+    await plugin.afterPublishAll?.call(context, {
+      plan: publishPlan(context.graph, {
+        packages: [{ pkg: core, publishResult: { type: "skipped" } }],
+      }),
+    });
+
+    expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+      {
+        args: ["tag", "@acme/core@1.0.1"],
+        command: "git",
+        cwd: "/repo",
+        throwOnError: undefined,
+      },
+    ]);
   });
 
   test("skips plugin tags on dry runs, disabled tags, and failed publishes", async () => {
@@ -182,19 +188,13 @@ describe("git utils", () => {
       const plugin = git();
       const context = pluginContext();
       const core = context.graph.get("test:@acme/core")!;
-      exec.mockImplementation((_command, args = []) => {
-        if (args.at(0) === "rev-parse") {
-          return commandResult({
-            exitCode: 1,
-          });
-        }
-
-        if (args.at(0) === "tag" || args.at(0) === "push") {
-          return commandResult();
-        }
-
-        throw new Error(`Unexpected command: ${args.join(" ")}`);
-      });
+      exec.mockImplementation(
+        mockGit((args) => {
+          if (args.at(0) === "tag" || args.at(0) === "push") {
+            return commandResult();
+          }
+        }),
+      );
 
       await plugin.afterPublishAll?.call(context, {
         plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
@@ -202,17 +202,6 @@ describe("git utils", () => {
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
-          {
-            "args": [
-              "rev-parse",
-              "-q",
-              "--verify",
-              "refs/tags/@acme/core@1.0.1",
-            ],
-            "command": "git",
-            "cwd": "/repo",
-            "throwOnError": undefined,
-          },
           {
             "args": [
               "tag",
@@ -240,29 +229,206 @@ describe("git utils", () => {
     }
   });
 
+  test("skips duplicate local tags without pushing them", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const plugin = git();
+      const context = pluginContext();
+      const core = context.graph.get("test:@acme/core")!;
+      exec.mockImplementation(
+        mockGit((args) => {
+          if (args.at(0) === "tag") {
+            return commandResult({
+              exitCode: 128,
+              stderr: "fatal: tag '@acme/core@1.0.1' already exists",
+            });
+          }
+        }),
+      );
+
+      await plugin.afterPublishAll?.call(context, {
+        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+      });
+
+      expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+        {
+          args: ["tag", "@acme/core@1.0.1"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
+      ]);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("skips push when remote tag already exists", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const plugin = git();
+      const context = pluginContext();
+      const core = context.graph.get("test:@acme/core")!;
+      exec.mockImplementation(
+        mockGit((args) => {
+          if (args.at(0) === "tag") {
+            return commandResult();
+          }
+
+          if (args.at(0) === "push") {
+            return commandResult({
+              exitCode: 1,
+              stderr:
+                "! [rejected] @acme/core@1.0.1 -> @acme/core@1.0.1 (already exists)\nerror: failed to push some refs",
+            });
+          }
+        }),
+      );
+
+      await expect(
+        plugin.afterPublishAll?.call(context, {
+          plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+        {
+          args: ["tag", "@acme/core@1.0.1"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
+        {
+          args: ["push", "origin", "@acme/core@1.0.1"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
+      ]);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
   test("throws when git tag creation fails", async () => {
     const plugin = git();
     const context = pluginContext();
     const core = context.graph.get("test:@acme/core")!;
-    exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "rev-parse") {
-        return commandResult({
-          exitCode: 1,
-        });
-      }
-
-      if (args.at(0) === "tag") {
-        return commandResult({ exitCode: 1, stderr: "tag failed" });
-      }
-
-      throw new Error(`Unexpected command: ${args.join(" ")}`);
-    });
+    exec.mockImplementation(
+      mockGit((args) => {
+        if (args.at(0) === "tag") {
+          return commandResult({ exitCode: 1, stderr: "tag failed" });
+        }
+      }),
+    );
 
     await expect(
       plugin.afterPublishAll?.call(context, {
         plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
       }),
     ).rejects.toThrow(/tag failed/);
+  });
+
+  test("returns success from resolvePlanStatus when tag exists locally", async () => {
+    const plugin = git();
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "rev-parse") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const status = await plugin.resolvePlanStatus?.call(context, {
+      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    });
+
+    expect(Array.isArray(status)).toBe(true);
+    expect(
+      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
+    ).toBe(false);
+    expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+      {
+        args: ["rev-parse", "-q", "--verify", "refs/tags/@acme/core@1.0.1"],
+        command: "git",
+        cwd: "/repo",
+        throwOnError: undefined,
+      },
+    ]);
+  });
+
+  test("returns success from resolvePlanStatus when tag exists on origin", async () => {
+    const plugin = git();
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "rev-parse") {
+        return commandResult({ exitCode: 1 });
+      }
+
+      if (args.at(0) === "ls-remote") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const status = await plugin.resolvePlanStatus?.call(context, {
+      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    });
+
+    expect(Array.isArray(status)).toBe(true);
+    expect(
+      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
+    ).toBe(false);
+    expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
+      {
+        args: ["rev-parse", "-q", "--verify", "refs/tags/@acme/core@1.0.1"],
+        command: "git",
+        cwd: "/repo",
+        throwOnError: undefined,
+      },
+      {
+        args: ["ls-remote", "--exit-code", "--tags", "origin", "refs/tags/@acme/core@1.0.1"],
+        command: "git",
+        cwd: "/repo",
+        throwOnError: undefined,
+      },
+    ]);
+  });
+
+  test("returns pending from resolvePlanStatus when tag is missing", async () => {
+    const plugin = git();
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "rev-parse") {
+        return commandResult({ exitCode: 1 });
+      }
+
+      if (args.at(0) === "ls-remote") {
+        return commandResult({ exitCode: 2 });
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const status = await plugin.resolvePlanStatus?.call(context, {
+      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    });
+
+    expect(Array.isArray(status)).toBe(true);
+    expect(
+      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
+    ).toBe(true);
   });
 });
 
@@ -312,6 +478,16 @@ function commandResult(overrides: Partial<ExecResult> = {}): ReturnType<typeof x
     stderr: "",
     ...overrides,
   } as unknown as ReturnType<typeof x>;
+}
+
+function mockGit(handler: (args: readonly string[]) => ReturnType<typeof x> | undefined) {
+  return (_command: string, args?: readonly string[]) => {
+    const argv = args ?? [];
+    const result = handler(argv);
+    if (result) return result;
+
+    throw new Error(`Unexpected command: ${argv.join(" ")}`);
+  };
 }
 
 function normalizeExecCall([command, args, options]: Parameters<typeof x>) {

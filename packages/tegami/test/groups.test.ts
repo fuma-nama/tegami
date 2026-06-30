@@ -7,6 +7,7 @@ import { tegami } from "../src";
 import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
+import type { PackageOptions } from "../src/types";
 import { getPendingPackageIds } from "./helpers/draft";
 import { publishPlan } from "./helpers/plan";
 
@@ -78,7 +79,7 @@ Useful release note.
       coreDistTag: draft.getPackageDraft("npm:@acme/core")?.npm?.distTag,
       uiDistTag: draft.getPackageDraft("npm:@acme/ui")?.npm?.distTag,
     }).toEqual({
-      coreDistTag: undefined,
+      coreDistTag: "alpha",
       uiDistTag: "next",
     });
 
@@ -163,10 +164,6 @@ Breaking note.
     });
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "rev-parse") {
-        return commandResult({ exitCode: 1 });
-      }
-
       if (args.at(0) === "tag") {
         return commandResult();
       }
@@ -213,8 +210,16 @@ function createGroupContext(options: TegamiContext["options"]): TegamiContext {
     graph.registerGroup(name, groupOptions);
   }
 
+  let getPackageOptions: ((pkg: WorkspacePackage) => PackageOptions | undefined) | undefined;
+  if (typeof options.packages === "function") {
+    getPackageOptions = options.packages;
+  } else if (options.packages) {
+    const packages = options.packages;
+    getPackageOptions = (pkg) => packages[pkg.id] ?? packages[pkg.name];
+  }
+
   for (const pkg of graph.getPackages()) {
-    const packageOptions = options.packages?.[pkg.id] ?? options.packages?.[pkg.name];
+    const packageOptions = getPackageOptions?.(pkg);
     if (!packageOptions) continue;
 
     pkg.setPackageOptions(packageOptions);

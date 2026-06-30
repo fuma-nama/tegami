@@ -19,7 +19,7 @@ Create an entry script in your repo root.
 
 ```ts title="scripts/tegami.mts"
 import { tegami } from "tegami";
-import { createCli } from "tegami/cli";
+import { runCli } from "tegami/cli";
 import { github } from "tegami/plugins/github";
 
 const paper = tegami({
@@ -37,7 +37,7 @@ const paper = tegami({
   },
 });
 
-void createCli(paper).parseAsync();
+await runCli(paper);
 ```
 
 Add a package script so the CLI is easy to run:
@@ -50,22 +50,22 @@ Add a package script so the CLI is easy to run:
 }
 ```
 
-Tegami discovers npm and Cargo workspace packages automatically. Use the `packages` option to override release settings per package.
+Tegami discovers npm workspace packages automatically, see [Plugins](/plugins) for other languages. Use the `packages` option to override release settings per package.
 
 ## CLI commands
 
-`createCli` wraps the programmatic API. Pass the same `tegami()` instance you use in scripts.
+`runCli` wraps the programmatic API. Pass the same `tegami()` instance you use in scripts.
 
-| Command             | Description                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------- |
-| `tegami`            | Create changelog files interactively or from conventional commits                           |
-| `tegami version`    | Draft version changes and write the publish lock                                            |
-| `tegami publish`    | Publish packages from the publish lock                                                      |
-| `tegami ci`         | Version if changelogs are pending, otherwise publish                                        |
-| `tegami pr preview` | Build a pull request release preview (for CI)                                               |
-| `tegami pr comment` | Post a release preview artifact as a pull request comment (requires a `workflow_run` event) |
-| `tegami cleanup`    | Optionally remove a finished publish lock file from `.tegami/`                              |
-| `tegami init-agent` | Append AGENTS.md instructions for AI agents writing changelogs                              |
+| Command             | Description                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `tegami`            | Create changelog files interactively or from conventional commits |
+| `tegami version`    | Draft version changes and write the publish lock                  |
+| `tegami publish`    | Publish packages from the publish lock                            |
+| `tegami ci`         | Version if changelogs are pending, otherwise publish              |
+| `tegami cleanup`    | Optionally remove a finished publish lock file from `.tegami/`    |
+| `tegami init-agent` | Append AGENTS.md instructions for AI agents writing changelogs    |
+
+And more from plugins.
 
 Locally, `tegami` and `tegami version` use interactive prompts. In CI (`CI=true`), prompts are skipped and commands run non-interactively.
 

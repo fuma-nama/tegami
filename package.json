@@ -12,11 +12,12 @@
     "tegami": "pnpm --filter tegami build && node scripts/tegami.mts"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.0.1",
     "oxfmt": "^0.56.0",
     "oxlint": "^1.71.0",
     "tegami": "workspace:*",
-    "turbo": "^2.9.18",
+    "tinyexec": "^1.2.4",
+    "turbo": "^2.10.0",
     "typescript": "6.0.3",
     "vitest": "^4.1.9"
   },

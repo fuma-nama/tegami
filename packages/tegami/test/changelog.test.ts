@@ -267,7 +267,7 @@ async function normalizePlan(
   draft: Awaited<ReturnType<ReturnType<typeof tegami>["draft"]>>,
   cwd: string,
 ) {
-  const graph = await tegami({ cwd })._internal.graph();
+  const graph = (await tegami({ cwd })._internal.context()).graph;
   return Object.fromEntries(
     getPendingPackageIds(draft, graph).map((id) => {
       const plan = draft.getPackageDraft(id)!;

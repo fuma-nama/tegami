@@ -80,6 +80,9 @@ describe("draft publish plans", () => {
           "changelogIds": [
             "change.md",
           ],
+          "npm": {
+            "distTag": undefined,
+          },
           "type": "major",
         },
       }
@@ -333,18 +336,22 @@ Core only.
     const cwd = await createWorkspace({ changelog: false });
     tempDirs.push(cwd);
 
-    const graph = await tegami({
-      cwd,
-      ignore: ["@acme/ui"],
-    })._internal.graph();
+    const graph = (
+      await tegami({
+        cwd,
+        ignore: ["@acme/ui"],
+      })._internal.context()
+    ).graph;
 
     expect(graph.get("npm:@acme/core")).toBeDefined();
     expect(graph.getByName("@acme/ui")).toEqual([]);
 
-    const graphById = await tegami({
-      cwd,
-      ignore: ["npm:@acme/core"],
-    })._internal.graph();
+    const graphById = (
+      await tegami({
+        cwd,
+        ignore: ["npm:@acme/core"],
+      })._internal.context()
+    ).graph;
 
     expect(graphById.get("npm:@acme/core")).toBeUndefined();
     expect(graphById.get("npm:@acme/ui")).toBeDefined();
@@ -354,18 +361,22 @@ Core only.
     const cwd = await createWorkspace({ changelog: false });
     tempDirs.push(cwd);
 
-    const graph = await tegami({
-      cwd,
-      ignore: [/^@acme\/ui$/],
-    })._internal.graph();
+    const graph = (
+      await tegami({
+        cwd,
+        ignore: [/^@acme\/ui$/],
+      })._internal.context()
+    ).graph;
 
     expect(graph.get("npm:@acme/core")).toBeDefined();
     expect(graph.getByName("@acme/ui")).toEqual([]);
 
-    const graphByPattern = await tegami({
-      cwd,
-      ignore: [/^npm:@acme/],
-    })._internal.graph();
+    const graphByPattern = (
+      await tegami({
+        cwd,
+        ignore: [/^npm:@acme/],
+      })._internal.context()
+    ).graph;
 
     expect(graphByPattern.getPackages()).toEqual([]);
   });
@@ -458,6 +469,58 @@ More features.
     expect(changelog).toContain("## Minor release");
   });
 
+  test("auto-adds exit prerelease replay during apply for prerelease packages", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-auto-replay-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/tegami"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/tegami/package.json"), {
+      name: "tegami",
+      version: "1.0.0-beta.0",
+    });
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages:
+  npm:tegami: patch
+---
+
+## Beta fix
+
+Fixed something during beta.
+`,
+    );
+
+    const paper = tegami({
+      cwd,
+      packages: {
+        tegami: { prerelease: "beta" },
+      },
+    });
+    const draft = await paper.draft();
+
+    expect(draft.getPackageDraft("npm:tegami")?.type).toBe("patch");
+    await draft.apply();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.0.0-beta.1",
+    });
+    const keptChangelog = await readFile(join(cwd, ".tegami/change.md"), "utf8");
+    expect(keptChangelog).toContain("exit prerelease: npm:tegami");
+    expect(keptChangelog).not.toContain("type:");
+    expect(await readFile(join(cwd, "packages/tegami/CHANGELOG.md"), "utf8")).toContain(
+      "## Beta fix",
+    );
+  });
+
   test("discovers packages with nested workspace globs", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-"));
     tempDirs.push(cwd);
@@ -480,7 +543,7 @@ More features.
       version: "1.0.0",
     });
 
-    const graph = await tegami({ cwd })._internal.graph();
+    const graph = (await tegami({ cwd })._internal.context()).graph;
 
     expect(normalizeDirPath(graph.get("npm:@acme/nested")?.path ?? "")).toBe(
       normalizeDirPath(join(cwd, "examples/nested/pkg")),

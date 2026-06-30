@@ -5,6 +5,8 @@ import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
+import { cargo } from "../src/plugins/cargo";
+import { cargoManifestSchema } from "../src/plugins/cargo/schema";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
 import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
@@ -20,6 +22,10 @@ vi.mock("tinyexec", () => ({
 
 const tempDirs: string[] = [];
 const exec = vi.mocked(x);
+
+function withCargo(options: Parameters<typeof tegami>[0] = {}) {
+  return tegami({ ...options, plugins: [cargo(), ...(options.plugins ?? [])] });
+}
 
 beforeEach(() => {
   exec.mockReset();
@@ -68,20 +74,25 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const graph = await tegami({ cwd })._internal.graph();
+    const graph = (await withCargo({ cwd })._internal.context()).graph;
     const packages = graph.getPackages().map((pkg) => ({
       manager: pkg.manager,
       name: pkg.name,
       version: pkg.version,
     }));
 
-    expect(packages).toHaveLength(3);
+    expect(packages).toHaveLength(4);
     expect(packages).toEqual(
       expect.arrayContaining([
         {
           manager: "npm",
           name: "@acme/js",
           version: "1.0.0",
+        },
+        {
+          manager: "cargo",
+          name: "acme_workspace",
+          version: "0.0.0",
         },
         {
           manager: "cargo",
@@ -101,7 +112,7 @@ Note.
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
 
-    const draft = await tegami({ cwd }).draft();
+    const draft = await withCargo({ cwd }).draft();
     await draft.apply();
 
     const npmPackage = JSON.parse(await readFile(join(cwd, "packages/js/package.json"), "utf8"));
@@ -120,7 +131,7 @@ Note.
       packageIds.push((entry as { id: string }).id);
     }
     expect(packageIds.sort()).toEqual(
-      ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
+      ["cargo:acme_binding", "cargo:acme_core", "cargo:acme_workspace", "npm:@acme/js"].sort(),
     );
   });
 
@@ -128,7 +139,7 @@ Note.
     const cwd = await createDuplicateNameWorkspace();
     tempDirs.push(cwd);
 
-    const paper = tegami({ cwd });
+    const paper = withCargo({ cwd });
     const draft = await paper.draft();
     await draft.apply();
 
@@ -148,7 +159,9 @@ Note.
     while ((entry = lock.read("core:packages"))) {
       packageIds.push((entry as { id: string }).id);
     }
-    expect(packageIds.sort()).toEqual(["cargo:pkg-a", "npm:pkg-a"]);
+    expect(packageIds.sort()).toEqual(
+      ["cargo:duplicate_workspace", "cargo:pkg-a", "npm:pkg-a"].sort(),
+    );
   });
 
   test("preserves Cargo.toml formatting and comments when applying a plan", async () => {
@@ -164,7 +177,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
 `;
     await writeFile(join(cwd, "crates/binding/Cargo.toml"), bindingManifest);
 
-    await tegami({ cwd })
+    await withCargo({ cwd })
       .draft()
       .then((draft) => draft.apply());
 
@@ -178,17 +191,23 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
   test("routes npm and cargo publishes through their registry clients", async () => {
     const cwd = await createMixedWorkspace();
     tempDirs.push(cwd);
-    await tegami({ cwd })
+    await withCargo({ cwd })
       .draft()
       .then((draft) => draft.apply());
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("not found", { status: 404 })),
+      vi.fn(async (url: string) => {
+        if (url.includes("registry.npmjs.org")) {
+          return new Response(JSON.stringify({ version: "1.1.0" }), { status: 200 });
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
     );
     exec.mockImplementation(() => commandResult());
 
-    const result = await tegami({ cwd, npm: { client: "npm" } }).publish();
+    const result = await withCargo({ cwd, npm: { client: "npm" } }).publish();
 
     if (result === "skipped") {
       throw new Error("expected publish plan, got skipped");
@@ -198,9 +217,8 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
       .filter(([, plan]) => plan.publishResult!.type === "published")
       .map(([id]) => id);
 
-    expect(published.sort()).toEqual(
-      ["cargo:acme_binding", "cargo:acme_core", "npm:@acme/js"].sort(),
-    );
+    expect(published.sort()).toEqual(["cargo:acme_binding", "cargo:acme_core"].sort());
+    expect(result.packages.get("npm:@acme/js")?.publishResult).toEqual({ type: "skipped" });
     expect(
       exec.mock.calls.map(([command, args, options]) => ({
         command,
@@ -208,11 +226,6 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
         cwd: normalizeDirPath(String(options?.nodeOptions?.cwd)),
       })),
     ).toEqual([
-      {
-        command: "npm",
-        args: ["publish"],
-        cwd: normalizeDirPath(join(cwd, "packages/js")),
-      },
       {
         command: "cargo",
         args: ["publish"],
@@ -224,6 +237,10 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
         cwd: normalizeDirPath(join(cwd, "crates/binding")),
       },
     ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://registry.npmjs.org/@acme/js/1.1.0",
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_core/1.1.0");
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_binding/1.0.1");
   });
@@ -231,7 +248,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
   test("throws on circular cargo workspace dependencies", async () => {
     const cwd = await createCircularCargoWorkspace();
     tempDirs.push(cwd);
-    await tegami({ cwd })
+    await withCargo({ cwd })
       .draft()
       .then((draft) => draft.apply());
 
@@ -244,7 +261,60 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     );
     exec.mockImplementation(() => commandResult());
 
-    await expect(tegami({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
+    await expect(withCargo({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
+  });
+
+  test("includes cargo crates without a version field in the graph", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-no-version-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "crates/lib"), { recursive: true });
+    await writeFile(
+      join(cwd, "Cargo.toml"),
+      `[package]
+name = "versionless_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
+members = ["crates/*"]
+`,
+    );
+    await writeFile(
+      join(cwd, "crates/lib/Cargo.toml"),
+      `[package]
+name = "acme_lib"
+`,
+    );
+
+    const graph = (await withCargo({ cwd })._internal.context()).graph;
+    const pkg = graph.get("cargo:acme_lib");
+
+    expect(pkg).toBeDefined();
+    expect(pkg!.version).toBeUndefined();
+  });
+});
+
+describe("cargo manifest schema", () => {
+  test("requires a package section", () => {
+    expect(() =>
+      cargoManifestSchema.parse(parse(`[workspace]\nmembers = ["crates/*"]\n`)),
+    ).toThrow();
+  });
+
+  test("accepts workspace roots with a virtual package section", () => {
+    const manifest = cargoManifestSchema.parse(
+      parse(`[package]
+name = "acme_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
+members = ["crates/*"]
+`),
+    );
+
+    expect(manifest.package?.name).toBe("acme_workspace");
+    expect(manifest.workspace?.members).toEqual(["crates/*"]);
   });
 });
 
@@ -262,7 +332,12 @@ async function createMixedWorkspace(): Promise<string> {
   });
   await writeFile(
     join(cwd, "Cargo.toml"),
-    `[workspace]
+    `[package]
+name = "acme_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
   );
@@ -306,7 +381,12 @@ async function createCircularCargoWorkspace(): Promise<string> {
 
   await writeFile(
     join(cwd, "Cargo.toml"),
-    `[workspace]
+    `[package]
+name = "cycle_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
   );
@@ -358,7 +438,12 @@ async function createDuplicateNameWorkspace(): Promise<string> {
   });
   await writeFile(
     join(cwd, "Cargo.toml"),
-    `[workspace]
+    `[package]
+name = "duplicate_workspace"
+version = "0.0.0"
+publish = false
+
+[workspace]
 members = ["crates/*"]
 `,
   );

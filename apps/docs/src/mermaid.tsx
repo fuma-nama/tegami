@@ -10,7 +10,12 @@ export async function Mermaid({ chart }: { chart: string }) {
       transparent: true,
     });
 
-    return <div dangerouslySetInnerHTML={{ __html: svg }} />;
+    return (
+      <div
+        dangerouslySetInnerHTML={{ __html: svg }}
+        className="overflow-auto border rounded-lg shadow-md"
+      />
+    );
   } catch {
     return (
       <CodeBlock title="Mermaid">

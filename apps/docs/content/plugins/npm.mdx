@@ -28,11 +28,50 @@ const paper = tegami({
 });
 ```
 
-| Option           | Default | Description                                                    |
-| ---------------- | ------- | -------------------------------------------------------------- |
-| `client`         | auto    | Package manager for registry operations (`npm`, `pnpm`)        |
-| `updateLockFile` | `true`  | Run install after versioning to refresh the lockfile           |
-| `onBreakPeerDep` | `"set"` | When a peer dep constraint breaks: `set`, `error`, or `ignore` |
+| Option           | Default | Description                                                                    |
+| ---------------- | ------- | ------------------------------------------------------------------------------ |
+| `client`         | auto    | Package manager for registry operations (`npm`, `pnpm`)                        |
+| `updateLockFile` | `true`  | Run install after versioning to refresh the lockfile                           |
+| `onBreakPeerDep` | `"set"` | When a peer dep constraint breaks: `set`, `error`, or `ignore`                 |
+| `trustedPublish` | —       | Enable `tegami npm pretrust` for [npm trusted publishing](#trusted-publishing) |
+
+### Trusted Publishing
+
+Tegami can bootstrap new packages under [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) with `tegami npm pretrust`.
+
+Enable the command in your Tegami config:
+
+```ts title="scripts/tegami.mts"
+const paper = tegami({
+  plugins: [github({ repo: "acme/widgets" })],
+  npm: {
+    trustedPublish: {
+      provider: "github",
+      workflow: "publish.yml",
+    },
+  },
+});
+```
+
+Use `provider: "gitlab"` with the [GitLab plugin](/plugins/gitlab) for GitLab CI. The `workflow` value is the filename passed to `npm trust --file`.
+
+#### One-time setup for new packages
+
+Run this locally:
+
+1. Run `tegami version` so a publish lock exists.
+2. Login to npm (`npm login`).
+3. Run `tegami npm pretrust` (add `--dry-run` to preview).
+
+For each publishable package in the lock that npm does not know yet, pretrust:
+
+- Publishes an empty placeholder at `0.0.0-tegami-trusted-publish-setup` under the `temp` dist-tag.
+- Runs `npm trust` to link the package to your CI workflow.
+- Writes `npm:mark-latest` to the publish lock so the first real release is tagged `latest`.
+
+Packages already on the registry are skipped.
+
+CI still needs `id-token: write` in GitHub Actions (see [CI setup](/ci)). After pretrust, commit your local changes and hand the actual publishing to CI.
 
 ## Dependency bumps
 
@@ -53,6 +92,8 @@ npm({
 ## Package options
 
 It allows to override `distTag` for npm publish, otherwise, it will read from your `publishConfig` in `package.json`.
+
+When publishing prerelease versions, npm 11+ requires an explicit dist-tag. Tegami infers one from your `prerelease` config (for example, `1.0.0-alpha.0` → `alpha`) when no tag is configured.
 
 ```ts
 tegami({

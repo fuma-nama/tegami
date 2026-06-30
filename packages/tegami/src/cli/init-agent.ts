@@ -2,8 +2,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { TegamiContext } from "../context";
 
-const CHANGELOG_DOCS_URL = "https://tegami.fuma-nama.dev/changelog";
-
 export interface InitAgentOptions {
   output?: string;
 }
@@ -43,7 +41,7 @@ export function renderAgentsMd(context: TegamiContext): string {
     "",
     `Create pending changelog files under \`${changelogDir}/\` as \`YYYY-MM-DD-{hash}.md\`.`,
     "",
-    `See the [changelog format docs](${CHANGELOG_DOCS_URL}) for details.`,
+    `See the [changelog format docs](https://tegami.fuma-nama.dev/changelog) for details.`,
     "",
     "### Example",
     "",

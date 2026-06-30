@@ -5,6 +5,7 @@ import type {
   PackagePublishResult,
   PublishPlan,
 } from "../../src/plans/publish";
+import type { PublishPreflight } from "../../src/types";
 
 export function publishPlan(
   graph: PackageGraph,
@@ -12,6 +13,7 @@ export function publishPlan(
     dryRun?: boolean;
     packages?: Array<{
       pkg: WorkspacePackage;
+      preflight?: PublishPreflight;
       publishResult?: PackagePublishResult;
       git?: { tag: string };
       npm?: { distTag?: string };
@@ -29,6 +31,7 @@ export function publishPlan(
       updated: entry.updated ?? true,
       git: entry.git ?? { tag: `${pkg.name}@${pkg.version}` },
       npm: entry.npm,
+      preflight: entry.preflight ?? { shouldPublish: true },
       publishResult: entry.publishResult ?? { type: "published" },
     });
   }
@@ -40,6 +43,7 @@ export function publishPlan(
         updated: true,
         git: { tag: `${pkg.name}@${pkg.version}` },
         npm: { distTag: "latest" },
+        preflight: { shouldPublish: true },
         publishResult: { type: "published" },
       });
     }
