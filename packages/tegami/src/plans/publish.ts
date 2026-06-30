@@ -98,8 +98,9 @@ export async function initPublishPlan(
 
 function resolvePublishTargets(plan: PublishPlan): string[] {
   const ordered: string[] = [];
+  const scanned = new Set<string>();
 
-  function scan(id: string, stack = new Set<string>()) {
+  function scan(id: string, stack: Set<string>) {
     const preflight = plan.packages.get(id)?.preflight;
     if (!preflight || !preflight.shouldPublish) return;
 
@@ -107,7 +108,7 @@ function resolvePublishTargets(plan: PublishPlan): string[] {
       throw new Error(`circular reference of deps: ${[...stack, id].join(" -> ")}`);
     }
 
-    if (ordered.includes(id)) return;
+    if (scanned.has(id)) return;
 
     if (preflight.wait) {
       stack.add(id);
@@ -116,9 +117,11 @@ function resolvePublishTargets(plan: PublishPlan): string[] {
     }
 
     ordered.push(id);
+    scanned.add(id);
   }
 
-  for (const id of plan.packages.keys()) scan(id);
+  const stack = new Set<string>();
+  for (const id of plan.packages.keys()) scan(id, stack);
   return ordered;
 }
 

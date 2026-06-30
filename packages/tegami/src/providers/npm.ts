@@ -164,6 +164,13 @@ function formatDependencySpec(spec: DependencySpec): string {
   return spec.range;
 }
 
+interface DependentRef {
+  dependent: NpmPackage;
+  kind: (typeof DEP_FIELDS)[number];
+  name: string;
+  spec: DependencySpec;
+}
+
 export interface NpmPluginOptions {
   /** Package manager command used for npm registry operations. */
   client?: AgentName;
@@ -171,12 +178,7 @@ export interface NpmPluginOptions {
   /**
    * Decide how to bump the dependents of a bumped package.
    */
-  bumpDep?: (opts: {
-    dependent: NpmPackage;
-    kind: (typeof DEP_FIELDS)[number];
-    name: string;
-    spec: DependencySpec;
-  }) => BumpType | false;
+  bumpDep?: (opts: DependentRef) => BumpType | false;
 
   /**
    * What to do when a workspace dependency's version has gone beyond peer dependency constraints:
@@ -423,6 +425,25 @@ function depsPolicy(
   getBumpDepType: NonNullable<NpmPluginOptions["bumpDep"]>,
 ): DraftPolicy {
   const { graph } = context;
+  const dependentMap = new Map<string, DependentRef[]>();
+
+  for (const pkg of graph.getPackages()) {
+    if (!(pkg instanceof NpmPackage)) continue;
+
+    for (const kind of DEP_FIELDS) {
+      const dependencies = pkg.manifest[kind];
+      if (!dependencies) continue;
+
+      for (const [name, range] of Object.entries(dependencies)) {
+        const spec = parseDependencySpec(context, pkg, name, range);
+        if (!spec?.linked) continue;
+
+        const refs = dependentMap.get(spec.linked.id);
+        if (refs) refs.push({ dependent: pkg, kind, name, spec });
+        else dependentMap.set(spec.linked.id, [{ dependent: pkg, kind, name, spec }]);
+      }
+    }
+  }
 
   function needsUpdate(spec: DependencySpec, target: string): boolean {
     if (spec.linked && spec.protocol === "workspace") {
@@ -449,32 +470,28 @@ function depsPolicy(
     id: "npm:deps",
     onUpdate({ pkg, packageDraft: plan }) {
       if (!(pkg instanceof NpmPackage)) return;
+      const deps = dependentMap.get(pkg.id);
+      if (!deps) return;
+
       const group = graph.getPackageGroup(pkg.id);
+      const bumped = plan.bumpVersion(pkg);
+      if (!bumped) return;
 
-      for (const dependent of graph.getPackages()) {
-        if (!(dependent instanceof NpmPackage)) continue;
-
-        for (const field of DEP_FIELDS) {
-          const dependencies = dependent.manifest[field];
-          if (!dependencies) continue;
-
-          for (const [k, v] of Object.entries(dependencies)) {
-            const spec = parseDependencySpec(context, dependent, k, v);
-            if (!spec || spec.linked !== pkg) continue;
-            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
-              // they will always bump together
-              continue;
-            }
-
-            const bumped = plan.bumpVersion(pkg);
-            if (!bumped || !needsUpdate(spec, bumped)) continue;
-
-            const bumpType = getBumpDepType({ kind: field, dependent, spec, name: k });
-            if (bumpType === false) continue;
-
-            this.bumpPackage(dependent, { type: bumpType, reason: `update dependency "${k}"` });
-          }
+      for (const dep of deps) {
+        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+          // they will always bump together
+          continue;
         }
+
+        if (!needsUpdate(dep.spec, bumped)) continue;
+
+        const bumpType = getBumpDepType(dep);
+        if (bumpType === false) continue;
+
+        this.bumpPackage(dep.dependent, {
+          type: bumpType,
+          reason: `update dependency "${dep.name}"`,
+        });
       }
     },
   };

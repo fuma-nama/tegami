@@ -50,6 +50,13 @@ export class PipPackage extends WorkspacePackage {
   }
 }
 
+interface DependentRef {
+  dependent: PipPackage;
+  kind: (typeof DEP_FIELDS)[number];
+  spec: DependencySpec;
+  linked: PipPackage;
+}
+
 export interface PipPluginOptions {
   /**
    * Update lock file after versioning.
@@ -61,12 +68,7 @@ export interface PipPluginOptions {
   /**
    * Decide how to bump the dependents of a bumped package.
    */
-  bumpDep?: (opts: {
-    dependent: PipPackage;
-    kind: (typeof DEP_FIELDS)[number];
-    spec: DependencySpec;
-    linked: PipPackage;
-  }) => BumpType | false;
+  bumpDep?: (opts: DependentRef) => BumpType | false;
 
   /**
    * Named `[[tool.uv.index]]` entry for publishing and publish-status checks.
@@ -238,47 +240,52 @@ function depsPolicy(
     }
   },
 ): DraftPolicy {
+  const dependentMap = new Map<string, DependentRef[]>();
+
+  for (const pkg of graph.getPackages()) {
+    if (!(pkg instanceof PipPackage)) continue;
+
+    for (const { table, kind } of dependencyTables(pkg.manifest)) {
+      for (const rawSpec of table) {
+        const spec = parseDependencySpec(rawSpec);
+        if (!spec) continue;
+
+        const linked = resolveLinkedPackage(graph, pkg, spec);
+        if (!linked) continue;
+
+        const workspace = pkg.manifest.tool?.uv?.sources?.[spec.name]?.workspace === true;
+        if (!workspace) continue;
+
+        const refs = dependentMap.get(linked.id);
+        if (refs) refs.push({ dependent: pkg, kind, spec, linked });
+        else dependentMap.set(linked.id, [{ dependent: pkg, kind, spec, linked }]);
+      }
+    }
+  }
+
   return {
     id: "pip:deps",
     onUpdate({ pkg, packageDraft: plan }) {
       if (!(pkg instanceof PipPackage)) return;
+      const deps = dependentMap.get(pkg.id);
+      if (!deps) return;
+
       const group = graph.getPackageGroup(pkg.id);
+      const bumped = plan.bumpVersion(pkg);
+      if (!bumped) return;
 
-      for (const dependent of graph.getPackages()) {
-        if (!(dependent instanceof PipPackage)) continue;
-
-        for (const { table, kind } of dependencyTables(dependent.manifest)) {
-          for (const rawSpec of table) {
-            const spec = parseDependencySpec(rawSpec);
-            if (!spec) continue;
-
-            const linked = resolveLinkedPackage(graph, dependent, spec);
-            if (!linked || linked !== pkg) continue;
-
-            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
-              continue;
-            }
-
-            const bumped = plan.bumpVersion(pkg);
-            if (!bumped) continue;
-
-            const workspace = dependent.manifest.tool?.uv?.sources?.[spec.name]?.workspace === true;
-            if (!workspace) continue;
-
-            const bumpType = getBumpDepType({
-              kind,
-              dependent,
-              spec,
-              linked,
-            });
-            if (bumpType === false) continue;
-
-            this.bumpPackage(dependent, {
-              type: bumpType,
-              reason: `update dependency "${spec.name}"`,
-            });
-          }
+      for (const dep of deps) {
+        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+          continue;
         }
+
+        const bumpType = getBumpDepType(dep);
+        if (bumpType === false) continue;
+
+        this.bumpPackage(dep.dependent, {
+          type: bumpType,
+          reason: `update dependency "${dep.spec.name}"`,
+        });
       }
     },
   };

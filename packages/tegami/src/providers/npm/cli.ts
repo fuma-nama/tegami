@@ -97,9 +97,7 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
         }
 
         await publishPlaceholder(pkg);
-        console.log(`${pkg.name}: configuring trusted publishing`);
         await npmTrust(context, pkg, options, repo);
-        console.log(`${pkg.name}: configured`);
         lines.push(
           `configured ${pkg.name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
         );

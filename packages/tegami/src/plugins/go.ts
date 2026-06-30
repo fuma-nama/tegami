@@ -110,6 +110,12 @@ export class GoPackage extends WorkspacePackage {
   }
 }
 
+interface DependentRef {
+  dependent: GoPackage;
+  name: string;
+  version: string;
+}
+
 export interface GoPluginOptions {
   /**
    * Run `go work sync` or `go mod tidy` after versioning.
@@ -118,7 +124,7 @@ export interface GoPluginOptions {
    */
   updateLockFile?: boolean;
 
-  bumpDep?: (opts: { dependent: GoPackage; name: string; version: string }) => BumpType | false;
+  bumpDep?: (opts: DependentRef) => BumpType | false;
 }
 
 const packageLockSchema = z.object({
@@ -127,7 +133,7 @@ const packageLockSchema = z.object({
 });
 
 /**
- * Experimental plugin for Golang, the release flow of Golang is pretty special, there's some exceptions for it:
+ * Plugin for Golang, the release flow of Golang is pretty special, there's some exceptions for it:
  *
  * - Version is stored in lock file, normally, it should prefer to store versions in a file like `package.json` & `Cargo.toml`, but for Golang, there is no such file.
  * - Publishing is handed to Git plugin, because Golang uses Git tag for publishing.
@@ -291,33 +297,44 @@ function depsPolicy(
   { graph }: TegamiContext,
   getBumpDepType: GoPluginOptions["bumpDep"] = () => "patch",
 ): DraftPolicy {
+  const dependentMap = new Map<string, DependentRef[]>();
+
+  for (const pkg of graph.getPackages()) {
+    if (!(pkg instanceof GoPackage)) continue;
+
+    for (const [name, version] of pkg.mod.requires) {
+      const id = `go:${name}`;
+      const refs = dependentMap.get(id);
+      if (refs) refs.push({ dependent: pkg, name, version });
+      else dependentMap.set(id, [{ dependent: pkg, name, version }]);
+    }
+  }
+
   return {
     id: "go:deps",
     onUpdate({ pkg, packageDraft: plan }) {
       if (!(pkg instanceof GoPackage)) return;
+      const deps = dependentMap.get(pkg.id);
+      if (!deps) return;
+
       const group = graph.getPackageGroup(pkg.id);
+      const bumped = plan.bumpVersion(pkg);
+      if (!bumped) return;
 
-      for (const dependent of graph.getPackages()) {
-        if (!(dependent instanceof GoPackage)) continue;
-
-        for (const [moduleName, requireVersion] of dependent.mod.requires) {
-          if (pkg.id !== `go:${moduleName}`) continue;
-
-          if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
-            continue;
-          }
-
-          const bumped = plan.bumpVersion(pkg);
-          if (!bumped || semver.satisfies(bumped, stripGoVersion(requireVersion))) continue;
-
-          const bumpType = getBumpDepType?.({ name: pkg.name, dependent, version: requireVersion });
-          if (bumpType === false) continue;
-
-          this.bumpPackage(dependent, {
-            type: bumpType,
-            reason: `update require "${moduleName}"`,
-          });
+      for (const dep of deps) {
+        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+          continue;
         }
+
+        if (semver.satisfies(bumped, stripGoVersion(dep.version))) continue;
+
+        const bumpType = getBumpDepType?.(dep);
+        if (bumpType === false) continue;
+
+        this.bumpPackage(dep.dependent, {
+          type: bumpType,
+          reason: `update require "${dep.name}"`,
+        });
       }
     },
   };

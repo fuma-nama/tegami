@@ -7,7 +7,13 @@ import { x } from "tinyexec";
 const paper = tegami({
   plugins: [
     {
-      name: "auto-format",
+      name: "custom",
+      async willPublish({ pkg }) {
+        console.log("building", pkg.name);
+        await x("pnpm", ["build", "--filter", pkg.name], {
+          throwOnError: true,
+        });
+      },
       async applyCliDraft() {
         await x("pnpm", ["format"], {
           throwOnError: true,

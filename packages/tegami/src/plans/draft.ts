@@ -46,9 +46,16 @@ export const packageStoreSchema = z.object({
 
 type SnapshotMap = Map<string, { version: string | undefined }>;
 
+enum DraftStatus {
+  Ready,
+  Applied,
+  Applying,
+  Failed,
+}
+
 /** a draft describes all operations to perform before the actual publishing, such as version bumps. */
 export class Draft {
-  #applied = false;
+  #status = DraftStatus.Ready;
   /** package id -> draft */
   private readonly packages = new Map<string, PackageDraft>();
   /** id -> changelog */
@@ -153,49 +160,61 @@ export class Draft {
 
   /** Apply version bumps, lock file, and changelog files. */
   async apply(): Promise<void> {
-    if (this.#applied) {
-      throw new Error("This draft has already been applied.");
+    switch (this.#status) {
+      case DraftStatus.Applied:
+        throw new Error("This draft has already been applied.");
+      case DraftStatus.Applying:
+        throw new Error("There is already a previous apply() run.");
+      case DraftStatus.Failed:
+        throw new Error(
+          "The previous apply() run failed, please clear your local git changes and try again.",
+        );
     }
     const { graph } = this.context;
-    this.#applied = true;
 
-    const snapshots: SnapshotMap = new Map();
-    for (const pkg of graph.getPackages()) {
-      snapshots.set(pkg.id, { version: pkg.version });
-    }
-
-    for (const plugin of this.context.plugins) {
-      await handlePluginError(plugin, "applyDraft", () =>
-        plugin.applyDraft?.call(this.context, this),
-      );
-    }
-
-    const updatedChangelogs = this.applyReplays(snapshots);
-    const writes: Awaitable<void>[] = [];
-
-    for (const [id, packageDraft] of this.packages) {
-      const pkg = graph.get(id);
-      if (!pkg) continue;
-      writes.push(this.appendChangelog(pkg, packageDraft));
-    }
-
-    for (const entry of this.changelogs.values()) {
-      const updated = updatedChangelogs.get(entry.id);
-      const filePath = path.join(this.context.changelogDir, entry.filename);
-
-      if (updated) {
-        writes.push(
-          mkdir(this.context.changelogDir, { recursive: true }).then(() =>
-            writeFile(filePath, updated.getRawContent()),
-          ),
-        );
-      } else if (!entry.virtual) {
-        writes.push(rm(filePath, { force: true }));
+    try {
+      const snapshots: SnapshotMap = new Map();
+      for (const pkg of graph.getPackages()) {
+        snapshots.set(pkg.id, { version: pkg.version });
       }
-    }
 
-    writes.push(this.writeLockFile(snapshots));
-    await Promise.all(writes);
+      for (const plugin of this.context.plugins) {
+        await handlePluginError(plugin, "applyDraft", () =>
+          plugin.applyDraft?.call(this.context, this),
+        );
+      }
+
+      const updatedChangelogs = this.applyReplays(snapshots);
+      const writes: Awaitable<void>[] = [];
+
+      for (const [id, packageDraft] of this.packages) {
+        const pkg = graph.get(id);
+        if (!pkg) continue;
+        writes.push(this.appendChangelog(pkg, packageDraft));
+      }
+
+      for (const entry of this.changelogs.values()) {
+        const updated = updatedChangelogs.get(entry.id);
+        const filePath = path.join(this.context.changelogDir, entry.filename);
+
+        if (updated) {
+          writes.push(
+            mkdir(this.context.changelogDir, { recursive: true }).then(() =>
+              writeFile(filePath, updated.getRawContent()),
+            ),
+          );
+        } else if (!entry.virtual) {
+          writes.push(rm(filePath, { force: true }));
+        }
+      }
+
+      writes.push(this.writeLockFile(snapshots));
+      await Promise.all(writes);
+      this.#status = DraftStatus.Applied;
+    } catch (e) {
+      this.#status = DraftStatus.Failed;
+      throw e;
+    }
   }
 
   /** write persistent data to publish lock */
@@ -244,7 +263,7 @@ export class Draft {
   }
 
   canApply() {
-    return !this.#applied;
+    return this.#status === DraftStatus.Ready;
   }
 
   /** Attach replaying changelog entries to packages (already bumped), and return the updated changelog entries. */

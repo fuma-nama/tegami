@@ -19,6 +19,16 @@ vi.mock("tinyexec", () => ({
   x: vi.fn(),
 }));
 
+vi.mock("@clack/prompts", () => ({
+  intro: vi.fn(),
+  note: vi.fn(),
+  outro: vi.fn(),
+  spinner: vi.fn(() => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+  })),
+}));
+
 const tempDirs: string[] = [];
 const exec = vi.mocked(x);
 

@@ -56,6 +56,13 @@ export class CargoPackage extends WorkspacePackage {
   }
 }
 
+interface DependentRef {
+  dependent: CargoPackage;
+  kind: (typeof DEP_FIELDS)[number];
+  name: string;
+  version: string;
+}
+
 export interface CargoPluginOptions {
   /**
    * Update lock file after versioning.
@@ -67,12 +74,7 @@ export interface CargoPluginOptions {
   /**
    * Decide how to bump the dependents of a bumped package.
    */
-  bumpDep?: (opts: {
-    dependent: CargoPackage;
-    kind: (typeof DEP_FIELDS)[number];
-    name: string;
-    version: string;
-  }) => BumpType | false;
+  bumpDep?: (opts: DependentRef) => BumpType | false;
 }
 
 export function cargo({
@@ -226,43 +228,51 @@ function depsPolicy(
     }
   },
 ): DraftPolicy {
+  const dependentMap = new Map<string, DependentRef[]>();
+
+  for (const pkg of graph.getPackages()) {
+    if (!(pkg instanceof CargoPackage)) continue;
+
+    for (const { table, kind } of dependencyTables(pkg.manifest, "")) {
+      for (const [rawName, rawSpec] of Object.entries(table)) {
+        const spec = parseSpec(rawSpec);
+        if (!spec || !semver.validRange(spec.version)) continue;
+
+        const name = spec.package ?? rawName;
+        const id = `cargo:${name}`;
+        const refs = dependentMap.get(id);
+        if (refs) refs.push({ dependent: pkg, kind, name, version: spec.version });
+        else dependentMap.set(id, [{ dependent: pkg, kind, name, version: spec.version }]);
+      }
+    }
+  }
+
   return {
     id: "cargo:deps",
     onUpdate({ pkg, packageDraft: plan }) {
       if (!(pkg instanceof CargoPackage)) return;
+      const deps = dependentMap.get(pkg.id);
+      if (!deps) return;
+
       const group = graph.getPackageGroup(pkg.id);
+      const bumped = plan.bumpVersion(pkg);
+      if (!bumped) return;
 
-      for (const dependent of graph.getPackages()) {
-        if (!(dependent instanceof CargoPackage)) continue;
-
-        for (const { table, kind } of dependencyTables(dependent.manifest, "")) {
-          for (const [rawName, rawSpec] of Object.entries(table)) {
-            const spec = parseSpec(rawSpec);
-            if (!spec || !semver.validRange(spec.version)) continue;
-            if (pkg.id !== `cargo:${spec.package ?? rawName}`) continue;
-
-            if (group?.options.syncBump && graph.getPackageGroup(dependent.id) === group) {
-              // they will always bump together
-              continue;
-            }
-
-            const bumped = plan.bumpVersion(pkg);
-            if (!bumped || semver.satisfies(bumped, spec.version)) continue;
-
-            const bumpType = getBumpDepType({
-              kind,
-              dependent,
-              name: pkg.name,
-              version: spec.version,
-            });
-            if (bumpType === false) continue;
-
-            this.bumpPackage(dependent, {
-              type: bumpType,
-              reason: `update dependency "${rawName}"`,
-            });
-          }
+      for (const dep of deps) {
+        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+          // they will always bump together
+          continue;
         }
+
+        if (semver.satisfies(bumped, dep.version)) continue;
+
+        const bumpType = getBumpDepType(dep);
+        if (bumpType === false) continue;
+
+        this.bumpPackage(dep.dependent, {
+          type: bumpType,
+          reason: `update dependency "${dep.name}"`,
+        });
       }
     },
   };
