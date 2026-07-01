@@ -15,6 +15,7 @@ const uvSchema = z.object({
   workspace: z
     .object({
       members: z.array(z.string()).optional(),
+      exclude: z.array(z.string()).optional(),
     })
     .optional(),
   sources: z.record(z.string(), uvSourceSchema).optional(),
@@ -30,7 +31,7 @@ const pyprojectProjectSchema = z.object({
 });
 
 export const pyprojectManifestSchema = z.object({
-  project: pyprojectProjectSchema,
+  project: pyprojectProjectSchema.optional(),
   "dependency-groups": z.record(z.string(), z.array(z.string())).optional(),
   tool: z
     .object({
@@ -41,6 +42,7 @@ export const pyprojectManifestSchema = z.object({
 
 export type PyprojectManifest = z.infer<typeof pyprojectManifestSchema>;
 export type UvIndex = z.infer<typeof uvIndexSchema>;
+export type UvSource = z.infer<typeof uvSourceSchema>;
 
 export const simpleIndexProjectSchema = z.object({
   files: z.array(z.object({ filename: z.string() })).optional(),
