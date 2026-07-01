@@ -134,6 +134,9 @@ export interface TegamiPlugin {
     opts: { pkg: WorkspacePackage; plan: PublishPlan },
   ): Awaitable<PublishPreflight | void | undefined>;
 
+  /** Called when all preflights finished */
+  afterPreflight?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
+
   /** Publish package, return a result object indicating if the package is published, skipped, or failed. Return `undefined` if the package is not handled by this plugin. */
   publish?(
     this: TegamiContext,

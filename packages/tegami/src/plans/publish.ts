@@ -211,36 +211,34 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
 export async function runPreflights(context: TegamiContext, plan: PublishPlan): Promise<void> {
   const promises: Promise<void>[] = [];
 
-  const runPreflight = async (pkg: WorkspacePackage): Promise<PublishPreflight> => {
-    for (const plugin of context.plugins) {
-      const res = await handlePluginError(plugin, "publishPreflight", () =>
-        plugin.publishPreflight?.call(context, { pkg, plan }),
-      );
-
-      if (res) return res;
-    }
-
-    return {
-      shouldPublish: false,
-    };
-  };
-
   for (const [id, packagePlan] of plan.packages) {
     const pkg = context.graph.get(id)!;
 
-    if (!packagePlan.updated) {
-      packagePlan.preflight = { shouldPublish: false };
-      continue;
-    }
+    packagePlan.preflight = { shouldPublish: false };
+    if (!packagePlan.updated) continue;
 
     promises.push(
-      runPreflight(pkg).then((preflight) => {
-        packagePlan.preflight = preflight;
-      }),
+      (async () => {
+        for (const plugin of context.plugins) {
+          const res = await handlePluginError(plugin, "publishPreflight", () =>
+            plugin.publishPreflight?.call(context, { pkg, plan }),
+          );
+
+          if (res) {
+            packagePlan.preflight = res;
+            break;
+          }
+        }
+      })(),
     );
   }
 
   await Promise.all(promises);
+  for (const plugin of context.plugins) {
+    await handlePluginError(plugin, "afterPreflight", () =>
+      plugin.afterPreflight?.call(context, { plan }),
+    );
+  }
 }
 
 export async function publishPlanStatus(

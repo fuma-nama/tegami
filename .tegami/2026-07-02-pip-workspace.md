@@ -1,6 +1,6 @@
 ---
 packages:
-  "npm:tegami-pip": patch
+  "npm:@tegami/pip": patch
 ---
 
 ### Align pip workspace handling with uv
