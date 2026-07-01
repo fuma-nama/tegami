@@ -175,6 +175,9 @@ export interface TegamiPlugin {
 }
 
 export type Awaitable<T> = T | Promise<T>;
+export type RequireFields<Obj, K extends keyof Obj> = Obj & {
+  [R in K]-?: NonNullable<Obj[R]>;
+};
 
 export interface PublishPreflight {
   /**

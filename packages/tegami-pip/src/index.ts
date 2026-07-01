@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join, normalize, resolve } from "node:path";
+import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import { satisfies, validRange } from "@renovatebot/pep440";
@@ -38,7 +38,7 @@ export class PipPackage extends WorkspacePackage {
   }
 
   async write(): Promise<void> {
-    await writeFile(join(this.path, "pyproject.toml"), this.content + "\n");
+    await writeFile(path.join(this.path, "pyproject.toml"), this.content + "\n");
   }
 
   patch(path: string, value: unknown): void {
@@ -303,9 +303,11 @@ function resolveLinkedPackage(
   let absolute: string;
 
   if (source?.path) {
-    absolute = resolve(pkg.path, source.path);
+    absolute = path.resolve(pkg.path, source.path);
   } else if ("url" in spec && spec.url.startsWith("file:")) {
-    absolute = fileURLToPath(new URL(spec.url, pathToFileURL(join(pkg.path, "pyproject.toml"))));
+    absolute = fileURLToPath(
+      new URL(spec.url, pathToFileURL(path.join(pkg.path, "pyproject.toml"))),
+    );
   } else {
     return;
   }
@@ -318,11 +320,14 @@ function resolveLinkedPackage(
     );
 }
 
-async function buildEntry(path: string) {
+async function buildEntry(dir: string) {
   try {
-    path = normalize(path);
-    const content = await readFile(join(path, "pyproject.toml"), "utf8");
-    return { manifest: pyprojectManifestSchema.parse(parse(content)), content, path };
+    const content = await readFile(path.join(dir, "pyproject.toml"), "utf8");
+    return {
+      manifest: pyprojectManifestSchema.parse(parse(content)),
+      content,
+      path: dir.endsWith(path.sep) ? dir.slice(0, -1) : dir,
+    };
   } catch {
     return;
   }

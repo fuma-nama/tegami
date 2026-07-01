@@ -5,7 +5,7 @@ import { initSync, parse } from "@rainbowatcher/toml-edit-js";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
-import { cargo } from "../src/plugins/cargo";
+import { cargo, CargoPackage } from "../src/plugins/cargo";
 import { cargoManifestSchema } from "../src/plugins/cargo/schema";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
@@ -264,7 +264,110 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     await expect(withCargo({ cwd }).publish()).rejects.toThrow(/circular reference of deps/);
   });
 
-  test("includes cargo crates without a version field in the graph", async () => {
+  test("resolves workspace-inherited package versions", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-workspace-version-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "crates/lib"), { recursive: true });
+    await writeFile(
+      join(cwd, "Cargo.toml"),
+      `[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+`,
+    );
+    await writeFile(
+      join(cwd, "crates/lib/Cargo.toml"),
+      `[package]
+name = "acme_lib"
+version.workspace = true
+`,
+    );
+
+    const graph = (await withCargo({ cwd })._internal.context()).graph;
+    const pkg = graph.get("cargo:acme_lib");
+
+    expect(pkg).toBeDefined();
+    expect(pkg!.version).toBe("1.0.0");
+  });
+
+  test("bumps workspace.package.version for inherited member versions", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-workspace-bump-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "crates/lib"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "Cargo.toml"),
+      `[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+`,
+    );
+    await writeFile(
+      join(cwd, "crates/lib/Cargo.toml"),
+      `[package]
+name = "acme_lib"
+version.workspace = true
+`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["acme_lib"]
+---
+
+## Workspace release
+
+Bump the shared workspace version.
+`,
+    );
+
+    await withCargo({ cwd })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const root = await readCargo(cwd);
+    const member = await readCargo(join(cwd, "crates/lib"));
+
+    expect(table(root.workspace)?.package).toEqual({ version: "1.1.0" });
+    expect(table(member.package)?.version).toEqual({ workspace: true });
+  });
+
+  test("inherits publish = { workspace = true } from workspace.package", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-workspace-publish-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "crates/lib"), { recursive: true });
+    await writeFile(
+      join(cwd, "Cargo.toml"),
+      `[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+publish = false
+`,
+    );
+    await writeFile(
+      join(cwd, "crates/lib/Cargo.toml"),
+      `[package]
+name = "acme_lib"
+version.workspace = true
+publish.workspace = true
+`,
+    );
+
+    const pkg = (await withCargo({ cwd })._internal.context()).graph.get(
+      "cargo:acme_lib",
+    ) as CargoPackage;
+
+    expect(pkg.manifest.package.publish).toEqual({ workspace: true });
+    expect(pkg.workspaceFile?.data.workspace?.package?.publish).toBe(false);
+  });
+
+  test("excludes member manifests without a version from the graph", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-no-version-"));
     tempDirs.push(cwd);
     await mkdir(join(cwd, "crates/lib"), { recursive: true });
@@ -289,16 +392,103 @@ name = "acme_lib"
     const graph = (await withCargo({ cwd })._internal.context()).graph;
     const pkg = graph.get("cargo:acme_lib");
 
-    expect(pkg).toBeDefined();
-    expect(pkg!.version).toBeUndefined();
+    expect(pkg).toBeUndefined();
+  });
+
+  test("does not include virtual workspace roots without a package section", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cargo-virtual-workspace-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "crates/lib"), { recursive: true });
+    await writeFile(
+      join(cwd, "Cargo.toml"),
+      `[workspace]
+members = ["crates/*"]
+`,
+    );
+    await writeFile(
+      join(cwd, "crates/lib/Cargo.toml"),
+      `[package]
+name = "acme_lib"
+version = "1.0.0"
+`,
+    );
+
+    const graph = (await withCargo({ cwd })._internal.context()).graph;
+    const packages = graph.getPackages().map((pkg) => ({
+      manager: pkg.manager,
+      name: pkg.name,
+    }));
+
+    expect(packages).toEqual([{ manager: "cargo", name: "acme_lib" }]);
   });
 });
 
 describe("cargo manifest schema", () => {
-  test("requires a package section", () => {
-    expect(() =>
-      cargoManifestSchema.parse(parse(`[workspace]\nmembers = ["crates/*"]\n`)),
-    ).toThrow();
+  test("accepts virtual workspace roots without a package section", () => {
+    const manifest = cargoManifestSchema.parse(parse(`[workspace]\nmembers = ["crates/*"]\n`));
+
+    expect(manifest.package).toBeUndefined();
+    expect(manifest.workspace?.members).toEqual(["crates/*"]);
+  });
+
+  test("accepts workspace-inherited package fields", () => {
+    const manifest = cargoManifestSchema.parse(
+      parse(`[package]
+name = "acme_lib"
+version.workspace = true
+publish.workspace = true
+`),
+    );
+
+    expect(manifest.package?.version).toEqual({ workspace: true });
+    expect(manifest.package?.publish).toEqual({ workspace: true });
+  });
+
+  test("accepts workspace dependency table fields", () => {
+    const manifest = cargoManifestSchema.parse(
+      parse(`[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+serde = "1.0"
+acme_core = { path = "crates/core", version = "1.0.0" }
+
+[package]
+name = "acme_app"
+version = "1.0.0"
+
+[dependencies]
+serde = { workspace = true }
+acme_core = { workspace = true }
+`),
+    );
+
+    expect(manifest.workspace?.dependencies?.serde).toBe("1.0");
+    expect(manifest.dependencies?.serde).toEqual({ workspace: true });
+  });
+
+  test("accepts dependency format unions", () => {
+    expect(
+      cargoManifestSchema.parse(
+        parse(`[package]
+name = "demo"
+version = "1.0.0"
+
+[dependencies]
+a = "1"
+b = { workspace = true }
+c = { path = "../lib" }
+d = { git = "https://example.com/repo.git", rev = "abc" }
+e = { version = "2", registry = "my-registry" }
+`),
+      ).dependencies,
+    ).toEqual({
+      a: "1",
+      b: { workspace: true },
+      c: { path: "../lib" },
+      d: { git: "https://example.com/repo.git", rev: "abc" },
+      e: { version: "2", registry: "my-registry" },
+    });
   });
 
   test("accepts workspace roots with a virtual package section", () => {

@@ -5,6 +5,7 @@ import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
 import type { AgentName } from "package-manager-detector";
 import type { GitLabToken } from "./plugins/gitlab/api";
+import type { CargoGraph } from "./plugins/cargo";
 
 export interface TegamiContext {
   /** absolute path */
@@ -32,6 +33,9 @@ export interface TegamiContext {
   /** additional context when npm plugin is configured */
   npm?: {
     client: AgentName;
+  };
+  cargo?: {
+    graph: CargoGraph;
   };
 }
 

@@ -156,8 +156,6 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   }
   groups.sort((a, b) => (a[1] ? 0 : 1) - (b[1] ? 0 : 1));
   for (const [group, changed] of groups) {
-    if (changed) initialValues.add(`group:${group.name}`);
-
     selectOptions.push({
       label: `(Group) ${group.name}` + (changed ? "*" : ""),
       value: `group:${group.name}`,

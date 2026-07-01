@@ -1,12 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join, normalize } from "node:path";
+import path from "node:path";
 import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
-import type { Awaitable, TegamiPlugin } from "../types";
+import type { RequireFields, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
@@ -14,53 +14,68 @@ import { cargoManifestSchema, type CargoDependency, type CargoManifest } from ".
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 
+interface CargoToml<Data extends CargoManifest = CargoManifest> {
+  path: string;
+  content: string;
+  data: Data;
+}
+
 export class CargoPackage extends WorkspacePackage {
   readonly manager = "cargo";
+  readonly manifest: RequireFields<CargoManifest, "package">;
 
   constructor(
     readonly path: string,
-    readonly manifest: CargoManifest,
-    private content: string,
-    private readonly workspaceManifest?: CargoManifest,
+    /** a crate must have `package` field defined, otherwise it is merely a virutal workspace file, and Tegami should not include it. */
+    readonly file: CargoToml<RequireFields<CargoManifest, "package">>,
+    readonly workspaceFile?: CargoToml<RequireFields<CargoManifest, "workspace">>,
   ) {
     super();
+    this.manifest = file.data;
   }
 
   get name(): string {
-    return this.packageInfo.name;
+    return this.manifest.package.name;
   }
 
-  get version() {
-    return this.packageInfo.version ?? this.workspaceVersion;
+  get version(): string {
+    const packageVersion = this.manifest.package.version;
+    if (typeof packageVersion === "string") return packageVersion;
+
+    const inherited = this.workspaceFile?.data.workspace.package;
+    if (packageVersion.workspace && inherited?.version) return inherited.version;
+    throw new Error(`Invalid Cargo.toml in "${this.path}".`);
   }
 
   setVersion(version: string): void {
-    this.packageInfo.version = version;
-    this.patch("package.version", version);
-  }
+    const packageInfo = this.manifest.package;
 
-  async write(): Promise<void> {
-    await writeFile(join(this.path, "Cargo.toml"), this.content + "\n");
-  }
+    if (typeof packageInfo.version === "string") {
+      packageInfo.version = version;
+      patchFile(this.file, "package.version", version);
+      return;
+    }
 
-  patch(path: string, value: unknown): void {
-    this.content = edit(this.content, path, value);
-  }
+    if (packageInfo.version.workspace && this.workspaceFile?.data.workspace.package) {
+      this.workspaceFile.data.workspace.package.version = version;
+      patchFile(this.workspaceFile, "workspace.package.version", version);
+      return;
+    }
 
-  get packageInfo() {
-    return this.manifest.package;
+    throw new Error(`Invalid Cargo.toml in "${this.path}".`);
   }
+}
 
-  private get workspaceVersion(): string | undefined {
-    return this.workspaceManifest?.workspace?.package?.version;
-  }
+function patchFile(file: CargoToml, path: string, value: unknown): void {
+  file.content = edit(file.content, path, value);
 }
 
 interface DependentRef {
   dependent: CargoPackage;
   kind: (typeof DEP_FIELDS)[number];
   name: string;
-  version: string;
+  spec: CargoDependency;
+  version?: string;
 }
 
 export interface CargoPluginOptions {
@@ -81,8 +96,6 @@ export function cargo({
   updateLockFile = true,
   bumpDep: getBumpDepType,
 }: CargoPluginOptions = {}): TegamiPlugin {
-  let active = false;
-
   return {
     name: "cargo",
     enforce: "pre",
@@ -90,43 +103,53 @@ export function cargo({
       await initToml();
     },
     async resolve() {
-      await discoverCargoPackages(this.cwd, (pkg) => this.graph.add(pkg));
-      active = this.graph.getPackages().some((pkg) => pkg instanceof CargoPackage);
+      const graph = await resolveCargoGraph(this.cwd);
+      if (graph.packages.size === 0) return;
+
+      this.cargo = { graph };
+      for (const pkg of graph.packages.values()) this.graph.add(pkg);
     },
     initDraft(plan) {
-      if (!active) return;
+      if (!this.cargo) return;
       plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async publishPreflight({ pkg }) {
-      if (!(pkg instanceof CargoPackage)) return;
+      if (!(pkg instanceof CargoPackage) || !this.cargo) return;
+      let shouldPublish = true;
+
+      if (typeof pkg.manifest.package.publish === "boolean") {
+        shouldPublish = pkg.manifest.package.publish;
+      } else if (pkg.manifest.package.publish?.workspace) {
+        shouldPublish = pkg.workspaceFile?.data.workspace?.package?.publish ?? shouldPublish;
+      }
 
       const wait: string[] = [];
 
-      for (const { table } of dependencyTables(pkg.manifest, "")) {
-        for (const [rawName, dep] of Object.entries(table)) {
-          if (!dep || typeof dep === "string" || !dep.path) continue;
+      for (const { table, tablePath } of dependencyTables(pkg.manifest)) {
+        for (const [rawName, spec] of Object.entries(table)) {
+          const resolved = resolveLinkedDep(
+            pkg.workspaceFile,
+            pkg.file,
+            this.cargo.graph,
+            tablePath,
+            rawName,
+            spec,
+          );
+          if (!resolved) continue;
 
-          const packageName = dep.package ?? rawName;
-          const id = `cargo:${packageName}`;
-          const linked = this.graph.get(id);
-          if (!linked || !(linked instanceof CargoPackage)) continue;
-
-          wait.push(id);
+          wait.push(resolved.linked.id);
         }
       }
 
-      return {
-        shouldPublish: pkg.version !== undefined && pkg.packageInfo.publish !== false,
-        wait,
-      };
+      return { shouldPublish, wait };
     },
     resolvePlanStatus({ plan }) {
-      if (!active) return;
+      if (!this.cargo) return;
 
       return Array.from(plan.packages, async ([id, { preflight }]) => {
         if (!preflight!.shouldPublish) return;
         const pkg = this.graph.get(id)!;
-        if (!(pkg instanceof CargoPackage) || !pkg.version) return;
+        if (!(pkg instanceof CargoPackage)) return;
         if (!(await isPackagePublished(pkg.name, pkg.version))) return "pending";
       });
     },
@@ -155,58 +178,53 @@ export function cargo({
       };
     },
     async applyDraft(draft) {
-      if (!active) return;
+      if (!this.cargo) return;
+      const graph = this.cargo.graph;
 
-      const { graph } = this;
-      const writes: Awaitable<void>[] = [];
-
-      for (const pkg of graph.getPackages()) {
-        if (!(pkg instanceof CargoPackage)) continue;
-
+      for (const pkg of graph.packages.values()) {
         const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
         if (bumped) pkg.setVersion(bumped);
       }
 
-      for (const pkg of graph.getPackages()) {
-        if (!(pkg instanceof CargoPackage)) continue;
-
-        for (const { table, path: tablePath } of dependencyTables(pkg.manifest, "")) {
-          for (const [rawName, rawSpec] of Object.entries(table)) {
-            const spec = parseSpec(rawSpec);
-            // Ignore invalid range
-            if (!spec || !semver.validRange(spec.version)) continue;
-
-            const packageName = spec.package ?? rawName;
-            const linked = graph.get(`cargo:${packageName}`);
-            if (!linked || !(linked instanceof CargoPackage)) continue;
-            if (!linked.version || semver.satisfies(linked.version, spec.version)) continue;
+      for (const pkg of graph.packages.values()) {
+        for (const { table, tablePath } of dependencyTables(pkg.manifest)) {
+          for (const [rawName, spec] of Object.entries(table)) {
+            const resolved = resolveLinkedDep(
+              pkg.workspaceFile,
+              pkg.file,
+              graph,
+              tablePath,
+              rawName,
+              spec,
+            );
+            if (
+              !resolved ||
+              !resolved.range ||
+              !resolved.setRange ||
+              semver.satisfies(resolved.linked.version, resolved.range)
+            )
+              continue;
 
             let updatedRange: string;
-            if (spec.version.startsWith("^")) {
-              updatedRange = `^${linked.version}`;
-            } else if (spec.version.startsWith("~")) {
-              updatedRange = `~${linked.version}`;
+            if (resolved.range.startsWith("^")) {
+              updatedRange = `^${resolved.linked.version}`;
+            } else if (resolved.range.startsWith("~")) {
+              updatedRange = `~${resolved.linked.version}`;
             } else {
-              updatedRange = linked.version;
+              updatedRange = resolved.linked.version;
             }
 
-            table[rawName] = spec.setVersion(updatedRange);
-            pkg.patch(
-              typeof rawSpec === "string"
-                ? `${tablePath}.${rawName}`
-                : `${tablePath}.${rawName}.version`,
-              updatedRange,
-            );
+            table[rawName] = resolved.setRange(updatedRange);
           }
         }
-
-        writes.push(pkg.write());
       }
 
-      await Promise.all(writes);
+      await Promise.all(
+        Array.from(graph.files.values(), (file) => writeFile(file.path, file.content + "\n")),
+      );
     },
     async applyCliDraft() {
-      if (!active || !updateLockFile) return;
+      if (!this.cargo || !updateLockFile) return;
       const result = await x("cargo", ["update", "--workspace"], {
         nodeOptions: { cwd: this.cwd },
       });
@@ -219,7 +237,7 @@ export function cargo({
 }
 
 function depsPolicy(
-  { graph }: TegamiContext,
+  { graph, cargo }: TegamiContext,
   getBumpDepType: CargoPluginOptions["bumpDep"] = ({ kind }) => {
     switch (kind) {
       case "dependencies":
@@ -230,21 +248,28 @@ function depsPolicy(
     }
   },
 ): DraftPolicy {
+  const cargoGraph = cargo!.graph;
   const dependentMap = new Map<string, DependentRef[]>();
 
-  for (const pkg of graph.getPackages()) {
-    if (!(pkg instanceof CargoPackage)) continue;
+  for (const pkg of cargoGraph.packages.values()) {
+    for (const { table, tablePath } of dependencyTables(pkg.manifest)) {
+      for (const [name, spec] of Object.entries(table)) {
+        const resolved = resolveLinkedDep(
+          pkg.workspaceFile,
+          pkg.file,
+          cargoGraph,
+          tablePath,
+          name,
+          spec,
+        );
+        if (!resolved) continue;
 
-    for (const { table, kind } of dependencyTables(pkg.manifest, "")) {
-      for (const [rawName, rawSpec] of Object.entries(table)) {
-        const spec = parseSpec(rawSpec);
-        if (!spec || !semver.validRange(spec.version)) continue;
-
-        const name = spec.package ?? rawName;
-        const id = `cargo:${name}`;
+        const id = resolved.linked.id;
         const refs = dependentMap.get(id);
-        if (refs) refs.push({ dependent: pkg, kind, name, version: spec.version });
-        else dependentMap.set(id, [{ dependent: pkg, kind, name, version: spec.version }]);
+        const kind = tablePath.at(-1) as (typeof DEP_FIELDS)[number];
+
+        if (refs) refs.push({ dependent: pkg, kind, name, spec, version: resolved.range });
+        else dependentMap.set(id, [{ dependent: pkg, kind, name, spec, version: resolved.range }]);
       }
     }
   }
@@ -266,14 +291,14 @@ function depsPolicy(
           continue;
         }
 
-        if (semver.satisfies(bumped, dep.version)) continue;
+        if (dep.version && semver.satisfies(bumped, dep.version)) continue;
 
         const bumpType = getBumpDepType(dep);
         if (bumpType === false) continue;
 
         this.bumpPackage(dep.dependent, {
           type: bumpType,
-          reason: `update dependency "${dep.name}"`,
+          reason: `update dependency "${pkg.name}"`,
         });
       }
     },
@@ -292,32 +317,58 @@ async function isPackagePublished(name: string, version: string) {
   );
 }
 
-async function buildEntry(path: string) {
+async function buildEntry(dir: string): Promise<CargoToml | undefined> {
   try {
-    const content = await readFile(join(path, "Cargo.toml"), "utf8");
-    return { manifest: cargoManifestSchema.parse(parse(content)), content, path };
+    const filePath = path.join(dir, "Cargo.toml");
+    const content = await readFile(filePath, "utf8");
+    return {
+      path: filePath,
+      data: cargoManifestSchema.parse(parse(content)),
+      content,
+    };
   } catch {
     return;
   }
 }
 
-async function discoverCargoPackages(cwd: string, add: (pkg: CargoPackage) => void): Promise<void> {
+export interface CargoGraph {
+  /** path -> Cargo.toml */
+  files: Map<string, CargoToml>;
+  /** name -> package */
+  packages: Map<string, CargoPackage>;
+}
+
+async function resolveCargoGraph(cwd: string): Promise<CargoGraph> {
+  const out: CargoGraph = {
+    packages: new Map(),
+    files: new Map(),
+  };
   const root = await buildEntry(cwd);
-  if (!root) return;
+  if (!root) return out;
 
-  if (root.manifest.package?.name)
-    add(new CargoPackage(cwd, root.manifest, root.content, root.manifest));
+  const rootWorkspace = root.data.workspace;
+  out.files.set(root.path, root);
 
-  const workspace = root.manifest.workspace;
-  if (!workspace?.members) return;
-
-  const paths = await expandWorkspaceMembers(cwd, workspace.members, workspace.exclude);
-  const manifests = await Promise.all(paths.map(buildEntry));
-
-  for (const entry of manifests) {
-    if (entry?.manifest.package?.name)
-      add(new CargoPackage(entry.path, entry.manifest, entry.content, root.manifest));
+  if (root.data.package) {
+    const pkg = new CargoPackage(cwd, root as never, rootWorkspace ? (root as never) : undefined);
+    out.packages.set(pkg.name, pkg);
   }
+
+  if (!rootWorkspace || !rootWorkspace.members) return out;
+
+  const dirs = await expandWorkspaceMembers(cwd, rootWorkspace.members, rootWorkspace.exclude);
+  await Promise.all(
+    dirs.map(async (dir) => {
+      const entry = await buildEntry(dir);
+      if (!entry || !entry.data.package) return;
+
+      const pkg = new CargoPackage(dir, entry as never, root as never);
+      out.files.set(entry.path, entry);
+      out.packages.set(pkg.name, pkg);
+    }),
+  );
+
+  return out;
 }
 
 async function expandWorkspaceMembers(
@@ -325,46 +376,41 @@ async function expandWorkspaceMembers(
   members: string[],
   exclude: string[] = [],
 ): Promise<string[]> {
-  const paths = members.includes(".") ? [cwd] : [];
   const patterns = members.filter((member) => member !== ".");
+  if (patterns.length === 0) return [];
 
-  if (patterns.length > 0) {
-    paths.push(
-      ...(await glob(patterns, {
-        absolute: true,
-        cwd,
-        ignore: ["**/target/**", ...exclude],
-        onlyDirectories: true,
-        onlyFiles: false,
-      })),
-    );
-  }
+  const results = await glob(patterns, {
+    absolute: true,
+    cwd,
+    ignore: ["**/target/**", ...exclude],
+    onlyDirectories: true,
+    onlyFiles: false,
+  });
 
-  return paths.map(normalize);
+  return results.map((item) => {
+    return item.endsWith(path.sep) ? item.slice(0, -1) : item;
+  });
 }
 
-function dependencyTables(manifest: CargoManifest, prefix: string) {
+function dependencyTables(manifest: CargoManifest, prefix: string[] = []) {
   const tables: {
-    kind: (typeof DEP_FIELDS)[number];
     table: Record<string, CargoDependency>;
-    path: string;
+    tablePath: [...string[], (typeof DEP_FIELDS)[number]];
   }[] = [];
 
   for (const field of DEP_FIELDS) {
     const table = manifest[field];
-    if (table) {
-      const path = prefix ? `${prefix}.${field}` : field;
-      tables.push({ kind: field, table, path });
-    }
+    if (!table) continue;
+    tables.push({ table, tablePath: [...prefix, field] });
   }
 
   const target = manifest.target;
   if (target) {
     for (const [targetKey, targetConfig] of Object.entries(target)) {
-      const targetPath = prefix ? `${prefix}.target.${targetKey}` : `target.${targetKey}`;
       for (const field of DEP_FIELDS) {
         const table = targetConfig[field];
-        if (table) tables.push({ kind: field, table, path: `${targetPath}.${field}` });
+        if (!table) continue;
+        tables.push({ table, tablePath: [...prefix, "target", targetKey, field] });
       }
     }
   }
@@ -372,21 +418,85 @@ function dependencyTables(manifest: CargoManifest, prefix: string) {
   return tables;
 }
 
-function parseSpec(v: CargoDependency) {
-  if (typeof v === "string") {
+function resolveLinkedDep(
+  workspaceFile: CargoToml | undefined,
+  file: CargoToml,
+  graph: CargoGraph,
+  tablePath: [...string[], (typeof DEP_FIELDS)[number]],
+  rawName: string,
+  spec: CargoDependency,
+):
+  | {
+      linked: CargoPackage;
+      range?: string;
+      setRange?: (v: string) => CargoDependency;
+    }
+  | undefined {
+  if (typeof spec === "string") {
+    const linked = graph.packages.get(rawName);
+    if (!linked) return;
+
     return {
-      version: v,
-      setVersion(version: string) {
-        return version;
+      linked,
+      range: spec,
+      setRange(v) {
+        patchFile(file, [...tablePath, rawName].join("."), v);
+        return v;
       },
     };
   }
 
+  if ("git" in spec) return;
+
+  if ("workspace" in spec) {
+    const kind = tablePath[tablePath.length - 1] as (typeof DEP_FIELDS)[number];
+    const entry = workspaceFile?.data.workspace?.[kind]?.[rawName];
+    if (!entry) return;
+    const resolved = resolveLinkedDep(
+      undefined,
+      workspaceFile,
+      graph,
+      ["workspace", kind],
+      rawName,
+      entry,
+    );
+    if (!resolved || !resolved.setRange) return resolved;
+
+    return {
+      ...resolved,
+      setRange(v) {
+        workspaceFile.data.workspace![kind]![rawName] = resolved.setRange!(v);
+        return spec;
+      },
+    };
+  }
+
+  if ("path" in spec) {
+    const pkgPath = path.resolve(path.dirname(file.path), spec.path);
+
+    for (const pkg of graph.packages.values()) {
+      if (pkg.path !== pkgPath) continue;
+      return {
+        linked: pkg,
+        range: spec.version,
+        setRange(v) {
+          patchFile(file, [...tablePath, rawName, "version"].join("."), v);
+          return { ...spec, version: v };
+        },
+      };
+    }
+    return;
+  }
+
+  const linked = graph.packages.get(spec.package ?? rawName);
+  if (!linked) return;
+
   return {
-    package: v.package,
-    version: v.version,
-    setVersion(version: string) {
-      return { ...v, version };
+    linked,
+    range: spec.version,
+    setRange(v) {
+      patchFile(file, [...tablePath, rawName, "version"].join("."), v);
+      return { ...spec, version: v };
     },
   };
 }
