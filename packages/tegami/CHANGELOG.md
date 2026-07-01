@@ -1,3 +1,13 @@
+## tegami@1.0.2
+
+### Handle Cargo workspace semantics
+
+Tegami can now handle more advanced workspace inheritance usages.
+
+### Support `afterPreflight` hook
+
+Hook when all preflights finished.
+
 ## tegami@1.0.0
 
 ### Make Cargo plugin opt-in
