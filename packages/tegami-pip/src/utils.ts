@@ -1,4 +1,5 @@
 import { RANGE_PATTERN } from "@renovatebot/pep440";
+import { joinPath } from "tegami/utils";
 import { simpleIndexProjectSchema } from "./schema";
 
 const COMPARATOR = new RegExp(`^${RANGE_PATTERN}$`, "i");
@@ -31,8 +32,7 @@ export async function isPackagePublished(
   version: string,
   indexUrl: string,
 ) {
-  const base = indexUrl.endsWith("/") ? indexUrl : `${indexUrl}/`;
-  const response = await fetch(`${base}${encodeURIComponent(normalizedName)}/`, {
+  const response = await fetch(joinPath(indexUrl, encodeURIComponent(normalizedName), "/"), {
     headers: { Accept: "application/vnd.pypi.simple.v1+json" },
   });
 

@@ -1,0 +1,65 @@
+---
+title: Dart
+description: Dart pub workspace support and pub.dev publishing.
+---
+
+The Dart plugin discovers official pub workspace members from `pubspec.yaml`, bumps versions, updates workspace dependency ranges, and publishes with `dart pub publish`.
+
+```npm
+npm install @tegami/dart
+```
+
+```ts
+import { tegami } from "tegami";
+import { dart } from "@tegami/dart";
+
+const paper = tegami({
+  plugins: [dart()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+[`dart`](https://dart.dev/get-dart) must be available in CI and your repository must use official pub workspaces.
+
+</Callout>
+
+## Discovery
+
+Tegami reads the root `pubspec.yaml` and expands its `workspace` entries. Nested official workspaces are included through their own `workspace` entries.
+
+Packages need a `name` in `pubspec.yaml`. Packages without a `version`, or packages with `publish_to: none`, are skipped during publishing.
+
+## Dependency Bumping
+
+Tegami treats dependencies whose names match another Dart workspace package as workspace dependencies.
+
+| Dependency kind        | Default dependent bump |
+| ---------------------- | ---------------------- |
+| `dependencies`         | patch                  |
+| `dependency_overrides` | patch                  |
+| `dev_dependencies`     | none                   |
+
+**Dependent version bumps**: when a workspace package is released, workspace dependents in `dependencies` and `dependency_overrides` are patch-bumped even if the old constraint still accepts the new version.
+
+**Constraint rewrites**: workspace dependency constraints are updated when they no longer accept the linked package's new version.
+
+## Configuration
+
+```ts
+dart({
+  updateLockFile: false,
+  bumpDep: ({ kind }) => (kind === "dev_dependencies" ? false : "patch"),
+});
+```
+
+| Option           | Default | Description                                                  |
+| ---------------- | ------- | ------------------------------------------------------------ |
+| `updateLockFile` | `true`  | Run `dart pub get` at the workspace root after versioning    |
+| `bumpDep`        | —       | Decide how to bump workspace dependents when a package bumps |
+
+## Publishing
+
+Tegami publishes packages with `dart pub publish`, adding `--force` in CI. Packages using `publish_to: none` are skipped.
+
+For publish status checks, Tegami uses the hosted pub repository API. If a package has a custom `publish_to` URL, Tegami checks that hosted registry instead of `pub.dev`.
