@@ -248,8 +248,7 @@ export function npm({
     async applyCliDraft() {
       if (!active || !updateLockFile) return;
 
-      const args = client === "pnpm" ? ["install", "--no-git-checks"] : ["install"];
-      const result = await x(client, args, { nodeOptions: { cwd: this.cwd } });
+      const result = await x(client, ["install"], { nodeOptions: { cwd: this.cwd } });
       if (result.exitCode !== 0) {
         throw execFailure("Failed to update lockfile.", result);
       }
