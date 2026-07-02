@@ -1,3 +1,13 @@
+## tegami@1.1.1
+
+### Replace `js-yaml` with `yaml`
+
+`yaml` supports preserving formatting while editing properties, this is useful for updating package manifest files.
+
+### Experiment `typia` compile-time validation
+
+Try to precompile schema using `typia`.
+
 ## tegami@1.1.0
 
 ### Improve Cargo performance by pre-indexing dependencies
