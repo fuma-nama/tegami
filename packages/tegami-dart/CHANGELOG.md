@@ -1,7 +1,4 @@
----
-packages:
-  "npm:@tegami/dart": minor
----
+## @tegami/dart@1.1.0
 
 ### Add Dart pub plugin
 
