@@ -1,12 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Improve Cargo performance by pre-indexing dependencies\n\nThe dependencies of `Cargo.toml` will be pre-indexed to improve performance in large monorepos.\n"
-    filename: 2026-07-02-mr3anaoq.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix update lock file of npm plugin\n"
+    filename: 2026-07-03-mr3qzsxv.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Support `prerelease(name)` replay condition\n\nTegami now supports replay condition when entering prerelease.\n"
-    filename: 2026-07-02-mr3cbjht.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:@tegami/dart:\n    type: minor\n---\n\n### Add Dart pub plugin\n\nTegami now includes an opt-in Dart plugin at `@tegami/dart` for official pub workspaces. It discovers packages from `pubspec.yaml`, bumps workspace dependency ranges, runs `dart pub get` after versioning, and publishes with `dart pub publish`, adding `--force` in CI.\n"
-    filename: 2026-07-02-a9d4e2.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support catalog for npm plugin\n\nTegami can now bump deps correctly with catalog protocol.\n"
+    filename: 2026-07-03-mr3tot0m.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -14,15 +11,13 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-02-mr3anaoq.md
-      - 2026-07-02-mr3cbjht.md
+      - 2026-07-03-mr3qzsxv.md
+      - 2026-07-03-mr3tot0m.md
     id: npm:tegami
     updated: true
-  - changelogIds:
-      - 2026-07-02-a9d4e2.md
-    id: npm:@tegami/dart
-    updated: true
   - id: npm:@tegami/pip
+    updated: true
+  - id: npm:@tegami/dart
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
@@ -30,6 +25,6 @@ npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
-  - id: npm:@tegami/dart
   - id: npm:@tegami/pip
+  - id: npm:@tegami/dart
   - id: npm:@repo/typescript-config

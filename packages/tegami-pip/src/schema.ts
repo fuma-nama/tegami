@@ -1,49 +1,45 @@
-import z from "zod";
+import typia from "typia";
 
-const uvSourceSchema = z.object({
-  workspace: z.boolean().optional(),
-  path: z.string().optional(),
-});
+export interface UvSource {
+  workspace?: boolean;
+  path?: string;
+}
 
-const uvIndexSchema = z.object({
-  name: z.string(),
-  url: z.string(),
-  "publish-url": z.string().optional(),
-});
+export interface UvIndex {
+  name: string;
+  url: string;
+  "publish-url"?: string;
+}
 
-const uvSchema = z.object({
-  workspace: z
-    .object({
-      members: z.array(z.string()).optional(),
-      exclude: z.array(z.string()).optional(),
-    })
-    .optional(),
-  sources: z.record(z.string(), uvSourceSchema).optional(),
-  index: z.array(uvIndexSchema).optional(),
-});
+interface UvConfig {
+  workspace?: {
+    members?: string[];
+    exclude?: string[];
+  };
+  sources?: Record<string, UvSource>;
+  index?: UvIndex[];
+}
 
-const pyprojectProjectSchema = z.object({
-  name: z.string(),
-  version: z.string().optional(),
-  private: z.boolean().optional(),
-  dependencies: z.array(z.string()).optional(),
-  "optional-dependencies": z.record(z.string(), z.array(z.string())).optional(),
-});
+export interface PyprojectProject {
+  name: string;
+  version?: string;
+  private?: boolean;
+  dependencies?: string[];
+  "optional-dependencies"?: Record<string, string[]>;
+}
 
-export const pyprojectManifestSchema = z.object({
-  project: pyprojectProjectSchema.optional(),
-  "dependency-groups": z.record(z.string(), z.array(z.string())).optional(),
-  tool: z
-    .object({
-      uv: uvSchema.optional(),
-    })
-    .optional(),
-});
+export interface PyprojectManifest {
+  project?: PyprojectProject;
+  "dependency-groups"?: Record<string, string[]>;
+  tool?: {
+    uv?: UvConfig;
+  };
+}
 
-export type PyprojectManifest = z.infer<typeof pyprojectManifestSchema>;
-export type UvIndex = z.infer<typeof uvIndexSchema>;
-export type UvSource = z.infer<typeof uvSourceSchema>;
+export interface SimpleIndexProject {
+  files?: {
+    filename: string;
+  }[];
+}
 
-export const simpleIndexProjectSchema = z.object({
-  files: z.array(z.object({ filename: z.string() })).optional(),
-});
+export const assertPyprojectManifest = typia.createAssert<PyprojectManifest>();

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { ChangelogEntry, parseChangelogFile } from "../changelog/parse";
 import { TegamiContext } from "../context";
-import { changelogStoreSchema, packageStoreSchema } from "./draft";
+import { validateChangelogStore, validatePackageStore } from "./draft";
 import { parsePublishLock, PublishLock } from "./lock";
 import { PublishPreflight } from "../types";
 import { WorkspacePackage } from "../graph";
@@ -60,8 +60,9 @@ export async function initPublishPlan(
   const changelogs = new Map<string, ChangelogEntry>();
 
   while ((data = lock.read("core:changelogs"))) {
-    const entry = changelogStoreSchema.safeParse(data).data;
-    if (!entry) continue;
+    const validated = validateChangelogStore(data);
+    if (!validated.success) continue;
+    const entry = validated.data;
     const parsed = parseChangelogFile(entry.filename, entry.content);
     if (!parsed) continue;
 
@@ -69,8 +70,9 @@ export async function initPublishPlan(
   }
 
   while ((data = lock.read("core:packages"))) {
-    const parsed = packageStoreSchema.safeParse(data).data;
-    if (!parsed) continue;
+    const validated = validatePackageStore(data);
+    if (!validated.success) continue;
+    const parsed = validated.data;
     if (!context.graph.get(parsed.id)) continue;
 
     const pkgChangelogs: ChangelogEntry[] = [];

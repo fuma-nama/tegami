@@ -45,7 +45,8 @@ describe("tegami context", () => {
     ).resolves.toEqual({ shouldPublish: true });
 
     expect(detectPackageManager).not.toHaveBeenCalled();
-    expect(context.npm).toEqual({ client: "npm" });
+    expect(context.npm?.client).toBe("npm");
+    expect(context.npm?.graph?.packages.has("@acme/core")).toBe(true);
   });
 
   test("detects pnpm when creating a project context", async () => {
@@ -72,7 +73,8 @@ describe("tegami context", () => {
     expect(detectPackageManager).toHaveBeenCalledWith({
       cwd,
     });
-    expect(context.npm).toEqual({ client: "pnpm" });
+    expect(context.npm?.client).toBe("pnpm");
+    expect(context.npm?.graph?.packages.has("@acme/core")).toBe(true);
   });
 
   test("defaults npm client when package manager detection fails", async () => {
@@ -90,7 +92,8 @@ describe("tegami context", () => {
       }),
     ).resolves.toEqual({ shouldPublish: true });
 
-    expect(context.npm).toEqual({ client: "npm" });
+    expect(context.npm?.client).toBe("npm");
+    expect(context.npm?.graph?.packages.has("@acme/core")).toBe(true);
   });
 
   test("defaults the publish lock path", async () => {
@@ -140,7 +143,7 @@ describe("tegami context", () => {
       `${JSON.stringify({ name: "@acme/lib" }, null, 2)}\n`,
     );
 
-    const context = await createResolvedContext({ cwd });
+    const context = await createResolvedContext({ cwd, npm: { client: "pnpm" } });
     const pkg = context.graph.get("npm:@acme/lib");
 
     expect(pkg).toBeDefined();

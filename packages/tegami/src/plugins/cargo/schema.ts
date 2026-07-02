@@ -1,90 +1,74 @@
-import z from "zod";
+import typia from "typia";
 
-const baseDepSchema = z.object({
-  package: z.string().optional(),
-  features: z.array(z.string()).optional(),
-  optional: z.boolean().optional(),
-  "default-features": z.boolean().optional(),
-});
+interface CargoDepBase {
+  package?: string;
+  features?: string[];
+  optional?: boolean;
+  "default-features"?: boolean;
+}
 
-/** `{ workspace = true }` — inherit from `[workspace.dependencies]` */
-const workspaceDependencySchema = baseDepSchema.extend({
-  workspace: z.literal(true),
-});
+interface CargoWorkspaceDependency extends CargoDepBase {
+  workspace: true;
+}
 
-/** `{ path = "../lib" }` — optional `version` for publishing */
-const pathDependencySchema = baseDepSchema.extend({
-  path: z.string(),
-  version: z.string().optional(),
-});
+interface CargoPathDependency extends CargoDepBase {
+  path: string;
+  version?: string;
+}
 
-/** `{ git = "…" }` — exactly one of `branch`, `tag`, or `rev` in practice */
-const gitDependencySchema = baseDepSchema.extend({
-  git: z.string(),
-  branch: z.string().optional(),
-  tag: z.string().optional(),
-  rev: z.string().optional(),
-  version: z.string().optional(),
-});
+interface CargoGitDependency extends CargoDepBase {
+  git: string;
+  branch?: string;
+  tag?: string;
+  rev?: string;
+  version?: string;
+}
 
-/** `{ version = "1.0" }` — crates.io or `[registries]` */
-const registryDependencySchema = baseDepSchema.extend({
-  version: z.string(),
-  registry: z.string().optional(),
-});
+interface CargoRegistryDependency extends CargoDepBase {
+  version: string;
+  registry?: string;
+}
 
-/**
- * @see https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
- */
-const cargoDependencySchema = z.union([
-  z.string(),
-  workspaceDependencySchema,
-  pathDependencySchema,
-  gitDependencySchema,
-  registryDependencySchema,
-]);
+export type CargoDependency =
+  | string
+  | CargoWorkspaceDependency
+  | CargoPathDependency
+  | CargoGitDependency
+  | CargoRegistryDependency;
 
-const cargoInheritSchema = z.looseObject({
-  workspace: z.literal(true),
-});
+interface CargoInherit {
+  workspace: true;
+}
 
-const cargoWorkspaceSchema = z.looseObject({
-  members: z.array(z.string()).optional(),
-  exclude: z.array(z.string()).optional(),
-  package: z
-    .looseObject({
-      version: z.string().optional(),
-      publish: z.boolean().optional(),
-    })
-    .optional(),
-  dependencies: z.record(z.string(), cargoDependencySchema).optional(),
-  "dev-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-  "build-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-});
+interface CargoTargetSection {
+  dependencies?: Record<string, CargoDependency>;
+  "dev-dependencies"?: Record<string, CargoDependency>;
+  "build-dependencies"?: Record<string, CargoDependency>;
+}
 
-export const cargoManifestSchema = z.looseObject({
-  package: z
-    .looseObject({
-      name: z.string(),
-      version: z.string().or(cargoInheritSchema),
-      publish: z.boolean().or(cargoInheritSchema).optional(),
-    })
-    .optional(),
-  workspace: cargoWorkspaceSchema.optional(),
-  dependencies: z.record(z.string(), cargoDependencySchema).optional(),
-  "dev-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-  "build-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-  target: z
-    .record(
-      z.string(),
-      z.looseObject({
-        dependencies: z.record(z.string(), cargoDependencySchema).optional(),
-        "dev-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-        "build-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-      }),
-    )
-    .optional(),
-});
+interface CargoWorkspace {
+  members?: string[];
+  exclude?: string[];
+  package?: {
+    version?: string;
+    publish?: boolean;
+  };
+  dependencies?: Record<string, CargoDependency>;
+  "dev-dependencies"?: Record<string, CargoDependency>;
+  "build-dependencies"?: Record<string, CargoDependency>;
+}
 
-export type CargoDependency = z.infer<typeof cargoDependencySchema>;
-export type CargoManifest = z.infer<typeof cargoManifestSchema>;
+export interface CargoManifest {
+  package?: {
+    name: string;
+    version: string | CargoInherit;
+    publish?: boolean | CargoInherit;
+  };
+  workspace?: CargoWorkspace;
+  dependencies?: Record<string, CargoDependency>;
+  "dev-dependencies"?: Record<string, CargoDependency>;
+  "build-dependencies"?: Record<string, CargoDependency>;
+  target?: Record<string, CargoTargetSection>;
+}
+
+export const assertCargoManifest = typia.createAssert<CargoManifest>();

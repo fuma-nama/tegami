@@ -143,7 +143,7 @@ describe("createChangelog", () => {
           "changes": 1,
           "content": "---
       packages:
-        '@acme/core': minor
+        "@acme/core": minor
       ---
 
       ## Support auto changelogs
@@ -158,7 +158,7 @@ describe("createChangelog", () => {
           "changes": 1,
           "content": "---
       packages:
-        '@acme/ui': patch
+        "@acme/ui": patch
       ---
 
       ### Repair button state

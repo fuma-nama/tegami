@@ -6,7 +6,7 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { pip } from "../src/index";
 import { isPackagePublished, normalizePyPiName, updateConstraintRange } from "../src/utils";
-import { pyprojectManifestSchema } from "../src/schema";
+import { assertPyprojectManifest } from "../src/schema";
 import { tegami } from "tegami";
 import { parsePublishLock } from "../../tegami/src/plans/lock";
 import {
@@ -730,7 +730,7 @@ Release to TestPyPI.
 
 describe("pyproject manifest schema", () => {
   test("accepts a virtual workspace root without a project section", () => {
-    const manifest = pyprojectManifestSchema.parse(
+    const manifest = assertPyprojectManifest(
       parse(`[tool.uv.workspace]\nmembers = ["packages/*"]\n`),
     );
 
@@ -739,7 +739,7 @@ describe("pyproject manifest schema", () => {
   });
 
   test("accepts workspace exclude globs", () => {
-    const manifest = pyprojectManifestSchema.parse(
+    const manifest = assertPyprojectManifest(
       parse(`[tool.uv.workspace]\nmembers = ["packages/*"]\nexclude = ["packages/seeds"]\n`),
     );
 

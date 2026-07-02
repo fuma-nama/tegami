@@ -2,6 +2,7 @@
   "name": "root",
   "private": true,
   "scripts": {
+    "prepare": "ts-patch install",
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "oxlint",
@@ -13,12 +14,15 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
+    "@typia/unplugin": "^12.1.1",
     "oxfmt": "^0.56.0",
     "oxlint": "^1.71.0",
     "tegami": "workspace:*",
     "tinyexec": "^1.2.4",
+    "ts-patch": "^4.0.1",
     "turbo": "^2.10.0",
     "typescript": "6.0.3",
+    "typia": "^12.1.1",
     "vitest": "^4.1.9"
   },
   "engines": {

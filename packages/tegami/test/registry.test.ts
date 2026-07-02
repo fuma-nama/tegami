@@ -51,7 +51,7 @@ describe("npm registry preflight", () => {
   });
 
   test("returns shouldPublish true for missing package versions", async () => {
-    const context = await createContext("npm", undefined, "9.9.9");
+    const context = await createContext("pnpm", undefined, "9.9.9");
     const pkg = context.graph.get("npm:@acme/core");
     if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
     const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
@@ -169,7 +169,7 @@ async function createTestContext() {
   tempDirs.push(cwd);
 
   await mkdir(join(cwd, "packages/core"), { recursive: true });
-  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+  await writeNpmWorkspaceRoot(cwd);
   await writeFile(
     join(cwd, "packages/core/package.json"),
     `${JSON.stringify(
@@ -185,7 +185,7 @@ async function createTestContext() {
 
   return createResolvedContext({
     cwd,
-    npm: { client: "npm" },
+    npm: { client: "pnpm" },
   });
 }
 
@@ -211,7 +211,7 @@ async function createContext(
   const cwd = await mkdtemp(join(tmpdir(), "tegami-registry-client-"));
   tempDirs.push(cwd);
   await mkdir(join(cwd, "packages/core"), { recursive: true });
-  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+  await writeNpmWorkspaceRoot(cwd);
   await writeFile(
     join(cwd, "packages/core/package.json"),
     `${JSON.stringify(
@@ -239,6 +239,14 @@ async function createResolvedContext(options: Parameters<typeof createTegamiCont
   const context = await createTegamiContext(options);
   await resolveGraph(context);
   return context;
+}
+
+async function writeNpmWorkspaceRoot(cwd: string) {
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+  await writeFile(
+    join(cwd, "package.json"),
+    `${JSON.stringify({ name: "@acme/root", private: true, workspaces: ["packages/*"] }, null, 2)}\n`,
+  );
 }
 
 type ExecResult = Awaited<ReturnType<typeof x>>;

@@ -3,7 +3,11 @@ import { basename, join } from "node:path";
 import { maxBump, type BumpType } from "../utils/semver";
 import { frontmatter } from "../utils/frontmatter";
 import type { TegamiContext } from "../context";
-import { changelogFrontmatterSchema, renderChangelog, type ChangelogPackageConfig } from "./shared";
+import {
+  validateChangelogFrontmatter,
+  renderChangelog,
+  type ChangelogPackageConfig,
+} from "./shared";
 
 export interface ChangelogEntry {
   id: string;
@@ -48,8 +52,11 @@ export async function readChangelogEntries(context: TegamiContext): Promise<Chan
 /** Parse one changelog markdown file into release entries. */
 export function parseChangelogFile(filename: string, content: string): ChangelogEntry | undefined {
   const parsed = frontmatter(content);
-  const { success, data } = changelogFrontmatterSchema.safeParse(parsed.data);
-  if (!success || !data.packages) return;
+  const validated = validateChangelogFrontmatter(parsed.data);
+  if (!validated.success) return;
+  const { packages: packagesConfig } = validated.data;
+  if (!packagesConfig) return;
+  const data = validated.data;
 
   let headingBump: BumpType | undefined;
   const packages = new Map<string, ChangelogPackageConfig>();
@@ -70,13 +77,13 @@ export function parseChangelogFile(filename: string, content: string): Changelog
 
   if (sections.length === 0) return;
 
-  if (Array.isArray(data.packages)) {
+  if (Array.isArray(packagesConfig)) {
     if (!headingBump) return;
-    for (const pkg of data.packages) {
+    for (const pkg of packagesConfig) {
       packages.set(pkg, { type: headingBump });
     }
   } else {
-    for (const [k, v] of Object.entries(data.packages)) {
+    for (const [k, v] of Object.entries(packagesConfig)) {
       let config: ChangelogPackageConfig;
       if (typeof v === "string") config = { type: v };
       else if (v === null) config = { type: headingBump };

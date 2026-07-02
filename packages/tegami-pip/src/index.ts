@@ -9,7 +9,7 @@ import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin }
 import { WorkspacePackage } from "tegami";
 import { execFailure } from "tegami/utils";
 import {
-  pyprojectManifestSchema,
+  assertPyprojectManifest,
   type PyprojectManifest,
   type UvIndex,
   type UvSource,
@@ -343,7 +343,7 @@ interface PyprojectEntry {
 async function buildEntry(dir: string, requireProject = true): Promise<PyprojectEntry | undefined> {
   try {
     const content = await readFile(path.join(dir, "pyproject.toml"), "utf8");
-    const manifest = pyprojectManifestSchema.parse(parse(content));
+    const manifest = assertPyprojectManifest(parse(content));
     if (requireProject && !manifest.project?.name) return;
     return {
       manifest,

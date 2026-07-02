@@ -61,7 +61,7 @@ describe("publish plans", () => {
       tegami({
         cwd,
         lockPath: lockPath,
-        npm: { client: "npm" },
+        npm: { client: "pnpm" },
       }).publish({ dryRun: false }),
     ).resolves.toBe("skipped");
 
@@ -369,7 +369,10 @@ async function publishFixture(
 }
 
 async function createResolvedContext(options: Parameters<typeof createTegamiContext>[0]) {
-  const context = await createTegamiContext(options);
+  const context = await createTegamiContext({
+    npm: { client: "pnpm" },
+    ...options,
+  });
   await resolveGraph(context);
   return context;
 }

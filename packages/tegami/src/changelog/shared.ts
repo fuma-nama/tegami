@@ -1,28 +1,23 @@
-import z from "zod";
-import { dump } from "js-yaml";
+import typia, { tags } from "typia";
+import { stringify } from "yaml";
+import type { BumpType } from "../utils/semver";
 
-const bumpTypeSchema = z.enum(["major", "minor", "patch"]);
+export interface ChangelogPackageConfig {
+  type?: BumpType;
+  replay?: (string & tags.MinLength<1>)[];
+}
 
-const changelogPackageConfigSchema = z.object({
-  type: bumpTypeSchema.optional(),
-  replay: z.array(z.string().min(1)).optional(),
-});
+export interface ChangelogFrontmatter {
+  subject?: string;
+  packages?: string[] | Record<string, BumpType | null | ChangelogPackageConfig>;
+}
 
-export const changelogFrontmatterSchema = z.object({
-  subject: z.string().optional(),
-  packages: z
-    .union([
-      z.array(z.string()),
-      z.record(z.string(), z.union([bumpTypeSchema, z.null(), changelogPackageConfigSchema])),
-    ])
-    .optional(),
-});
+export const validateChangelogFrontmatter: (
+  input: unknown,
+) => typia.IValidation<ChangelogFrontmatter> = typia.createValidate<ChangelogFrontmatter>();
 
-export type ChangelogPackageConfig = z.output<typeof changelogPackageConfigSchema>;
-
-export function renderChangelog(
-  frontmatter: z.input<typeof changelogFrontmatterSchema>,
-  body: string,
-): string {
-  return ["---", dump(frontmatter).trim(), "---", "", body.trim(), ""].join("\n");
+export function renderChangelog(frontmatter: ChangelogFrontmatter, body: string): string {
+  return ["---", stringify(frontmatter, { lineWidth: 0 }).trim(), "---", "", body.trim(), ""].join(
+    "\n",
+  );
 }
