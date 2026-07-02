@@ -1,10 +1,12 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, normalize } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { parse } from "yaml";
+import * as semver from "semver";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
+import { parseDependencySpec, resolveNpmGraph } from "../src/providers/npm/graph";
 import { getPendingPackageIds, normalizePackagePlan } from "./helpers/draft";
 import { writePublishLock } from "./helpers/lock";
 import {
@@ -552,6 +554,224 @@ Fixed something during beta.
   });
 });
 
+describe("npm graph", () => {
+  test("discovers bun workspace object packages", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-graph-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "apps/web"), { recursive: true });
+    await writeJson(join(cwd, "package.json"), {
+      name: "@acme/root",
+      private: true,
+      workspaces: { packages: ["apps/*"] },
+    });
+    await writeJson(join(cwd, "apps/web/package.json"), {
+      name: "@acme/web",
+      version: "1.0.0",
+    });
+
+    const graph = await resolveNpmGraph(cwd, "npm");
+    expect([...graph.packages.keys()].sort()).toEqual(["@acme/root", "@acme/web"]);
+  });
+
+  test("parseDependencySpec handles workspace scoped package names", () => {
+    expect(parseDependencySpec("workspace:@acme/core")).toEqual({
+      protocol: "workspace",
+      packageName: "@acme/core",
+      range: "*",
+    });
+    expect(parseDependencySpec("workspace:@acme/core@^1.0.0")).toEqual({
+      protocol: "workspace",
+      packageName: "@acme/core",
+      range: "^1.0.0",
+    });
+    expect(parseDependencySpec("workspace:^")).toEqual({
+      protocol: "workspace",
+      range: "^",
+    });
+    expect(parseDependencySpec("workspace:^1.0.0")).toEqual({
+      protocol: "workspace",
+      range: "^1.0.0",
+    });
+  });
+
+  test("links workspace alias and path protocols", async () => {
+    const cwd = await createGraphRoot();
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+    });
+    await writeJson(join(cwd, "packages/ui/package.json"), {
+      name: "@acme/ui",
+      version: "1.0.0",
+      dependencies: {
+        "core-alias": "workspace:@acme/core@*",
+        portal: "portal:../core",
+        linked: "file:../core",
+      },
+    });
+
+    const graph = await resolveNpmGraph(cwd, "pnpm");
+    const ui = graph.packages.get("@acme/ui")!;
+    const deps = ui.listDependencies(graph);
+
+    expect(deps.find((dep) => dep.name === "core-alias")?.linked?.name).toBe("@acme/core");
+    expect(deps.find((dep) => dep.name === "portal")?.linked?.name).toBe("@acme/core");
+    expect(deps.find((dep) => dep.name === "linked")?.linked?.name).toBe("@acme/core");
+  });
+
+  test("links scoped workspace alias without an explicit range", async () => {
+    const cwd = await createGraphRoot();
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+    });
+    await writeJson(join(cwd, "packages/ui/package.json"), {
+      name: "@acme/ui",
+      version: "1.0.0",
+      dependencies: {
+        "core-alias": "workspace:@acme/core",
+      },
+    });
+
+    const graph = await resolveNpmGraph(cwd, "pnpm");
+    const dep = graph.packages
+      .get("@acme/ui")!
+      .listDependencies(graph)
+      .find((entry) => entry.name === "core-alias")!;
+
+    expect(dep.spec).toEqual({
+      protocol: "workspace",
+      packageName: "@acme/core",
+      range: "*",
+    });
+    expect(dep.linked?.name).toBe("@acme/core");
+  });
+
+  test("resolves catalog dependencies from pnpm-workspace.yaml", async () => {
+    const cwd = await createGraphRoot();
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+catalog:
+  react: ^18.0.0
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+      dependencies: { react: "catalog:" },
+    });
+
+    const graph = await resolveNpmGraph(cwd, "pnpm");
+    const core = graph.packages.get("@acme/core")!;
+    const react = core.listDependencies(graph).find((dep) => dep.name === "react")!;
+
+    expect(react.range).toBe("^18.0.0");
+    react.setRange?.("^18.3.0");
+
+    await Promise.all(graph.catalogs.map((source) => source.write?.()));
+    expect(await readFile(join(cwd, "pnpm-workspace.yaml"), "utf8")).toContain("react: ^18.3.0");
+  });
+
+  test("preserves .yarnrc.yml formatting when updating catalog dependencies", async () => {
+    const cwd = await createGraphRoot();
+    await writeFile(
+      join(cwd, ".yarnrc.yml"),
+      `# yarn settings
+nodeLinker: node-modules
+
+catalog:
+  react: ^18.0.0 # pinned
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+      dependencies: { react: "catalog:" },
+    });
+
+    const graph = await resolveNpmGraph(cwd, "yarn");
+    const react = graph.packages
+      .get("@acme/core")!
+      .listDependencies(graph)
+      .find((dep) => dep.name === "react")!;
+
+    expect(react.range).toBe("^18.0.0");
+    react.setRange?.("^18.3.0");
+
+    await Promise.all(graph.catalogs.map((source) => source.write?.()));
+
+    const written = await readFile(join(cwd, ".yarnrc.yml"), "utf8");
+    expect(written).toContain("# yarn settings");
+    expect(written).toContain("nodeLinker: node-modules");
+    expect(written).toContain("# pinned");
+    expect(written).toContain("react: ^18.3.0");
+  });
+
+  test.each(["workspace:@acme/core@*", "workspace:@acme/core"])(
+    "bumps dependents for workspace alias dependencies %s",
+    async (spec) => {
+      const cwd = await createGraphRoot();
+      await writeJson(join(cwd, "packages/core/package.json"), {
+        name: "@acme/core",
+        version: "1.0.0",
+      });
+      await writeJson(join(cwd, "packages/ui/package.json"), {
+        name: "@acme/ui",
+        version: "1.0.0",
+        dependencies: { "core-alias": spec },
+      });
+      await writeFile(
+        join(cwd, ".tegami/change.md"),
+        `---
+packages: ["@acme/core"]
+---
+
+## Bump core
+`,
+      );
+
+      const draft = await tegami({ cwd }).draft();
+      expect(draft.getPackageDraft("npm:@acme/ui")?.type).toBe("patch");
+    },
+  );
+
+  test("needsDependencyUpdate handles workspace caret shorthand", () => {
+    const resolved = {
+      field: "dependencies" as const,
+      name: "core",
+      spec: parseDependencySpec("workspace:^"),
+      linked: { version: "2.0.0" } as never,
+    };
+
+    expect(npmNeedsDependencyUpdate(resolved, "2.0.0")).toBe(false);
+    expect(npmNeedsDependencyUpdate(resolved, "3.0.0")).toBe(true);
+  });
+});
+
+async function createGraphRoot(manifest: Record<string, unknown> = {}): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-graph-"));
+  tempDirs.push(cwd);
+
+  await mkdir(join(cwd, "packages"), { recursive: true });
+  await mkdir(join(cwd, ".tegami"), { recursive: true });
+  await writeFile(
+    join(cwd, "pnpm-workspace.yaml"),
+    `packages:
+  - "packages/*"
+`,
+  );
+  await writeJson(join(cwd, "package.json"), {
+    name: "@acme/root",
+    private: true,
+    workspaces: ["packages/*"],
+    ...manifest,
+  });
+
+  return cwd;
+}
+
 async function createWorkspace(options: { changelog?: boolean } = {}): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-"));
 
@@ -603,10 +823,43 @@ Useful release note.
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function normalizeDirPath(path: string): string {
   const normalized = normalize(path);
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
+}
+
+function npmNeedsDependencyUpdate(
+  resolved: {
+    spec: ReturnType<typeof parseDependencySpec>;
+    linked?: { version?: string };
+    range?: string;
+  },
+  target: string,
+): boolean {
+  if (!resolved.linked) return false;
+
+  switch (resolved.spec.protocol) {
+    case "file":
+    case "portal":
+      return true;
+    case "workspace":
+      switch (resolved.spec.range) {
+        case "":
+        case "*":
+          return true;
+        case "^":
+        case "~":
+          return !semver.satisfies(
+            target,
+            `${resolved.spec.range}${resolved.linked.version ?? "0.0.0"}`,
+          );
+      }
+  }
+
+  if (!resolved.range || !semver.validRange(resolved.range)) return false;
+  return !semver.satisfies(target, resolved.range);
 }

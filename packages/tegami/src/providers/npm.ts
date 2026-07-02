@@ -1,174 +1,33 @@
-import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parse } from "yaml";
 import * as semver from "semver";
-import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { TegamiContext } from "../context";
-import { assertPackageManifest, assertPnpmWorkspace, type PackageManifest } from "./npm/schema";
-import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure, isNodeError } from "../utils/error";
-import { WorkspacePackage } from "../graph";
-import { detect } from "package-manager-detector";
-import type { BumpType } from "../utils/semver";
-import type { DraftPolicy, PackageDraft } from "../plans/draft";
-import type { AgentName } from "package-manager-detector";
+import { detect, type AgentName } from "package-manager-detector";
 import typia from "typia";
+import type { TegamiContext } from "../context";
 import type { PackagePublishResult } from "../plans/publish";
+import type { Awaitable, TegamiPlugin } from "../types";
+import { execFailure } from "../utils/error";
+import type { BumpType } from "../utils/semver";
+import type { DraftPolicy } from "../plans/draft";
 import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
 import { joinPath } from "../utils/common";
+import {
+  type DependencySpec,
+  type DepField,
+  formatDependencySpec,
+  NpmPackage,
+  type ResolvedNpmDependency,
+  resolveNpmGraph,
+} from "./npm/graph";
 
-const DEP_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-] as const;
-
-export class NpmPackage extends WorkspacePackage {
-  readonly manager = "npm";
-
-  constructor(
-    readonly path: string,
-    readonly manifest: PackageManifest,
-  ) {
-    super();
-  }
-
-  get name(): string {
-    return this.manifest.name;
-  }
-
-  get version(): string | undefined {
-    return this.manifest.version;
-  }
-
-  async write(): Promise<void> {
-    await writeFile(
-      path.join(this.path, "package.json"),
-      `${JSON.stringify(this.manifest, null, 2)}\n`,
-    );
-  }
-
-  initDraft() {
-    const defaults = super.initDraft();
-    defaults.npm = {
-      distTag: this.manifest.publishConfig?.tag,
-    };
-
-    return defaults;
-  }
-
-  getRegistry(): string {
-    return this.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
-  }
-
-  configureDraft({ draft }: { draft: PackageDraft }): void {
-    super.configureDraft({ draft });
-
-    const { distTag = this.group?.options?.npm?.distTag } = this.options.npm ?? {};
-
-    if (distTag) {
-      draft.npm ??= {};
-      draft.npm.distTag = distTag;
-    } else if (draft.prerelease) {
-      draft.npm ??= {};
-      // `npm publish` requires tag for prerelease versions
-      draft.npm.distTag ??= draft.prerelease;
-    }
-  }
-}
-
-type DependencySpec =
-  | {
-      protocol: "npm";
-      alias: string;
-      range: string;
-      linked?: WorkspacePackage;
-    }
-  | {
-      protocol: "workspace";
-      range: string;
-      linked?: WorkspacePackage;
-    }
-  | {
-      protocol: "file";
-      raw: string;
-      linked?: WorkspacePackage;
-    }
-  | {
-      range: string;
-      linked?: WorkspacePackage;
-      protocol?: undefined;
-    };
-
-function parseDependencySpec(
-  context: TegamiContext,
-  dependent: NpmPackage,
-  name: string,
-  range: string,
-): DependencySpec | undefined {
-  const { graph } = context;
-
-  if (range.startsWith("workspace:")) {
-    return {
-      range: range.slice("workspace:".length),
-      linked: graph.get(`npm:${name}`),
-      protocol: "workspace",
-    };
-  }
-
-  if (range.startsWith("file:")) {
-    let target = path.resolve(dependent.path, range.slice("file:".length));
-    if (path.basename(target) === "package.json") {
-      target = path.dirname(target);
-    }
-
-    return {
-      protocol: "file",
-      raw: range,
-      linked: graph.getPackages().find((pkg) => pkg instanceof NpmPackage && pkg.path === target),
-    };
-  }
-
-  if (range.startsWith("npm:")) {
-    const spec = range.slice("npm:".length);
-    const separator = spec.lastIndexOf("@");
-    if (separator <= 0) return;
-    const alias = spec.slice(0, separator);
-
-    return {
-      alias,
-      linked: graph.get(`npm:${alias}`),
-      range: spec.slice(separator + 1),
-      protocol: "npm",
-    };
-  }
-
-  return { linked: graph.get(`npm:${name}`), range: range };
-}
-
-function formatDependencySpec(spec: DependencySpec): string {
-  if (spec.protocol === "workspace") {
-    return `workspace:${spec.range}`;
-  }
-
-  if (spec.protocol === "file") {
-    return spec.raw;
-  }
-
-  if (spec.protocol === "npm") {
-    return `npm:${spec.alias}@${spec.range}`;
-  }
-
-  return spec.range;
-}
+export { type NpmGraph, type DependencySpec, NpmPackage } from "./npm/graph";
 
 interface DependentRef {
   dependent: NpmPackage;
-  kind: (typeof DEP_FIELDS)[number];
+  kind: DepField;
   name: string;
   spec: DependencySpec;
+  resolved: ResolvedNpmDependency;
 }
 
 export interface NpmPluginOptions {
@@ -240,17 +99,20 @@ export function npm({
       if (defaultClient) {
         client = defaultClient;
       } else {
-        const result = await detect({
-          cwd: this.cwd,
-        });
+        const result = await detect({ cwd: this.cwd });
         client = result?.name ?? "npm";
       }
 
       this.npm = { client };
     },
     async resolve() {
-      await discoverNpmPackages(this.cwd, (pkg) => this.graph.add(pkg));
-      active = this.graph.getPackages().some((pkg) => pkg instanceof NpmPackage);
+      if (!this.npm) return;
+      const graph = await resolveNpmGraph(this.cwd, this.npm.client);
+      if (graph.packages.size === 0) return;
+
+      this.npm.graph = graph;
+      for (const pkg of graph.packages.values()) this.graph.add(pkg);
+      active = true;
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage)) return;
@@ -290,9 +152,7 @@ export function npm({
         const packagePlan = plan.packages.get(parsed.id);
         if (!packagePlan) continue;
 
-        packagePlan.npm = {
-          distTag: parsed.distTag,
-        };
+        packagePlan.npm = { distTag: parsed.distTag };
       }
 
       while ((data = lock.read("npm:mark-latest"))) {
@@ -322,9 +182,7 @@ export function npm({
             "--registry",
             pkg.getRegistry(),
           ],
-          {
-            nodeOptions: { cwd: pkg.path },
-          },
+          { nodeOptions: { cwd: pkg.path } },
         );
 
         if (tagResult.exitCode !== 0) {
@@ -342,58 +200,47 @@ export function npm({
       plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async applyDraft(draft) {
-      if (!active) return;
+      if (!active || !this.npm?.graph) return;
 
-      const { graph } = this;
+      const npmGraph = this.npm.graph;
       const writes: Awaitable<void>[] = [];
 
-      for (const pkg of graph.getPackages()) {
-        if (!(pkg instanceof NpmPackage)) continue;
+      for (const pkg of npmGraph.packages.values()) {
         const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
         if (bumped) pkg.manifest.version = bumped;
       }
 
-      for (const pkg of graph.getPackages()) {
-        if (!(pkg instanceof NpmPackage)) continue;
+      for (const pkg of npmGraph.packages.values()) {
+        for (const dep of pkg.listDependencies(npmGraph)) {
+          if (!dep.linked || !dep.range || !dep.setRange) continue;
+          if (!dep.linked.version || semver.satisfies(dep.linked.version, dep.range)) continue;
 
-        for (const field of DEP_FIELDS) {
-          const dependencies = pkg.manifest[field];
-          if (!dependencies) continue;
+          const isPeer = dep.field === "peerDependencies";
+          if (isPeer && onBreakPeerDep === "ignore") continue;
 
-          for (const [k, v] of Object.entries(dependencies)) {
-            const spec = parseDependencySpec(this, pkg, k, v);
-
-            if (!spec?.linked || spec.protocol === "workspace" || spec.protocol === "file")
-              continue;
-            // Ignore special syntax like "latest"
-            if (!semver.validRange(spec.range)) continue;
-            if (!spec.linked.version || semver.satisfies(spec.linked.version, spec.range)) continue;
-
-            let updatedRange: string;
-            const isPeer = field === "peerDependencies";
-            if (isPeer && onBreakPeerDep === "ignore") {
-              continue;
-            }
-
-            if (isPeer && onBreakPeerDep === "set") {
-              updatedRange = spec.linked.version;
-            } else if (isPeer && onBreakPeerDep === "error") {
-              throw new Error(
-                `[Tegami] the version of "${spec.linked.name}" is beyond its peer dependency constraint "${v}" in package "${pkg.name}", please update the constraint to satisfy.`,
-              );
-            } else if (spec.range.startsWith("^")) {
-              updatedRange = `^${spec.linked.version}`;
-            } else if (spec.range.startsWith("~")) {
-              updatedRange = `~${spec.linked.version}`;
-            } else {
-              updatedRange = spec.linked.version;
-            }
-
-            dependencies[k] = formatDependencySpec({ ...spec, range: updatedRange });
+          let updatedRange: string;
+          if (isPeer && onBreakPeerDep === "set") {
+            updatedRange = dep.linked.version;
+          } else if (isPeer && onBreakPeerDep === "error") {
+            throw new Error(
+              `[Tegami] the version of "${dep.linked.name}" is beyond its peer dependency constraint "${formatDependencySpec(dep.spec)}" in package "${pkg.name}", please update the constraint to satisfy.`,
+            );
+          } else if (dep.range.startsWith("^")) {
+            updatedRange = `^${dep.linked.version}`;
+          } else if (dep.range.startsWith("~")) {
+            updatedRange = `~${dep.linked.version}`;
+          } else {
+            updatedRange = dep.linked.version;
           }
+
+          dep.setRange(updatedRange);
         }
 
         writes.push(pkg.write());
+      }
+
+      for (const source of npmGraph.catalogs) {
+        writes.push(source.write?.());
       }
 
       await Promise.all(writes);
@@ -402,19 +249,13 @@ export function npm({
       if (!active || !updateLockFile) return;
 
       const args = client === "pnpm" ? ["install", "--no-git-checks"] : ["install"];
-
-      const result = await x(client, args, {
-        nodeOptions: {
-          cwd: this.cwd,
-        },
-      });
+      const result = await x(client, args, { nodeOptions: { cwd: this.cwd } });
       if (result.exitCode !== 0) {
         throw execFailure("Failed to update lockfile.", result);
       }
     },
     initCli(cli) {
       if (!trustedPublish) return;
-
       registerNpmCli(cli, trustedPublish);
     },
   };
@@ -424,46 +265,51 @@ function depsPolicy(
   context: TegamiContext,
   getBumpDepType: NonNullable<NpmPluginOptions["bumpDep"]>,
 ): DraftPolicy {
-  const { graph } = context;
+  const npmGraph = context.npm?.graph;
+  if (!npmGraph) throw new Error("npm graph is missing");
+
   const dependentMap = new Map<string, DependentRef[]>();
 
-  for (const pkg of graph.getPackages()) {
-    if (!(pkg instanceof NpmPackage)) continue;
+  for (const pkg of npmGraph.packages.values()) {
+    for (const resolved of pkg.listDependencies(npmGraph)) {
+      if (!resolved.linked) continue;
 
-    for (const kind of DEP_FIELDS) {
-      const dependencies = pkg.manifest[kind];
-      if (!dependencies) continue;
-
-      for (const [name, range] of Object.entries(dependencies)) {
-        const spec = parseDependencySpec(context, pkg, name, range);
-        if (!spec?.linked) continue;
-
-        const refs = dependentMap.get(spec.linked.id);
-        if (refs) refs.push({ dependent: pkg, kind, name, spec });
-        else dependentMap.set(spec.linked.id, [{ dependent: pkg, kind, name, spec }]);
-      }
+      const refs = dependentMap.get(resolved.linked.id);
+      const ref: DependentRef = {
+        dependent: pkg,
+        kind: resolved.field,
+        name: resolved.name,
+        spec: resolved.spec,
+        resolved,
+      };
+      if (refs) refs.push(ref);
+      else dependentMap.set(resolved.linked.id, [ref]);
     }
   }
 
-  function needsUpdate(spec: DependencySpec, target: string): boolean {
-    if (spec.linked && spec.protocol === "workspace") {
-      switch (spec.range) {
-        case "":
-        case "*":
-          return true;
-        case "^":
-        case "~":
-          return !semver.satisfies(target, `${spec.range}${spec.linked.version}`);
-      }
+  function needsDependencyUpdate(resolved: ResolvedNpmDependency, target: string): boolean {
+    if (!resolved.linked) return false;
+
+    switch (resolved.spec.protocol) {
+      case "file":
+      case "portal":
+        return true;
+      case "workspace":
+        switch (resolved.spec.range) {
+          case "":
+          case "*":
+            return true;
+          case "^":
+          case "~":
+            return !semver.satisfies(
+              target,
+              `${resolved.spec.range}${resolved.linked.version ?? "0.0.0"}`,
+            );
+        }
     }
 
-    if (spec.linked && spec.protocol === "file") {
-      return true;
-    }
-
-    // Ignore special syntax like "latest".
-    if (spec.protocol === "file" || !semver.validRange(spec.range)) return false;
-    return !semver.satisfies(target, spec.range);
+    if (!resolved.range || !semver.validRange(resolved.range)) return false;
+    return !semver.satisfies(target, resolved.range);
   }
 
   return {
@@ -477,12 +323,8 @@ function depsPolicy(
       if (!bumped) return;
 
       for (const dep of deps) {
-        if (pkg.group?.options.syncBump && dep.dependent.group === pkg.group) {
-          // they will always bump together
-          continue;
-        }
-
-        if (!needsUpdate(dep.spec, bumped)) continue;
+        if (pkg.group?.options.syncBump && dep.dependent.group === pkg.group) continue;
+        if (!needsDependencyUpdate(dep.resolved, bumped)) continue;
 
         const bumpType = getBumpDepType(dep);
         if (bumpType === false) continue;
@@ -511,12 +353,7 @@ async function publish(
     for (const script of ["prepublishOnly", "prepack", "prepare"]) {
       if (!pkg.manifest.scripts?.[script]) continue;
 
-      const result = await x("bun", ["run", script], {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-
+      const result = await x("bun", ["run", script], { nodeOptions: { cwd: pkg.path } });
       if (result.exitCode === 0) continue;
 
       return {
@@ -528,9 +365,7 @@ async function publish(
 
     const tarballPath = path.resolve(pkg.path, "pkg.tgz");
     const packResult = await x("bun", ["pm", "pack", "--filename", tarballPath], {
-      nodeOptions: {
-        cwd: pkg.path,
-      },
+      nodeOptions: { cwd: pkg.path },
     });
     if (packResult.exitCode !== 0) {
       return {
@@ -542,11 +377,7 @@ async function publish(
     const publishArgs = ["publish", tarballPath];
     if (distTag) publishArgs.push("--tag", distTag);
 
-    const publishResult = await x("npm", publishArgs, {
-      nodeOptions: {
-        cwd: pkg.path,
-      },
-    });
+    const publishResult = await x("npm", publishArgs, { nodeOptions: { cwd: pkg.path } });
     if (publishResult.exitCode !== 0) {
       return {
         type: "failed",
@@ -556,9 +387,7 @@ async function publish(
         ).message,
       };
     }
-    return {
-      type: "published",
-    };
+    return { type: "published" };
   }
 
   let command: AgentName;
@@ -574,12 +403,7 @@ async function publish(
     command = "npm";
   }
 
-  const result = await x(command, args, {
-    nodeOptions: {
-      cwd: pkg.path,
-    },
-  });
-
+  const result = await x(command, args, { nodeOptions: { cwd: pkg.path } });
   if (result.exitCode !== 0) {
     return {
       type: "failed",
@@ -590,9 +414,7 @@ async function publish(
     };
   }
 
-  return {
-    type: "published",
-  };
+  return { type: "published" };
 }
 
 async function isPackagePublished(
@@ -612,60 +434,4 @@ async function isPackagePublished(
   }
 
   return true;
-}
-
-async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
-  const rootManifest = await readManifest(cwd).catch(() => undefined);
-  const pnpmPatterns = await readFile(path.join(cwd, "pnpm-workspace.yaml"), "utf8")
-    .then((content) => assertPnpmWorkspace(parse(content)))
-    .catch((error: unknown) => {
-      if (isNodeError(error) && error.code === "ENOENT") return undefined;
-      throw error;
-    });
-
-  if (rootManifest?.name) {
-    add(new NpmPackage(cwd, rootManifest));
-  }
-
-  const patterns = pnpmPatterns?.packages ?? rootManifest?.workspaces;
-  if (!patterns || patterns.length === 0) return;
-
-  const candidatePaths = await expandWorkspacePatterns(cwd, patterns);
-  const manifests = await Promise.all(
-    candidatePaths.map((path) =>
-      readManifest(path)
-        .then((manifest) => ({ path, manifest }))
-        .catch(() => undefined),
-    ),
-  );
-
-  for (const entry of manifests) {
-    if (!entry) continue;
-    add(new NpmPackage(entry.path, entry.manifest));
-  }
-}
-
-async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise<string[]> {
-  if (patterns.length === 0) return [];
-
-  const results = await glob(patterns, {
-    absolute: true,
-    cwd,
-    ignore: ["**/node_modules/**", "**/dist/**"],
-    onlyDirectories: true,
-    onlyFiles: false,
-  });
-
-  return results.map((item) => {
-    return item.endsWith(path.sep) ? item.slice(0, -1) : item;
-  });
-}
-
-async function readManifest(packagePath: string): Promise<PackageManifest> {
-  const content = await readFile(path.join(packagePath, "package.json"), "utf8");
-  const parsed = JSON.parse(content);
-
-  // validation only
-  assertPackageManifest(parsed);
-  return parsed;
 }

@@ -207,7 +207,7 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
     );
     exec.mockImplementation(() => commandResult());
 
-    const result = await withCargo({ cwd, npm: { client: "npm" } }).publish();
+    const result = await withCargo({ cwd, npm: { client: "pnpm" } }).publish();
 
     if (result === "skipped") {
       throw new Error("expected publish plan, got skipped");
