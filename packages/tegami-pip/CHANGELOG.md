@@ -1,3 +1,9 @@
+## @tegami/pip@1.1.1
+
+### Experiment `typia` compile-time validation
+
+Try to precompile schema using `typia`.
+
 ## @tegami/pip@1.0.2
 
 ### Align pip workspace handling with uv
