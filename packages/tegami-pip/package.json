@@ -1,6 +1,6 @@
 {
   "name": "@tegami/pip",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Python workspace support and PyPI publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",
