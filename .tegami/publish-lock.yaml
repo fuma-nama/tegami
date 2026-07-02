@@ -1,84 +1,12 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:tegami:\n    type: major\n---\n\n### Make Cargo plugin opt-in\n\nThe Cargo plugin is no longer enabled by default. Add `cargo()` from `tegami/plugins/cargo` to your `plugins` array for Rust workspace support.\n"
-    filename: 2026-06-30-cargo-optin.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Improve Cargo performance by pre-indexing dependencies\n\nThe dependencies of `Cargo.toml` will be pre-indexed to improve performance in large monorepos.\n"
+    filename: 2026-07-02-mr3anaoq.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support `npm pretrust` command\n\nUseful for publishing new packages with trusted publishing.\n"
-    filename: 2026-06-30-mr0jrgvq.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Support `prerelease(name)` replay condition\n\nTegami now supports replay condition when entering prerelease.\n"
+    filename: 2026-07-02-mr3cbjht.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:tegami:\n    type: major\n---\n\n## v1 stable\n\nThis marks all v1 APIs as stable.\n"
-    filename: 2026-06-30-mr0qp0w8.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Generate dist tag for npm in prerelease mode\n\n`npm publish` now requires `tag` for prerelease versions.\n"
-    filename: 2026-06-27-mqv6tiot.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Plugin `afterPublish` no longer fired for skipped packages\n\nThe `afterPublish` hook of plugins will no longer be fired for skipped packages.\n"
-    filename: 2026-06-27-mqwcpkfe.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Add support for Golang\n\nExperimental plugin available at `/plugins/go`.\n"
-    filename: 2026-06-27-mqwfcq94.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Ready for v1\n\nThis marks all existing APIs as stable & safe to use.\n"
-    filename: 2026-06-27-mqwfe2p2.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Support function `packages` option\n\nThe `packages` option can now return package options dynamically.\n"
-    filename: 2026-06-27-mqwidtwo.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Include packages without `version`\n\nPreviously, packages without a version field defined in `package.json` or `Cargo.toml` will be ignored from graph, now those packages will be included.\n\nThis may add unwanted packages into versioning, please update your `ignore` config if needed.\n"
-    filename: 2026-06-27-mqwix8n1.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Fix prerelease tag switching\n\nSwitch prerelease tag without triggering another bump.\n"
-    filename: 2026-06-27-mqwjetwh.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: tegami'\n---\n\n## Auto replay when prerelease is configured\n\nNo longer need to write replay conditions manually.\n"
-    filename: 2026-06-28-mqwk3fdh.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Handle empty `version` fields in `Cargo.toml` & `package.json`\n\nNo longer bump versions when `version` field is not defined.\n"
-    filename: 2026-06-28-mqxcauc5.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Fix replaying changelogs showing in PR body\n\nNo longer show replay-only changelogs in PR previews.\n"
-    filename: 2026-06-28-mqxcbt4c.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Show bumped packages of each changelog\n\nThe PR preview body now show the bumped packages of each changelog, in a collapsible.\n"
-    filename: 2026-06-28-mqxcwmrv.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Change behaviour of `publishPreflight` hook\n\nNow only the first handler plugin will be considered, no longer merges results.\n"
-    filename: 2026-06-28-mqxkybqv.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Replace `preflight.publish` with `preflight.shouldPublish`\n\nThe publish checking will only happen at publish-time & plan resolve.\n"
-    filename: 2026-06-28-mqxkzame.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n### Fix CLI parsing for options without short flags\n\nRelease preview workflows failed when passing `--artifact` because Node's argument parser rejects `short: undefined`.\n"
-    filename: 2026-06-29-cli-artifact-fix.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Improve GitHub release notes\n\nThe release notes can now display related PRs & contributors.\n"
-    filename: 2026-06-29-mqy1hys5.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Support `go.publish` option\n\nDecide whether a Go package should be published via the `go.publish` option, default to `true`.\n"
-    filename: 2026-06-29-mqy1w07a.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Drop MDAST dependencies\n\nTegami only requires extracting headings and preserves formatting, a regex alternative is lighter, better, and faster.\n"
-    filename: 2026-06-29-mqy3y8qs.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Remove dependency for parsing\n\nReplace extra dependencies with `util:parseArgs`.\n"
-    filename: 2026-06-29-mqy5nzrz.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Add GitLab plugin\n\nTegami now includes a GitLab plugin with version merge requests, GitLab releases, tag handling, and release note links for commits and related merge requests.\n"
-    filename: 2026-06-29-mqygitlb.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Allow plugins to add CLI commands\n\nPlugins can now hook on `runCli` hook to add custom commands.\n"
-    filename: 2026-06-29-mqz0vmbb.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Strict checks for Git tags\n\nHandle concurrent runs & without `git pull`.\n"
-    filename: 2026-06-29-mqzdjsbe.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Support `no-checks` option in `version` command\n\nAllows to skip publish plan status checks.\n"
-    filename: 2026-06-29-mqze0dsn.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n## Move request preview commands into plugins\n\nThe GitHub plugin now provides `tegami pr`, and the GitLab plugin provides `tegami mr` for merge request previews and comments.\n\nPlugin CLI commands now register through the `initCli` hook, so `tegami --help` and grouped help output include plugin-provided commands.\n"
-    filename: 2026-06-29-mrprcmds.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    replay:\n      - 'exit prerelease: npm:tegami'\n---\n\n### Add pip plugin\n\nTegami now includes an opt-in pip plugin at `@tegami/pip` for Python monorepos. It discovers packages from `pyproject.toml`, supports uv workspaces, bumps dependency ranges, runs `uv lock` after versioning, and publishes to PyPI with `uv publish`.\n"
-    filename: 2026-06-29-pipplugin.md
+  - content: "---\npackages:\n  npm:@tegami/dart:\n    type: minor\n---\n\n### Add Dart pub plugin\n\nTegami now includes an opt-in Dart plugin at `@tegami/dart` for official pub workspaces. It discovers packages from `pubspec.yaml`, bumps workspace dependency ranges, runs `dart pub get` after versioning, and publishes with `dart pub publish`, adding `--force` in CI.\n"
+    filename: 2026-07-02-a9d4e2.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -86,39 +14,15 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-06-30-cargo-optin.md
-      - 2026-06-30-mr0jrgvq.md
-      - 2026-06-30-mr0qp0w8.md
-      - 2026-06-27-mqv6tiot.md
-      - 2026-06-27-mqwcpkfe.md
-      - 2026-06-27-mqwfcq94.md
-      - 2026-06-27-mqwfe2p2.md
-      - 2026-06-27-mqwidtwo.md
-      - 2026-06-27-mqwix8n1.md
-      - 2026-06-27-mqwjetwh.md
-      - 2026-06-28-mqwk3fdh.md
-      - 2026-06-28-mqxcauc5.md
-      - 2026-06-28-mqxcbt4c.md
-      - 2026-06-28-mqxcwmrv.md
-      - 2026-06-28-mqxkybqv.md
-      - 2026-06-28-mqxkzame.md
-      - 2026-06-29-cli-artifact-fix.md
-      - 2026-06-29-mqy1hys5.md
-      - 2026-06-29-mqy1w07a.md
-      - 2026-06-29-mqy3y8qs.md
-      - 2026-06-29-mqy5nzrz.md
-      - 2026-06-29-mqygitlb.md
-      - 2026-06-29-mqz0vmbb.md
-      - 2026-06-29-mqzdjsbe.md
-      - 2026-06-29-mqze0dsn.md
-      - 2026-06-29-mrprcmds.md
-      - 2026-06-29-pipplugin.md
+      - 2026-07-02-mr3anaoq.md
+      - 2026-07-02-mr3cbjht.md
     id: npm:tegami
     updated: true
   - changelogIds:
-      - 2026-06-30-cargo-optin.md
-      - 2026-06-30-mr0qp0w8.md
-    id: npm:@tegami/pip
+      - 2026-07-02-a9d4e2.md
+    id: npm:@tegami/dart
+    updated: true
+  - id: npm:@tegami/pip
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
@@ -126,5 +30,6 @@ npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
+  - id: npm:@tegami/dart
   - id: npm:@tegami/pip
   - id: npm:@repo/typescript-config

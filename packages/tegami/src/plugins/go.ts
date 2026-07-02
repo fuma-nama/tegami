@@ -225,10 +225,7 @@ export function go({
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof GoPackage)) return;
 
-      const shouldPublish =
-        pkg.getPackageOptions().go?.publish ??
-        this.graph.getPackageGroup(pkg.id)?.options?.go?.publish ??
-        true;
+      const shouldPublish = pkg.options.go?.publish ?? pkg.group?.options?.go?.publish ?? true;
       const wait: string[] = [];
 
       for (const [moduleName] of pkg.mod.requires) {
@@ -319,12 +316,11 @@ function depsPolicy(
       const deps = dependentMap.get(pkg.id);
       if (!deps) return;
 
-      const group = graph.getPackageGroup(pkg.id);
       const bumped = plan.bumpVersion(pkg);
       if (!bumped) return;
 
       for (const dep of deps) {
-        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+        if (pkg.group?.options.syncBump && dep.dependent.group === pkg.group) {
           continue;
         }
 

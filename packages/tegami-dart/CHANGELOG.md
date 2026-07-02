@@ -1,0 +1,5 @@
+## @tegami/dart@1.1.0
+
+### Add Dart pub plugin
+
+Tegami now includes an opt-in Dart plugin at `@tegami/dart` for official pub workspaces. It discovers packages from `pubspec.yaml`, bumps workspace dependency ranges, runs `dart pub get` after versioning, and publishes with `dart pub publish`, adding `--force` in CI.

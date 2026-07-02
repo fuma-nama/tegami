@@ -1,4 +1,5 @@
 import { RANGE_PATTERN } from "@renovatebot/pep440";
+import { joinPath } from "tegami/utils";
 import { simpleIndexProjectSchema } from "./schema";
 
 const COMPARATOR = new RegExp(`^${RANGE_PATTERN}$`, "i");
@@ -26,24 +27,26 @@ export function updateConstraintRange(range: string, version: string): string {
     .join(",");
 }
 
-export async function isPackagePublished(name: string, version: string, indexUrl: string) {
-  const base = indexUrl.endsWith("/") ? indexUrl : `${indexUrl}/`;
-  const normalized = normalizePyPiName(name);
-  const response = await fetch(`${base}${encodeURIComponent(normalized)}/`, {
+export async function isPackagePublished(
+  normalizedName: string,
+  version: string,
+  indexUrl: string,
+) {
+  const response = await fetch(joinPath(indexUrl, encodeURIComponent(normalizedName), "/"), {
     headers: { Accept: "application/vnd.pypi.simple.v1+json" },
   });
 
   if (response.status === 404) return false;
   if (!response.ok) {
     throw new Error(
-      `Unable to validate ${name}@${version} on ${indexUrl}: ${await response.text()}`,
+      `Unable to validate ${normalizedName}@${version} on ${indexUrl}: ${await response.text()}`,
     );
   }
 
   const { data } = simpleIndexProjectSchema.safeParse(await response.json());
   if (!data?.files || data.files.length === 0) return false;
 
-  const dist = escapeRegex(normalized);
+  const dist = escapeRegex(normalizedName);
   const ver = escapeRegex(version);
   const wheel = new RegExp(`^${dist}-${ver}(?:-\\d[^-]*)?-.+\\.whl$`, "i");
   const sdist = new RegExp(`^${dist}-${ver}\\.(?:tar\\.gz|tar\\.bz2|tar\\.xz|tar|zip)$`, "i");

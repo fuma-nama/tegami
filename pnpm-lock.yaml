@@ -134,6 +134,43 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  packages/tegami-dart:
+    dependencies:
+      js-yaml:
+        specifier: ^5.2.0
+        version: 5.2.0
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.3
+        version: 0.22.3(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/tegami-pip:
     dependencies:
       '@rainbowatcher/toml-edit-js':

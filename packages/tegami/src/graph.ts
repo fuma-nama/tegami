@@ -9,20 +9,13 @@ export abstract class WorkspacePackage {
   abstract readonly path: string;
   abstract readonly manager: string;
   abstract readonly version: string | undefined;
+  /** note: this will only be available after package graph is resolved */
+  group?: PackageGroup;
+  /** note: this will only be available after package graph is resolved */
+  options: PackageOptions = {};
 
   get id(): string {
     return `${this.manager}:${this.name}`;
-  }
-
-  private opts: PackageOptions = {};
-
-  /** note: this will only be available after package graph is resolved */
-  getPackageOptions(): PackageOptions {
-    return this.opts;
-  }
-
-  setPackageOptions(options: PackageOptions) {
-    this.opts = options;
   }
 
   /** create the initial draft. */
@@ -36,8 +29,8 @@ export abstract class WorkspacePackage {
   }
 
   /** configure an initial draft to match script-level configs. */
-  configureDraft(draft: PackageDraft, group?: PackageGroup): void {
-    const { prerelease = group?.options?.prerelease } = this.opts;
+  configureDraft({ draft }: { draft: PackageDraft }): void {
+    const { prerelease = this.group?.options?.prerelease } = this.options;
 
     if (prerelease !== undefined) draft.prerelease = prerelease;
   }
@@ -49,15 +42,14 @@ export interface PackageGroup {
   packages: WorkspacePackage[];
 }
 
-/** Dependency graph for discovered workspace packages. */
+/**
+ * Unified graph for discovered workspace packages.
+ *
+ * This is only used as a storage for all indexed packages.
+ * For registry-specific relationships (e.g. virtual workspaces), they are stored in the provider plugin internally.
+ */
 export class PackageGraph {
-  private readonly packages = new Map<
-    string,
-    {
-      value: WorkspacePackage;
-      group?: PackageGroup;
-    }
-  >();
+  private readonly packages = new Map<string, WorkspacePackage>();
   private readonly groups = new Map<string, PackageGroup>();
 
   constructor(packages: WorkspacePackage[] = []) {
@@ -67,29 +59,25 @@ export class PackageGraph {
   }
 
   getPackages(): WorkspacePackage[] {
-    const out: WorkspacePackage[] = [];
-    for (const pkg of this.packages.values()) {
-      out.push(pkg.value);
-    }
-    return out;
+    return Array.from(this.packages.values());
   }
 
   /** Get a package by exact id. */
   get(id: string): WorkspacePackage | undefined {
-    return this.packages.get(id)?.value;
+    return this.packages.get(id);
   }
 
   /** Get packages by id, `group:name`, or every package matching a name. */
   getByName(nameOrId: string): WorkspacePackage[] {
     const exact = this.packages.get(nameOrId);
-    if (exact) return [exact.value];
+    if (exact) return [exact];
 
     if (nameOrId.startsWith("group:")) {
       return this.getGroup(nameOrId.slice("group:".length))?.packages ?? [];
     }
 
     const out: WorkspacePackage[] = [];
-    for (const { value } of this.packages.values()) {
+    for (const value of this.packages.values()) {
       if (value.name === nameOrId) out.push(value);
     }
     return out;
@@ -98,7 +86,7 @@ export class PackageGraph {
   /** scan package into graph, if the package id already exists, replace the existing one in graph */
   add(pkg: WorkspacePackage): void {
     this.delete(pkg.id);
-    this.packages.set(pkg.id, { value: pkg });
+    this.packages.set(pkg.id, pkg);
   }
 
   delete(id: string): void {
@@ -140,7 +128,7 @@ export class PackageGraph {
     if (!group || !pkg || pkg.group) return;
 
     pkg.group = group;
-    group.packages.push(pkg.value);
+    group.packages.push(pkg);
   }
 
   removeGroupMember(group: string, id: string): void {

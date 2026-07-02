@@ -1,43 +1,89 @@
 import z from "zod";
 
+const baseDepSchema = z.object({
+  package: z.string().optional(),
+  features: z.array(z.string()).optional(),
+  optional: z.boolean().optional(),
+  "default-features": z.boolean().optional(),
+});
+
+/** `{ workspace = true }` — inherit from `[workspace.dependencies]` */
+const workspaceDependencySchema = baseDepSchema.extend({
+  workspace: z.literal(true),
+});
+
+/** `{ path = "../lib" }` — optional `version` for publishing */
+const pathDependencySchema = baseDepSchema.extend({
+  path: z.string(),
+  version: z.string().optional(),
+});
+
+/** `{ git = "…" }` — exactly one of `branch`, `tag`, or `rev` in practice */
+const gitDependencySchema = baseDepSchema.extend({
+  git: z.string(),
+  branch: z.string().optional(),
+  tag: z.string().optional(),
+  rev: z.string().optional(),
+  version: z.string().optional(),
+});
+
+/** `{ version = "1.0" }` — crates.io or `[registries]` */
+const registryDependencySchema = baseDepSchema.extend({
+  version: z.string(),
+  registry: z.string().optional(),
+});
+
+/**
+ * @see https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
+ */
 const cargoDependencySchema = z.union([
   z.string(),
-  z.object({
-    version: z.string(),
-    package: z.string().optional(),
-    path: z.string().optional(),
-  }),
+  workspaceDependencySchema,
+  pathDependencySchema,
+  gitDependencySchema,
+  registryDependencySchema,
 ]);
 
-const cargoTargetConfigSchema = z.object({
+const cargoInheritSchema = z.looseObject({
+  workspace: z.literal(true),
+});
+
+const cargoWorkspaceSchema = z.looseObject({
+  members: z.array(z.string()).optional(),
+  exclude: z.array(z.string()).optional(),
+  package: z
+    .looseObject({
+      version: z.string().optional(),
+      publish: z.boolean().optional(),
+    })
+    .optional(),
   dependencies: z.record(z.string(), cargoDependencySchema).optional(),
   "dev-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
   "build-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
 });
 
-const cargoPackageSchema = z.object({
-  name: z.string(),
-  version: z.string().optional(),
-  publish: z.boolean().optional(),
-});
-
-const cargoWorkspaceSchema = z.object({
-  members: z.array(z.string()).optional(),
-  exclude: z.array(z.string()).optional(),
+export const cargoManifestSchema = z.looseObject({
   package: z
-    .object({
-      version: z.string().optional(),
+    .looseObject({
+      name: z.string(),
+      version: z.string().or(cargoInheritSchema),
+      publish: z.boolean().or(cargoInheritSchema).optional(),
     })
     .optional(),
-});
-
-export const cargoManifestSchema = z.object({
-  package: cargoPackageSchema,
   workspace: cargoWorkspaceSchema.optional(),
   dependencies: z.record(z.string(), cargoDependencySchema).optional(),
   "dev-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
   "build-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
-  target: z.record(z.string(), cargoTargetConfigSchema).optional(),
+  target: z
+    .record(
+      z.string(),
+      z.looseObject({
+        dependencies: z.record(z.string(), cargoDependencySchema).optional(),
+        "dev-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
+        "build-dependencies": z.record(z.string(), cargoDependencySchema).optional(),
+      }),
+    )
+    .optional(),
 });
 
 export type CargoDependency = z.infer<typeof cargoDependencySchema>;

@@ -102,7 +102,7 @@ describe("isPackagePublished", () => {
     );
   });
 
-  test("normalizes the project name per PEP 503", async () => {
+  test("queries the PyPI index with a normalized project name", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -114,7 +114,7 @@ describe("isPackagePublished", () => {
     );
 
     await expect(
-      isPackagePublished("My.Package", "1.1.0", "https://pypi.org/simple/"),
+      isPackagePublished(normalizePyPiName("My.Package"), "1.1.0", "https://pypi.org/simple/"),
     ).resolves.toBe(true);
   });
 });
@@ -162,13 +162,18 @@ Note.
       version: pkg.version,
     }));
 
-    expect(packages).toHaveLength(3);
+    expect(packages).toHaveLength(4);
     expect(packages).toEqual(
       expect.arrayContaining([
         {
           manager: "npm",
           name: "@acme/js",
           version: "1.0.0",
+        },
+        {
+          manager: "pip",
+          name: "acme-workspace",
+          version: "0.0.0",
         },
         {
           manager: "pip",
@@ -208,7 +213,9 @@ Note.
     while ((entry = lock.read("core:packages"))) {
       packageIds.push((entry as { id: string }).id);
     }
-    expect(packageIds.sort()).toEqual(["npm:@acme/js", "pip:acme-api", "pip:acme-core"].sort());
+    expect(packageIds.sort()).toEqual(
+      ["npm:@acme/js", "pip:acme-api", "pip:acme-core", "pip:acme-workspace"].sort(),
+    );
   });
 
   test("updates compatible-release constraints with PEP 440 semantics", async () => {
@@ -376,7 +383,7 @@ Bump core.
     while ((entry = lock.read("core:packages"))) {
       packageIds.push((entry as { id: string }).id);
     }
-    expect(packageIds.sort()).toEqual(["npm:pkg-a", "pip:pkg-a"]);
+    expect(packageIds.sort()).toEqual(["npm:pkg-a", "pip:duplicate-workspace", "pip:pkg-a"].sort());
   });
 
   test("preserves pyproject.toml formatting and comments when applying a plan", async () => {
@@ -722,10 +729,187 @@ Release to TestPyPI.
 });
 
 describe("pyproject manifest schema", () => {
-  test("requires a project section", () => {
-    expect(() =>
-      pyprojectManifestSchema.parse(parse(`[tool.uv.workspace]\nmembers = ["packages/*"]\n`)),
-    ).toThrow();
+  test("accepts a virtual workspace root without a project section", () => {
+    const manifest = pyprojectManifestSchema.parse(
+      parse(`[tool.uv.workspace]\nmembers = ["packages/*"]\n`),
+    );
+
+    expect(manifest.project).toBeUndefined();
+    expect(manifest.tool?.uv?.workspace?.members).toEqual(["packages/*"]);
+  });
+
+  test("accepts workspace exclude globs", () => {
+    const manifest = pyprojectManifestSchema.parse(
+      parse(`[tool.uv.workspace]\nmembers = ["packages/*"]\nexclude = ["packages/seeds"]\n`),
+    );
+
+    expect(manifest.tool?.uv?.workspace?.exclude).toEqual(["packages/seeds"]);
+  });
+});
+
+describe("pip workspace handling", () => {
+  test("discovers members from a virtual workspace root", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-virtual-root-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+
+    await writeFile(join(cwd, "pyproject.toml"), `[tool.uv.workspace]\nmembers = ["packages/*"]\n`);
+    await writeFile(
+      join(cwd, "packages/core/pyproject.toml"),
+      `[project]\nname = "acme-core"\nversion = "1.0.0"\n`,
+    );
+
+    const graph = (await tegami({ cwd, plugins: [pip()] })._internal.context()).graph;
+    expect(graph.getPackages().map((pkg) => pkg.id)).toEqual(["pip:acme-core"]);
+  });
+
+  test("includes the workspace root as a graph member", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-root-member-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+
+    await writeFile(
+      join(cwd, "pyproject.toml"),
+      `[project]\nname = "acme-root"\nversion = "1.0.0"\n\n[tool.uv.workspace]\nmembers = ["packages/*"]\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/core/pyproject.toml"),
+      `[project]\nname = "acme-core"\nversion = "1.0.0"\n`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["acme-root"]
+---
+
+## Root release
+
+Bump the workspace root.
+`,
+    );
+
+    exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
+      ReturnType<typeof x>
+    >);
+    await tegami({ cwd, plugins: [pip()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const root = await readPyproject(cwd);
+    expect(table(root.project)?.version).toBe("1.1.0");
+  });
+
+  test("inherits workspace sources from the root manifest", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-root-sources-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/api"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+
+    await writeFile(
+      join(cwd, "pyproject.toml"),
+      `[project]\nname = "acme-root"\nversion = "0.0.0"\n\n[tool.uv.sources]\nacme-core = { workspace = true }\n\n[tool.uv.workspace]\nmembers = ["packages/*"]\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/core/pyproject.toml"),
+      `[project]\nname = "acme-core"\nversion = "1.0.0"\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/api/pyproject.toml"),
+      `[project]\nname = "acme-api"\nversion = "1.0.0"\ndependencies = ["acme-core>=1.0.0"]\n`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["acme-core"]
+---
+
+## Core release
+
+Bump core.
+`,
+    );
+
+    exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
+      ReturnType<typeof x>
+    >);
+    await tegami({ cwd, plugins: [pip()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const api = await readPyproject(join(cwd, "packages/api"));
+    expect(table(api.project)?.version).toBe("1.0.1");
+  });
+
+  test("matches workspace sources by normalized dependency names", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-normalized-source-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/api"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+
+    await writeFile(
+      join(cwd, "pyproject.toml"),
+      `[project]\nname = "acme-root"\nversion = "0.0.0"\n\n[tool.uv.workspace]\nmembers = ["packages/*"]\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/core/pyproject.toml"),
+      `[project]\nname = "My.Package"\nversion = "1.0.0"\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/api/pyproject.toml"),
+      `[project]\nname = "acme-api"\nversion = "1.0.0"\ndependencies = ["my-package>=1.0.0"]\n\n[tool.uv.sources]\nmy-package = { workspace = true }\n`,
+    );
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages: ["My.Package"]
+---
+
+## Core release
+
+Bump core.
+`,
+    );
+
+    exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" } as Awaited<
+      ReturnType<typeof x>
+    >);
+    await tegami({ cwd, plugins: [pip()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const api = await readPyproject(join(cwd, "packages/api"));
+    expect(table(api.project)?.version).toBe("1.0.1");
+  });
+
+  test("excludes workspace members listed in tool.uv.workspace.exclude", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-pip-exclude-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/seeds"), { recursive: true });
+
+    await writeFile(
+      join(cwd, "pyproject.toml"),
+      `[project]\nname = "acme-root"\nversion = "0.0.0"\n\n[tool.uv.workspace]\nmembers = ["packages/*"]\nexclude = ["packages/seeds"]\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/core/pyproject.toml"),
+      `[project]\nname = "acme-core"\nversion = "1.0.0"\n`,
+    );
+    await writeFile(
+      join(cwd, "packages/seeds/pyproject.toml"),
+      `[project]\nname = "acme-seeds"\nversion = "1.0.0"\n`,
+    );
+
+    const graph = (await tegami({ cwd, plugins: [pip()] })._internal.context()).graph;
+    expect(
+      graph
+        .getPackages()
+        .map((pkg) => pkg.id)
+        .sort(),
+    ).toEqual(["pip:acme-core", "pip:acme-root"].sort());
   });
 });
 

@@ -1,13 +1,13 @@
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "./draft";
 
-export function groupPolicy({ graph }: TegamiContext): DraftPolicy {
+export function groupPolicy(_ctx: TegamiContext): DraftPolicy {
   return {
     id: "group",
     onUpdate({ pkg, packageDraft }) {
       if (!packageDraft.type) return;
 
-      const group = graph.getPackageGroup(pkg.id);
+      const group = pkg.group;
       if (!group || !group.options.syncBump) return;
 
       for (const member of group.packages) {

@@ -8,7 +8,7 @@ import type { TegamiContext } from "../context";
 import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "./npm/schema";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
-import { PackageGroup, WorkspacePackage } from "../graph";
+import { WorkspacePackage } from "../graph";
 import { detect } from "package-manager-detector";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy, PackageDraft } from "../plans/draft";
@@ -63,10 +63,10 @@ export class NpmPackage extends WorkspacePackage {
     return this.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
   }
 
-  configureDraft(draft: PackageDraft, group?: PackageGroup): void {
-    super.configureDraft(draft, group);
+  configureDraft({ draft }: { draft: PackageDraft }): void {
+    super.configureDraft({ draft });
 
-    const { distTag = group?.options?.npm?.distTag } = this.getPackageOptions().npm ?? {};
+    const { distTag = this.group?.options?.npm?.distTag } = this.options.npm ?? {};
 
     if (distTag) {
       draft.npm ??= {};
@@ -475,12 +475,11 @@ function depsPolicy(
       const deps = dependentMap.get(pkg.id);
       if (!deps) return;
 
-      const group = graph.getPackageGroup(pkg.id);
       const bumped = plan.bumpVersion(pkg);
       if (!bumped) return;
 
       for (const dep of deps) {
-        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+        if (pkg.group?.options.syncBump && dep.dependent.group === pkg.group) {
           // they will always bump together
           continue;
         }

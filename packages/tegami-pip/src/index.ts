@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join, normalize, resolve } from "node:path";
+import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import { satisfies, validRange } from "@renovatebot/pep440";
@@ -8,24 +8,33 @@ import { x } from "tinyexec";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure } from "tegami/utils";
-import { pyprojectManifestSchema, type PyprojectManifest, type UvIndex } from "./schema";
-import { isPackagePublished, updateConstraintRange } from "./utils";
+import {
+  pyprojectManifestSchema,
+  type PyprojectManifest,
+  type UvIndex,
+  type UvSource,
+} from "./schema";
+import { isPackagePublished, normalizePyPiName, updateConstraintRange } from "./utils";
 
 const DEP_FIELDS = ["dependencies", "optional-dependencies", "dependency-groups"] as const;
 
 export class PipPackage extends WorkspacePackage {
   readonly manager = "pip";
+  readonly name: string;
+  readonly normalizedName: string;
 
   constructor(
     readonly path: string,
-    readonly manifest: PyprojectManifest,
+    readonly manifest: PyprojectManifest & {
+      project: NonNullable<PyprojectManifest["project"]>;
+    },
     private content: string,
+    /** Workspace root manifest; member sources override these entries. */
+    readonly workspaceRoot?: PyprojectManifest,
   ) {
     super();
-  }
-
-  get name(): string {
-    return this.projectInfo.name;
+    this.name = this.projectInfo.name;
+    this.normalizedName = normalizePyPiName(this.projectInfo.name);
   }
 
   get version(): string | undefined {
@@ -38,7 +47,7 @@ export class PipPackage extends WorkspacePackage {
   }
 
   async write(): Promise<void> {
-    await writeFile(join(this.path, "pyproject.toml"), this.content + "\n");
+    await writeFile(path.join(this.path, "pyproject.toml"), this.content + "\n");
   }
 
   patch(path: string, value: unknown): void {
@@ -121,7 +130,8 @@ export function pip({
         if (!preflight!.shouldPublish) return;
         const pkg = this.graph.get(id)!;
         if (!(pkg instanceof PipPackage) || !pkg.version) return;
-        if (!(await isPackagePublished(pkg.name, pkg.version, publishTarget.url))) return "pending";
+        if (!(await isPackagePublished(pkg.normalizedName, pkg.version, publishTarget.url)))
+          return "pending";
       });
     },
     async publish({ pkg }) {
@@ -193,8 +203,7 @@ export function pip({
               continue;
             }
 
-            const workspace = pkg.manifest.tool?.uv?.sources?.[spec.name]?.workspace === true;
-            if (!workspace || satisfies(linked.version, spec.version)) {
+            if (!isWorkspaceDep(pkg, spec.name) || satisfies(linked.version, spec.version)) {
               next.push(rawSpec);
               continue;
             }
@@ -253,8 +262,7 @@ function depsPolicy(
         const linked = resolveLinkedPackage(graph, pkg, spec);
         if (!linked) continue;
 
-        const workspace = pkg.manifest.tool?.uv?.sources?.[spec.name]?.workspace === true;
-        if (!workspace) continue;
+        if (!isWorkspaceDep(pkg, spec.name)) continue;
 
         const refs = dependentMap.get(linked.id);
         if (refs) refs.push({ dependent: pkg, kind, spec, linked });
@@ -294,18 +302,26 @@ function depsPolicy(
 function resolveLinkedPackage(
   graph: PackageGraph,
   pkg: PipPackage,
-  spec: NonNullable<ReturnType<typeof parseDependencySpec>>,
+  spec: DependencySpec,
 ): PipPackage | undefined {
-  const linked = graph.get(`pip:${spec.name}`);
-  if (linked instanceof PipPackage) return linked;
+  const normalizedName = normalizePyPiName(spec.name);
+  const byName = graph
+    .getPackages()
+    .find(
+      (candidate): candidate is PipPackage =>
+        candidate instanceof PipPackage && candidate.normalizedName === normalizedName,
+    );
+  if (byName) return byName;
 
-  const source = pkg.manifest.tool?.uv?.sources?.[spec.name];
+  const source = resolveUvSource(pkg, spec.name);
   let absolute: string;
 
   if (source?.path) {
-    absolute = resolve(pkg.path, source.path);
+    absolute = path.resolve(pkg.path, source.path);
   } else if ("url" in spec && spec.url.startsWith("file:")) {
-    absolute = fileURLToPath(new URL(spec.url, pathToFileURL(join(pkg.path, "pyproject.toml"))));
+    absolute = fileURLToPath(
+      new URL(spec.url, pathToFileURL(path.join(pkg.path, "pyproject.toml"))),
+    );
   } else {
     return;
   }
@@ -318,11 +334,22 @@ function resolveLinkedPackage(
     );
 }
 
-async function buildEntry(path: string) {
+interface PyprojectEntry {
+  manifest: PyprojectManifest;
+  content: string;
+  path: string;
+}
+
+async function buildEntry(dir: string, requireProject = true): Promise<PyprojectEntry | undefined> {
   try {
-    path = normalize(path);
-    const content = await readFile(join(path, "pyproject.toml"), "utf8");
-    return { manifest: pyprojectManifestSchema.parse(parse(content)), content, path };
+    const content = await readFile(path.join(dir, "pyproject.toml"), "utf8");
+    const manifest = pyprojectManifestSchema.parse(parse(content));
+    if (requireProject && !manifest.project?.name) return;
+    return {
+      manifest,
+      content,
+      path: dir.endsWith(path.sep) ? dir.slice(0, -1) : dir,
+    };
   } catch {
     return;
   }
@@ -332,30 +359,66 @@ async function discoverPipPackages(
   cwd: string,
   add: (pkg: PipPackage) => void,
 ): Promise<PyprojectManifest | undefined> {
-  const root = await buildEntry(cwd);
+  const root = await buildEntry(cwd, false);
   if (!root) return;
 
-  const members = root.manifest.tool?.uv?.workspace?.members;
-  if (members && members.length > 0) {
-    const paths = await glob(members, {
+  const workspace = root.manifest.tool?.uv?.workspace;
+  const rootManifest = root.manifest;
+  const entries: PyprojectEntry[] = [root];
+  if (workspace?.members?.length) {
+    const paths = await glob(workspace.members, {
       absolute: true,
       cwd,
-      ignore: ["**/.venv/**", "**/__pycache__/**", "**/dist/**"],
+      ignore: ["**/.venv/**", "**/__pycache__/**", "**/dist/**", ...(workspace.exclude ?? [])],
       onlyDirectories: true,
       onlyFiles: false,
     });
 
-    const manifests = await Promise.all(paths.map(buildEntry));
+    await Promise.all(
+      paths.map(async (dir) => {
+        const entry = await buildEntry(dir);
+        if (entry) entries.push(entry);
+      }),
+    );
+  }
 
-    for (const entry of manifests) {
-      if (entry?.manifest.project?.name)
-        add(new PipPackage(entry.path, entry.manifest, entry.content));
-    }
-  } else if (root.manifest.project?.name) {
-    add(new PipPackage(cwd, root.manifest, root.content));
+  for (const entry of entries) {
+    if (!entry?.manifest.project?.name) continue;
+    add(
+      new PipPackage(
+        entry.path,
+        entry.manifest as PipPackage["manifest"],
+        entry.content,
+        workspace ? rootManifest : undefined,
+      ),
+    );
   }
 
   return root.manifest;
+}
+
+function findUvSource(
+  sources: Record<string, UvSource> | undefined,
+  depName: string,
+): UvSource | undefined {
+  if (!sources) return;
+  const normalized = normalizePyPiName(depName);
+  for (const [key, source] of Object.entries(sources)) {
+    if (normalizePyPiName(key) === normalized) return source;
+  }
+}
+
+function resolveUvSource(pkg: PipPackage, depName: string): UvSource | undefined {
+  const local = findUvSource(pkg.manifest.tool?.uv?.sources, depName);
+  if (local) return local;
+
+  const root = pkg.workspaceRoot;
+  if (!root || root === pkg.manifest) return;
+  return findUvSource(root.tool?.uv?.sources, depName);
+}
+
+function isWorkspaceDep(pkg: PipPackage, depName: string): boolean {
+  return resolveUvSource(pkg, depName)?.workspace === true;
 }
 
 function dependencyTables(manifest: PyprojectManifest) {

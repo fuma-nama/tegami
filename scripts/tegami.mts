@@ -46,6 +46,9 @@ const paper = tegami({
     "@tegami/pip": {
       group: "tegami",
     },
+    "@tegami/dart": {
+      group: "tegami",
+    },
   },
 });
 
