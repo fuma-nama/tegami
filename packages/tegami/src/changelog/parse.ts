@@ -112,33 +112,65 @@ export function parseChangelogFile(filename: string, content: string): Changelog
   return entry;
 }
 
-export type ParsedReplayCondition =
+export type ReplayCondition =
   | {
-      type: "on-version";
+      on: "version";
       name: string;
       version: string;
     }
   | {
-      type: "on-exit-prerelease";
+      on: "exit-prerelease";
+      name: string;
+    }
+  | {
+      on: "enter-prerelease";
       name: string;
     };
 
-export function parseReplayCondition(condition: string): ParsedReplayCondition | null {
-  if (condition.startsWith("exit prerelease:")) {
+export function formatReplayCondition(condition: ReplayCondition): string {
+  switch (condition.on) {
+    case "exit-prerelease":
+      return `exit-prerelease(${condition.name})`;
+    case "enter-prerelease":
+      return `prerelease(${condition.name})`;
+    case "version":
+      return `${condition.name}@${condition.version}`;
+  }
+}
+
+export function parseReplayCondition(condition: string): ReplayCondition | null {
+  let match: RegExpExecArray | null;
+  if ((match = /^exit-prerelease\((.+)\)$/.exec(condition))) {
     return {
-      type: "on-exit-prerelease",
-      name: condition.slice("exit prerelease:".length).trimStart(),
+      on: "exit-prerelease",
+      name: match[1]!,
     };
   }
 
-  const idx = condition.lastIndexOf("@");
-  if (idx <= 0) return null;
+  if ((match = /^prerelease\((.+)\)$/.exec(condition))) {
+    return {
+      on: "enter-prerelease",
+      name: match[1]!,
+    };
+  }
 
-  return {
-    type: "on-version",
-    name: condition.slice(0, idx),
-    version: condition.slice(idx + 1),
-  };
+  // legacy syntax
+  if ((match = /^exit prerelease:\s*(.+)$/.exec(condition))) {
+    return {
+      on: "exit-prerelease",
+      name: match[1]!,
+    };
+  }
+
+  if ((match = /^(.+)@([^@]+)$/.exec(condition))) {
+    return {
+      on: "version",
+      name: match[1]!,
+      version: match[2]!,
+    };
+  }
+
+  return null;
 }
 
 interface RawMarkdownSection {

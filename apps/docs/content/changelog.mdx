@@ -106,6 +106,9 @@ Each item in `replay` is a condition string:
 | Condition               | Example                            | Matches when                                                                |
 | ----------------------- | ---------------------------------- | --------------------------------------------------------------------------- |
 | `name@version`          | `tegami@1.1.0`, `@acme/core@2.0.0` | A package with that name reaches that exact version                         |
-| `exit prerelease: name` | `exit prerelease: tegami`          | A package exits its prerelease line (for example `1.1.0-alpha.2` → `1.1.0`) |
+| `prerelease(name)`      | `prerelease(tegami)`               | A package enters a prerelease line (for example `1.0.0` → `1.1.0-alpha.0`)  |
+| `exit-prerelease(name)` | `exit-prerelease(tegami)`          | A package exits its prerelease line (for example `1.1.0-alpha.2` → `1.1.0`) |
+
+The legacy `exit prerelease: name` syntax is also accepted.
 
 A package can list multiple conditions. Tegami removes each condition as it matches. The file is deleted once every condition has been consumed.

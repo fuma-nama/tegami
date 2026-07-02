@@ -514,7 +514,7 @@ Fixed something during beta.
       version: "1.0.0-beta.1",
     });
     const keptChangelog = await readFile(join(cwd, ".tegami/change.md"), "utf8");
-    expect(keptChangelog).toContain("exit prerelease: npm:tegami");
+    expect(keptChangelog).toContain("exit-prerelease(npm:tegami)");
     expect(keptChangelog).not.toContain("type:");
     expect(await readFile(join(cwd, "packages/tegami/CHANGELOG.md"), "utf8")).toContain(
       "## Beta fix",

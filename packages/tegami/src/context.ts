@@ -96,8 +96,7 @@ export async function resolveGraph(ctx: TegamiContext) {
     const packageOptions = getPackageOptions?.(pkg);
     if (!packageOptions) continue;
 
-    pkg.setPackageOptions(packageOptions);
-
+    pkg.options = packageOptions;
     if (packageOptions.group) {
       graph.addGroupMember(packageOptions.group, pkg.id);
     }

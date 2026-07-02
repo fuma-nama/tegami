@@ -532,7 +532,7 @@ class PrTestPackage extends WorkspacePackage {
     options?: PackageOptions,
   ) {
     super();
-    if (options) this.setPackageOptions(options);
+    if (options) this.options = options;
   }
 
   get path() {

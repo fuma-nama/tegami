@@ -59,11 +59,10 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
 
       for (const [id, packagePlan] of plan.packages) {
         const pkg = graph.get(id)!;
-        const group = graph.getPackageGroup(pkg.id);
         packagePlan.git ??= {};
 
-        if (group?.options.syncGitTag && pkg.version) {
-          packagePlan.git.tag = `${group.name}@${pkg.version}`;
+        if (pkg.group?.options.syncGitTag && pkg.version) {
+          packagePlan.git.tag = `${pkg.group.name}@${pkg.version}`;
         } else if (pkg.version) {
           packagePlan.git.tag = `${pkg.name}@${pkg.version}`;
         }

@@ -6,8 +6,9 @@ import { BumpType, maxBump } from "../utils/semver";
 import type { WorkspacePackage } from "../graph";
 import {
   parseReplayCondition,
-  type ParsedReplayCondition,
+  type ReplayCondition,
   type ChangelogEntry,
+  formatReplayCondition,
 } from "../changelog/parse";
 import { PublishLock } from "./lock";
 import type { Awaitable } from "../types";
@@ -112,7 +113,7 @@ export class Draft {
     // assign script-level configs
     return this.dispatchPackage(
       pkg,
-      (draft) => pkg.configureDraft(draft, this.context.graph.getPackageGroup(pkg.id)),
+      (draft) => pkg.configureDraft({ draft }),
       (draft) => {
         const reasons = (draft.bumpReasons ??= new Set());
         reasons.add("align with script-level configs");
@@ -278,22 +279,32 @@ export class Draft {
         const draft = this.packages.get(pkg.id);
 
         if (draft?.prerelease) {
-          replay.push(`exit prerelease: ${pkg.id}`);
+          replay.push(formatReplayCondition({ on: "exit-prerelease", name: pkg.id }));
         }
       }
 
       return replay;
     };
 
-    const isMatch = (condition: ParsedReplayCondition) => {
-      if (condition.type === "on-exit-prerelease") {
-        return graph.getByName(condition.name).some((pkg) => {
-          const previous = snapshots.get(pkg.id);
-          return previous?.version && semver.inc(previous.version, "release") === pkg.version;
-        });
-      }
+    const isMatch = (condition: ReplayCondition) => {
+      switch (condition.on) {
+        case "enter-prerelease":
+          return graph.getByName(condition.name).some((pkg) => {
+            const previous = snapshots.get(pkg.id);
+            if (!pkg.version || !previous?.version) return false;
 
-      return graph.getByName(condition.name).some((pkg) => pkg.version === condition.version);
+            return !semver.prerelease(previous.version) && semver.prerelease(pkg.version);
+          });
+        case "exit-prerelease":
+          return graph.getByName(condition.name).some((pkg) => {
+            const previous = snapshots.get(pkg.id);
+            if (!pkg.version || !previous?.version) return false;
+
+            return semver.inc(previous.version, "release") === pkg.version;
+          });
+        case "version":
+          return graph.getByName(condition.name).some((pkg) => pkg.version === condition.version);
+      }
     };
 
     for (const entry of this.changelogs.values()) {
