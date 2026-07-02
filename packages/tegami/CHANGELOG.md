@@ -1,3 +1,13 @@
+## tegami@1.1.0
+
+### Improve Cargo performance by pre-indexing dependencies
+
+The dependencies of `Cargo.toml` will be pre-indexed to improve performance in large monorepos.
+
+### Support `prerelease(name)` replay condition
+
+Tegami now supports replay condition when entering prerelease.
+
 ## tegami@1.0.2
 
 ### Handle Cargo workspace semantics
