@@ -401,16 +401,7 @@ export function npm({
     async applyCliDraft() {
       if (!active || !updateLockFile) return;
 
-      let args: string[];
-      if (client === "npm") {
-        args = ["ci"];
-      } else if (client === "yarn") {
-        args = ["install", "--immutable"];
-      } else if (client === "bun") {
-        args = ["install", "--frozen-lockfile"];
-      } else {
-        args = ["install", "--frozen-lockfile"];
-      }
+      const args = client === "pnpm" ? ["install", "--no-git-checks"] : ["install"];
 
       const result = await x(client, args, {
         nodeOptions: {
