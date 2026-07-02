@@ -10,7 +10,7 @@ import type { RequireFields, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
-import { cargoManifestSchema, type CargoDependency, type CargoManifest } from "./cargo/schema";
+import { assertCargoManifest, type CargoDependency, type CargoManifest } from "./cargo/schema";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
 type DepKind = (typeof DEP_FIELDS)[number];
@@ -298,7 +298,7 @@ async function buildEntry(dir: string): Promise<CargoToml | undefined> {
   try {
     const filePath = path.join(dir, "Cargo.toml");
     const content = await readFile(filePath, "utf8");
-    return new CargoToml(filePath, content, cargoManifestSchema.parse(parse(content)));
+    return new CargoToml(filePath, content, assertCargoManifest(parse(content)));
   } catch {
     return;
   }

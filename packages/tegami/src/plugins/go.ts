@@ -1,7 +1,7 @@
 import { relative, resolve } from "node:path";
 import * as semver from "semver";
 import { x } from "tinyexec";
-import z from "zod";
+import typia from "typia";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
@@ -21,42 +21,35 @@ interface GoReplace {
   version?: string;
 }
 
-const goWorkJsonSchema = z.object({
-  Use: z
-    .array(
-      z.object({
-        DiskPath: z.string(),
-        ModulePath: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
+interface GoWorkJson {
+  Use?: {
+    DiskPath: string;
+    ModulePath?: string;
+  }[];
+}
 
-const goModJsonSchema = z.object({
-  Module: z.object({ Path: z.string() }),
-  Require: z
-    .array(
-      z.object({
-        Path: z.string(),
-        Version: z.string().optional(),
-      }),
-    )
-    .optional(),
-  Replace: z
-    .array(
-      z.object({
-        Old: z.object({
-          Path: z.string(),
-          Version: z.string().optional(),
-        }),
-        New: z.object({
-          Path: z.string(),
-          Version: z.string().optional(),
-        }),
-      }),
-    )
-    .optional(),
-});
+interface GoModJson {
+  Module: { Path: string };
+  Require?: {
+    Path: string;
+    Version?: string;
+  }[];
+  Replace?: {
+    Old: {
+      Path: string;
+      Version?: string;
+    };
+    New: {
+      Path: string;
+      Version?: string;
+    };
+  }[];
+}
+
+const validateGoWorkJson: (input: unknown) => typia.IValidation<GoWorkJson> =
+  typia.createValidate<GoWorkJson>();
+const validateGoModJson: (input: unknown) => typia.IValidation<GoModJson> =
+  typia.createValidate<GoModJson>();
 
 export class GoPackage extends WorkspacePackage {
   readonly manager = "go";
@@ -127,10 +120,13 @@ export interface GoPluginOptions {
   bumpDep?: (opts: DependentRef) => BumpType | false;
 }
 
-const packageLockSchema = z.object({
-  id: z.string(),
-  version: z.string(),
-});
+interface GoPackageLock {
+  id: string;
+  version: string;
+}
+
+const validateGoPackageLock: (input: unknown) => typia.IValidation<GoPackageLock> =
+  typia.createValidate<GoPackageLock>();
 
 /**
  * Plugin for Golang, the release flow of Golang is pretty special, there's some exceptions for it:
@@ -200,7 +196,7 @@ export function go({
         lock.write("go:packages", {
           id,
           version: pkg.version,
-        } satisfies z.input<typeof packageLockSchema>);
+        } satisfies GoPackageLock);
       }
     },
     initPublishPlan({ lock, plan }) {
@@ -208,8 +204,9 @@ export function go({
 
       let data: unknown;
       while ((data = lock.read("go:packages"))) {
-        const parsed = packageLockSchema.safeParse(data).data;
-        if (!parsed) continue;
+        const validated = validateGoPackageLock(data);
+        if (!validated.success) continue;
+        const parsed = validated.data;
 
         const pkg = this.graph.get(parsed.id);
         if (pkg instanceof GoPackage) pkg.setVersion(parsed.version);
@@ -368,7 +365,8 @@ async function listGoWorkUsePaths(cwd: string): Promise<string[] | undefined> {
   });
   if (result.exitCode !== 0) return undefined;
 
-  const data = goWorkJsonSchema.safeParse(JSON.parse(result.stdout)).data;
+  const validated = validateGoWorkJson(JSON.parse(result.stdout));
+  const data = validated.success ? validated.data : undefined;
   if (!data?.Use?.length) return [cwd];
 
   return data.Use.map((use) => resolve(cwd, use.DiskPath));
@@ -380,7 +378,8 @@ async function readGoMod(path: string): Promise<GoModFile | undefined> {
   });
   if (result.exitCode !== 0) return;
 
-  const data = goModJsonSchema.safeParse(JSON.parse(result.stdout)).data;
+  const validated = validateGoModJson(JSON.parse(result.stdout));
+  const data = validated.success ? validated.data : undefined;
   if (!data) return;
 
   const requires = new Map<string, string>();

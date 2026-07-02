@@ -1,3 +1,4 @@
+import UnpluginTypia from "@typia/unplugin/rollup";
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
@@ -17,6 +18,7 @@ export default defineConfig({
   },
   exports: true,
   deps: {
-    onlyBundle: [],
+    onlyBundle: ["typia", "@typia/interface"],
   },
+  plugins: [UnpluginTypia() as never],
 });

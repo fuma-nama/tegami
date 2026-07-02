@@ -7,7 +7,7 @@ import { parseDocument, type Document } from "yaml";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, isCI, joinPath } from "tegami/utils";
-import { hostedPackageSchema, pubspecSchema, type DartDependency, type Pubspec } from "./schema";
+import { assertHostedPackage, assertPubspec, type DartDependency, type Pubspec } from "./schema";
 
 const DEP_FIELDS = ["dependencies", "dev_dependencies", "dependency_overrides"] as const;
 const DEFAULT_HOSTED_URL = "https://pub.dev";
@@ -356,7 +356,7 @@ async function readPubspec(dir: string): Promise<PubspecFile | undefined> {
     return {
       path: filePath,
       doc,
-      data: pubspecSchema.parse(doc.toJS()),
+      data: assertPubspec(doc.toJS()),
     };
   } catch {
     return;
@@ -379,6 +379,6 @@ export async function isPackagePublished(
   if (response.status === 404) return false;
   if (!response.ok) return false;
 
-  const body = hostedPackageSchema.parse(await response.json());
+  const body = assertHostedPackage(await response.json());
   return body.versions?.some((entry) => entry.version === version) ?? false;
 }

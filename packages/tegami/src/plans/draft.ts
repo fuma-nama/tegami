@@ -16,7 +16,7 @@ import { handlePluginError } from "../utils/error";
 import { groupPolicy } from "./policy";
 import type { ChangelogPackageConfig } from "../changelog/shared";
 import * as semver from "semver";
-import z from "zod";
+import typia from "typia";
 
 export interface PackageDraft {
   type?: BumpType;
@@ -33,17 +33,22 @@ export interface PackageDraft {
   bumpVersion: (pkg: WorkspacePackage) => string | undefined;
 }
 
-export const changelogStoreSchema = z.object({
-  v: z.literal("0.0.0"),
-  filename: z.string(),
-  content: z.string(),
-});
+export interface ChangelogStore {
+  v: "0.0.0";
+  filename: string;
+  content: string;
+}
 
-export const packageStoreSchema = z.object({
-  id: z.string(),
-  updated: z.boolean(),
-  changelogIds: z.array(z.string()).optional(),
-});
+export interface PackageStore {
+  id: string;
+  updated: boolean;
+  changelogIds?: string[];
+}
+
+export const validateChangelogStore: (input: unknown) => typia.IValidation<ChangelogStore> =
+  typia.createValidate<ChangelogStore>();
+export const validatePackageStore: (input: unknown) => typia.IValidation<PackageStore> =
+  typia.createValidate<PackageStore>();
 
 type SnapshotMap = Map<string, { version: string | undefined }>;
 
@@ -235,14 +240,14 @@ export class Draft {
         id: pkg.id,
         updated: draft !== undefined && snapshot.version !== pkg.version,
         changelogIds: draft?.changelogs?.map((entry) => entry.id),
-      } satisfies z.input<typeof packageStoreSchema>);
+      } satisfies PackageStore);
     }
     for (const entry of changelogs) {
       lock.write("core:changelogs", {
         v: "0.0.0",
         filename: entry.filename,
         content: entry.getRawContent(),
-      } satisfies z.input<typeof changelogStoreSchema>);
+      } satisfies ChangelogStore);
     }
     for (const plugin of this.context.plugins) {
       await handlePluginError(plugin, "initPublishLock", () =>

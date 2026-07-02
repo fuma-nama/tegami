@@ -1,5 +1,5 @@
 import { parse, stringify } from "yaml";
-import z from "zod";
+import typia from "typia";
 
 /**
  * the data structure of `publish-lock.yaml` file.
@@ -41,9 +41,9 @@ export class PublishLock {
   }
 }
 
-const baseSchema = z.record(z.string(), z.array(z.unknown()));
+const assertPublishLockData = typia.createAssert<Record<string, unknown[]>>();
 
 export function parsePublishLock(content: string): PublishLock {
-  const data = baseSchema.parse(parse(content));
+  const data = assertPublishLockData(parse(content));
   return new PublishLock(new Map(Object.entries(data)));
 }

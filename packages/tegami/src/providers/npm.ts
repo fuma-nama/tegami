@@ -5,7 +5,7 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
-import { packageManifestSchema, pnpmWorkspaceSchema, type PackageManifest } from "./npm/schema";
+import { assertPackageManifest, assertPnpmWorkspace, type PackageManifest } from "./npm/schema";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, isNodeError } from "../utils/error";
 import { WorkspacePackage } from "../graph";
@@ -13,7 +13,7 @@ import { detect } from "package-manager-detector";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy, PackageDraft } from "../plans/draft";
 import type { AgentName } from "package-manager-detector";
-import z from "zod";
+import typia from "typia";
 import type { PackagePublishResult } from "../plans/publish";
 import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
 import { joinPath } from "../utils/common";
@@ -198,14 +198,19 @@ export interface NpmPluginOptions {
   trustedPublish?: TrustedPublishOptions;
 }
 
-const packageLockSchema = z.object({
-  id: z.string(),
-  distTag: z.string().optional(),
-});
+interface NpmPackageLock {
+  id: string;
+  distTag?: string;
+}
 
-const markLatestLockSchema = z.object({
-  id: z.string(),
-});
+interface NpmMarkLatestLock {
+  id: string;
+}
+
+const validateNpmPackageLock: (input: unknown) => typia.IValidation<NpmPackageLock> =
+  typia.createValidate<NpmPackageLock>();
+const validateNpmMarkLatestLock: (input: unknown) => typia.IValidation<NpmMarkLatestLock> =
+  typia.createValidate<NpmMarkLatestLock>();
 
 export function npm({
   client: defaultClient,
@@ -272,15 +277,16 @@ export function npm({
         lock.write("npm:packages", {
           id,
           distTag: pkg.npm.distTag,
-        } satisfies z.input<typeof packageLockSchema>);
+        } satisfies NpmPackageLock);
       }
     },
     initPublishPlan({ lock, plan }) {
       let data: unknown;
 
       while ((data = lock.read("npm:packages"))) {
-        const parsed = packageLockSchema.safeParse(data).data;
-        if (!parsed) continue;
+        const validated = validateNpmPackageLock(data);
+        if (!validated.success) continue;
+        const parsed = validated.data;
         const packagePlan = plan.packages.get(parsed.id);
         if (!packagePlan) continue;
 
@@ -290,8 +296,9 @@ export function npm({
       }
 
       while ((data = lock.read("npm:mark-latest"))) {
-        const parsed = markLatestLockSchema.safeParse(data).data;
-        if (!parsed) continue;
+        const validated = validateNpmMarkLatestLock(data);
+        if (!validated.success) continue;
+        const parsed = validated.data;
         const packagePlan = plan.packages.get(parsed.id);
         if (!packagePlan) continue;
 
@@ -619,7 +626,7 @@ async function isPackagePublished(
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
   const rootManifest = await readManifest(cwd).catch(() => undefined);
   const pnpmPatterns = await readFile(path.join(cwd, "pnpm-workspace.yaml"), "utf8")
-    .then((content) => pnpmWorkspaceSchema.parse(parse(content)))
+    .then((content) => assertPnpmWorkspace(parse(content)))
     .catch((error: unknown) => {
       if (isNodeError(error) && error.code === "ENOENT") return undefined;
       throw error;
@@ -668,6 +675,6 @@ async function readManifest(packagePath: string): Promise<PackageManifest> {
   const parsed = JSON.parse(content);
 
   // validation only
-  packageManifestSchema.parse(parsed);
+  assertPackageManifest(parsed);
   return parsed;
 }

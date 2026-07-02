@@ -6,7 +6,7 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { cargo, CargoPackage } from "../src/plugins/cargo";
-import { cargoManifestSchema } from "../src/plugins/cargo/schema";
+import { assertCargoManifest } from "../src/plugins/cargo/schema";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
 import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
@@ -425,14 +425,14 @@ version = "1.0.0"
 
 describe("cargo manifest schema", () => {
   test("accepts virtual workspace roots without a package section", () => {
-    const manifest = cargoManifestSchema.parse(parse(`[workspace]\nmembers = ["crates/*"]\n`));
+    const manifest = assertCargoManifest(parse(`[workspace]\nmembers = ["crates/*"]\n`));
 
     expect(manifest.package).toBeUndefined();
     expect(manifest.workspace?.members).toEqual(["crates/*"]);
   });
 
   test("accepts workspace-inherited package fields", () => {
-    const manifest = cargoManifestSchema.parse(
+    const manifest = assertCargoManifest(
       parse(`[package]
 name = "acme_lib"
 version.workspace = true
@@ -445,7 +445,7 @@ publish.workspace = true
   });
 
   test("accepts workspace dependency table fields", () => {
-    const manifest = cargoManifestSchema.parse(
+    const manifest = assertCargoManifest(
       parse(`[workspace]
 members = ["crates/*"]
 
@@ -469,7 +469,7 @@ acme_core = { workspace = true }
 
   test("accepts dependency format unions", () => {
     expect(
-      cargoManifestSchema.parse(
+      assertCargoManifest(
         parse(`[package]
 name = "demo"
 version = "1.0.0"
@@ -492,7 +492,7 @@ e = { version = "2", registry = "my-registry" }
   });
 
   test("accepts workspace roots with a virtual package section", () => {
-    const manifest = cargoManifestSchema.parse(
+    const manifest = assertCargoManifest(
       parse(`[package]
 name = "acme_workspace"
 version = "0.0.0"

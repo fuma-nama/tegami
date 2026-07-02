@@ -1,6 +1,10 @@
 import { RANGE_PATTERN } from "@renovatebot/pep440";
 import { joinPath } from "tegami/utils";
-import { simpleIndexProjectSchema } from "./schema";
+import typia from "typia";
+import type { SimpleIndexProject } from "./schema";
+
+const validateSimpleIndexProject: (input: unknown) => typia.IValidation<SimpleIndexProject> =
+  typia.createValidate<SimpleIndexProject>();
 
 const COMPARATOR = new RegExp(`^${RANGE_PATTERN}$`, "i");
 
@@ -43,7 +47,8 @@ export async function isPackagePublished(
     );
   }
 
-  const { data } = simpleIndexProjectSchema.safeParse(await response.json());
+  const validated = validateSimpleIndexProject(await response.json());
+  const data = validated.success ? validated.data : undefined;
   if (!data?.files || data.files.length === 0) return false;
 
   const dist = escapeRegex(normalizedName);
