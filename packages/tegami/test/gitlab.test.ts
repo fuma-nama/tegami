@@ -66,8 +66,7 @@ describe("gitlab release plugin", () => {
     const plugin = gitlabPlugin({
       repo: "acme/repo",
       release: {
-        create({ pkg, plan }) {
-          const packagePlan = plan.packages.get(pkg.id);
+        create({ pkg }) {
           return {
             title: `Release ${pkg.version}`,
             notes: `Notes for ${pkg.name}`,

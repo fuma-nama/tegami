@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
-import { load } from "js-yaml";
+import { parse } from "yaml";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
@@ -124,7 +124,7 @@ describe("draft publish plans", () => {
       code: "ENOENT",
     });
 
-    const rawPlan = load(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8")) as Record<
+    const rawPlan = parse(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8")) as Record<
       string,
       unknown[]
     >;

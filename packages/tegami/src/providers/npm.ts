@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { load } from "js-yaml";
+import { parse } from "yaml";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
@@ -619,7 +619,7 @@ async function isPackagePublished(
 async function discoverNpmPackages(cwd: string, add: (pkg: NpmPackage) => void): Promise<void> {
   const rootManifest = await readManifest(cwd).catch(() => undefined);
   const pnpmPatterns = await readFile(path.join(cwd, "pnpm-workspace.yaml"), "utf8")
-    .then((content) => pnpmWorkspaceSchema.parse(load(content) ?? {}))
+    .then((content) => pnpmWorkspaceSchema.parse(parse(content)))
     .catch((error: unknown) => {
       if (isNodeError(error) && error.code === "ENOENT") return undefined;
       throw error;

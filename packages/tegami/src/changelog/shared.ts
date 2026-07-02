@@ -1,5 +1,5 @@
 import z from "zod";
-import { dump } from "js-yaml";
+import { stringify } from "yaml";
 
 const bumpTypeSchema = z.enum(["major", "minor", "patch"]);
 
@@ -24,5 +24,7 @@ export function renderChangelog(
   frontmatter: z.input<typeof changelogFrontmatterSchema>,
   body: string,
 ): string {
-  return ["---", dump(frontmatter).trim(), "---", "", body.trim(), ""].join("\n");
+  return ["---", stringify(frontmatter, { lineWidth: 0 }).trim(), "---", "", body.trim(), ""].join(
+    "\n",
+  );
 }

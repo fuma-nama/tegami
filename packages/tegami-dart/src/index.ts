@@ -1,9 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { dump, load } from "js-yaml";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
+import { parseDocument, type Document } from "yaml";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, isCI, joinPath } from "tegami/utils";
@@ -14,6 +14,7 @@ const DEFAULT_HOSTED_URL = "https://pub.dev";
 
 interface PubspecFile {
   path: string;
+  doc: Document;
   data: Pubspec;
 }
 
@@ -41,13 +42,11 @@ export class DartPackage extends WorkspacePackage {
 
   setVersion(version: string): void {
     this.file.data.version = version;
+    this.file.doc.setIn(["version"], version);
   }
 
   async write(): Promise<void> {
-    await writeFile(
-      path.join(this.path, "pubspec.yaml"),
-      dump(this.file.data, { lineWidth: -1, noRefs: true, sortKeys: false }),
-    );
+    await writeFile(path.join(this.path, "pubspec.yaml"), this.file.doc.toString({ lineWidth: 0 }));
   }
 }
 
@@ -157,9 +156,13 @@ export function dart({
           const range = getDependencyRange(ref.spec);
           if (!range || satisfiesDartRange(ref.linked.version, range)) continue;
 
-          ref.table[ref.name] = setDependencyRange(
-            ref.spec,
-            updateConstraintRange(range, ref.linked.version),
+          const nextRange = updateConstraintRange(range, ref.linked.version);
+          ref.table[ref.name] = setDependencyRange(ref.spec, nextRange);
+          ref.dependent.file.doc.setIn(
+            typeof ref.spec === "object" && ref.spec !== null
+              ? [ref.kind, ref.name, "version"]
+              : [ref.kind, ref.name],
+            nextRange,
           );
         }
 
@@ -349,9 +352,11 @@ async function readPubspec(dir: string): Promise<PubspecFile | undefined> {
 
   try {
     const content = await readFile(filePath, "utf8");
+    const doc = parseDocument(content);
     return {
       path: filePath,
-      data: pubspecSchema.parse(load(content) ?? {}),
+      doc,
+      data: pubspecSchema.parse(doc.toJS()),
     };
   } catch {
     return;

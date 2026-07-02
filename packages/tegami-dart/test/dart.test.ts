@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { load } from "js-yaml";
+import { parse } from "yaml";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "tegami";
@@ -107,6 +107,32 @@ version: 1.0.0
     expect(exec).toHaveBeenCalledWith("dart", ["pub", "get"], {
       nodeOptions: { cwd },
     });
+  });
+
+  test("preserves pubspec.yaml formatting and comments when applying a plan", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+
+    const apiManifest = `name: api
+version: 1.0.0 # keep this comment
+resolution: workspace
+environment:
+  sdk: ^3.6.0
+dependencies:
+  core: ^1.0.0 # linked package
+`;
+    await writeFile(join(cwd, "packages/api/pubspec.yaml"), apiManifest);
+    await writeChangelog(cwd, "core", "major");
+
+    await tegami({ cwd, plugins: [dart()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const written = await readFile(join(cwd, "packages/api/pubspec.yaml"), "utf8");
+    expect(written).toContain("# keep this comment");
+    expect(written).toContain("# linked package");
+    expect(written).toContain("version: 1.0.1");
+    expect(written).toContain("core: ^2.0.0");
   });
 
   test("publishes with dart pub publish --force in CI and skips publish_to none", async () => {
@@ -231,5 +257,5 @@ Release ${pkg}.
 }
 
 async function readPubspec(dir: string): Promise<Record<string, unknown>> {
-  return load(await readFile(join(dir, "pubspec.yaml"), "utf8")) as Record<string, unknown>;
+  return parse(await readFile(join(dir, "pubspec.yaml"), "utf8")) as Record<string, unknown>;
 }
