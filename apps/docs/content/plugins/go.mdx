@@ -1,0 +1,105 @@
+---
+title: Go
+description: Go module workspace support and git-tag publishing.
+---
+
+The Go plugin discovers modules from `go.work` or a root `go.mod`, bumps versions, updates `require` directives, and publishes via git tags.
+
+```ts
+import { tegami } from "tegami";
+import { go } from "tegami/plugins/go";
+
+const paper = tegami({
+  plugins: [go()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+Go modules publish through git tags. When Go modules are present, the Go plugin requires either Git, GitHub, or GitLab plugin to be configured.
+
+</Callout>
+
+## How Go versioning works
+
+Go modules do not store a version in `go.mod`. Tegami tracks versions differently from npm or Cargo:
+
+- **Current version** is read from existing git tags (`v1.0.0` for the root module, `pkg/api/v1.0.0` for nested modules).
+- **Next version** is written to the publish lock during `tegami version`, not to `go.mod`.
+- **Publishing** creates git tags that the Go proxy picks up. Tegami delegates tagging to the git plugin.
+
+## Discovery
+
+Tegami discovers modules with the `go` CLI:
+
+- If `go.work` exists, every entry in `use` is scanned.
+- Otherwise, the root `go.mod` is treated as a single-module workspace.
+
+Each module's `require` and `replace` directives are read from `go mod edit -json`.
+
+## Dependency bumping
+
+When a module is bumped, dependents with a `require` on that module are patch-bumped by default. Tegami also rewrites `require` directives when the new version falls outside the existing constraint.
+
+| Situation                       | Default dependent bump |
+| ------------------------------- | ---------------------- |
+| `require` on a workspace module | patch                  |
+
+Members of the same [package group](/package-groups) with `syncBump` are not auto-bumped when a sibling is released.
+
+Customize this with `bumpDep`:
+
+```ts
+go({
+  bumpDep: () => "minor",
+});
+```
+
+## Configuration
+
+```ts
+const paper = tegami({
+  plugins: [
+    go({
+      updateLockFile: false,
+    }),
+  ],
+});
+```
+
+| Option           | Default | Description                                                       |
+| ---------------- | ------- | ----------------------------------------------------------------- |
+| `updateLockFile` | `true`  | Run `go work sync` or `go mod tidy` after applying a version plan |
+| `bumpDep`        | —       | Decide how to bump dependents when a module is bumped             |
+
+After versioning, Tegami runs `go work sync` when a `go.work` file is present, or `go mod tidy` in each module otherwise.
+
+## Publishing
+
+Publishing is handled through git tags, not a registry upload. Tegami:
+
+1. Sets the tag for each module (`v1.2.0` at the repo root, `relative/path/v1.2.0` for nested modules).
+2. Waits for workspace dependencies (from `require` and local `replace` directives) before publishing a module.
+3. Checks [proxy.golang.org](https://proxy.golang.org) to see whether a version is already available.
+
+### Package options
+
+Disable publishing for specific modules with `packages` or `groups`:
+
+```ts
+tegami({
+  plugins: [git(), go()],
+  groups: {
+    internal: {
+      go: { publish: false },
+    },
+  },
+  packages: {
+    "example.com/acme/api": {
+      go: { publish: true },
+    },
+  },
+});
+```
+
+Package-level `go.publish` overrides the group default.
