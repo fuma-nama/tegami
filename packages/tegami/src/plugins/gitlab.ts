@@ -14,6 +14,7 @@ import {
   commitVersionBranchChanges,
   createVersionRequestBody,
   hasGitChanges,
+  resolveVersionRequestTitle,
 } from "../utils/version-request";
 import {
   createMergeRequest,
@@ -63,6 +64,13 @@ interface VersionMergeRequestOptions {
    * @default "main"
    */
   base?: string;
+  /**
+   * Merge request title template. The `{version}` token is replaced with the
+   * shared release version (e.g. `"chore: release v{version}"`). Falls back to
+   * the default title when the release spans independent versions. Ignored when
+   * `create` returns a title.
+   */
+  title?: string;
 
   /** Override details for "Version Packages" MR. */
   create?: (this: TegamiContext, opts: { draft: Draft }) => Awaitable<VersionMergeRequest>;
@@ -247,7 +255,9 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       const { branch = "tegami/version-packages", base = "main" } = config;
       const baseMR = await config.create?.call(this, { draft });
       const mr: Required<VersionMergeRequest> = {
-        title: baseMR?.title ?? "Version Packages",
+        title:
+          baseMR?.title ??
+          resolveVersionRequestTitle(config.title, draft, this, cliOriginalPackageVersions),
         body:
           baseMR?.body ??
           createVersionRequestBody(

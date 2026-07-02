@@ -48,6 +48,57 @@ export async function commitVersionBranchChanges(
   }
 }
 
+/**
+ * The single version every released package landed on, or `undefined` when the
+ * release is empty or spans independent versions. Only packages whose version
+ * changed count, matching the rows in {@link createVersionRequestBody}.
+ */
+function sharedReleaseVersion(
+  draft: Draft,
+  context: TegamiContext,
+  snapshots: Map<string, string | undefined>,
+): string | undefined {
+  const versions = new Set<string>();
+
+  for (const id of draft.getPackageDrafts().keys()) {
+    const pkg = context.graph.get(id);
+    if (!pkg?.version) continue;
+
+    const originalVersion = snapshots.get(pkg.id);
+    if (!originalVersion || originalVersion === pkg.version) continue;
+
+    versions.add(pkg.version);
+  }
+
+  return versions.size === 1 ? versions.values().next().value : undefined;
+}
+
+/**
+ * Resolve the Version Packages PR/MR title.
+ *
+ * - `template` set: its `{version}` token is replaced with the shared release
+ *   version. Templates that reference `{version}` fall back to the default when
+ *   the release has no single version; static templates are used verbatim.
+ * - no `template`: `Version Packages v<version>` for a single shared version
+ *   (single package or synced group), otherwise the bare `Version Packages`.
+ */
+export function resolveVersionRequestTitle(
+  template: string | undefined,
+  draft: Draft,
+  context: TegamiContext,
+  snapshots: Map<string, string | undefined>,
+): string {
+  const version = sharedReleaseVersion(draft, context, snapshots);
+
+  if (template) {
+    if (!template.includes("{version}")) return template;
+    if (version) return template.replace(/\{version\}/g, version);
+    return "Version Packages";
+  }
+
+  return version ? `Version Packages v${version}` : "Version Packages";
+}
+
 export function createVersionRequestBody(
   draft: Draft,
   context: TegamiContext,

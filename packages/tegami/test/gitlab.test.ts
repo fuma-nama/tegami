@@ -553,7 +553,7 @@ describe("gitlab version merge request", () => {
       await runVersionMergeRequest(plugin, context, draft);
 
       expect(updateMergeRequest).toHaveBeenCalledWith("acme/repo", 42, {
-        title: "Version Packages",
+        title: "Version Packages v1.1.0",
         body: expect.stringContaining("Merge this MR to publish the versioned packages."),
         base: "main",
         apiUrl: "https://gitlab.com/api/v4",
@@ -600,7 +600,7 @@ describe("gitlab version merge request", () => {
             "args": [
               "commit",
               "-m",
-              "Version Packages",
+              "Version Packages v1.1.0",
             ],
             "command": "git",
             "cwd": "/repo",
@@ -650,7 +650,7 @@ describe("gitlab version merge request", () => {
       await runVersionMergeRequest(plugin, context, draft);
 
       expect(createMergeRequest).toHaveBeenCalledWith("acme/repo", {
-        title: "Version Packages",
+        title: "Version Packages v1.1.0",
         body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages",
         base: "main",
@@ -691,7 +691,7 @@ describe("gitlab version merge request", () => {
             "args": [
               "commit",
               "-m",
-              "Version Packages",
+              "Version Packages v1.1.0",
             ],
             "command": "git",
             "cwd": "/repo",
