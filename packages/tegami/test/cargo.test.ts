@@ -364,7 +364,7 @@ publish.workspace = true
     ) as CargoPackage;
 
     expect(pkg.manifest.package.publish).toEqual({ workspace: true });
-    expect(pkg.workspaceFile?.data.workspace?.package?.publish).toBe(false);
+    expect(pkg.file.workspace?.data.workspace?.package?.publish).toBe(false);
   });
 
   test("excludes member manifests without a version from the graph", async () => {

@@ -13,11 +13,33 @@ import type { BumpType } from "../utils/semver";
 import { cargoManifestSchema, type CargoDependency, type CargoManifest } from "./cargo/schema";
 
 const DEP_FIELDS = ["dependencies", "dev-dependencies", "build-dependencies"] as const;
+type DepKind = (typeof DEP_FIELDS)[number];
 
-interface CargoToml<Data extends CargoManifest = CargoManifest> {
-  path: string;
-  content: string;
-  data: Data;
+class CargoToml<Data extends CargoManifest = CargoManifest> {
+  private dependencies: ResolvedDependency[] | undefined;
+  workspace?: CargoToml<RequireFields<CargoManifest, "workspace">>;
+
+  constructor(
+    public path: string,
+    public content: string,
+    public data: Data,
+  ) {}
+
+  listDependencies(graph: CargoGraph): ResolvedDependency[] {
+    return (this.dependencies ??= listDependencies(graph, this));
+  }
+
+  patch(path: string, value: unknown) {
+    this.content = edit(this.content, path, value);
+  }
+}
+
+interface ResolvedDependency {
+  path: [...string[], kind: DepKind, key: string];
+  spec: CargoDependency;
+  resolved?: CargoPackage;
+  range?: string;
+  setRange?: (v: string) => void;
 }
 
 export class CargoPackage extends WorkspacePackage {
@@ -28,7 +50,6 @@ export class CargoPackage extends WorkspacePackage {
     readonly path: string,
     /** a crate must have `package` field defined, otherwise it is merely a virutal workspace file, and Tegami should not include it. */
     readonly file: CargoToml<RequireFields<CargoManifest, "package">>,
-    readonly workspaceFile?: CargoToml<RequireFields<CargoManifest, "workspace">>,
   ) {
     super();
     this.manifest = file.data;
@@ -42,7 +63,7 @@ export class CargoPackage extends WorkspacePackage {
     const packageVersion = this.manifest.package.version;
     if (typeof packageVersion === "string") return packageVersion;
 
-    const inherited = this.workspaceFile?.data.workspace.package;
+    const inherited = this.file.workspace?.data.workspace.package;
     if (packageVersion.workspace && inherited?.version) return inherited.version;
     throw new Error(`Invalid Cargo.toml in "${this.path}".`);
   }
@@ -52,13 +73,13 @@ export class CargoPackage extends WorkspacePackage {
 
     if (typeof packageInfo.version === "string") {
       packageInfo.version = version;
-      patchFile(this.file, "package.version", version);
+      this.file.patch("package.version", version);
       return;
     }
 
-    if (packageInfo.version.workspace && this.workspaceFile?.data.workspace.package) {
-      this.workspaceFile.data.workspace.package.version = version;
-      patchFile(this.workspaceFile, "workspace.package.version", version);
+    if (packageInfo.version.workspace && this.file.workspace?.data.workspace.package) {
+      this.file.workspace.data.workspace.package.version = version;
+      this.file.workspace.patch("workspace.package.version", version);
       return;
     }
 
@@ -66,13 +87,9 @@ export class CargoPackage extends WorkspacePackage {
   }
 }
 
-function patchFile(file: CargoToml, path: string, value: unknown): void {
-  file.content = edit(file.content, path, value);
-}
-
 interface DependentRef {
   dependent: CargoPackage;
-  kind: (typeof DEP_FIELDS)[number];
+  kind: DepKind;
   name: string;
   spec: CargoDependency;
   version?: string;
@@ -120,25 +137,12 @@ export function cargo({
       if (typeof pkg.manifest.package.publish === "boolean") {
         shouldPublish = pkg.manifest.package.publish;
       } else if (pkg.manifest.package.publish?.workspace) {
-        shouldPublish = pkg.workspaceFile?.data.workspace?.package?.publish ?? shouldPublish;
+        shouldPublish = pkg.file.workspace?.data.workspace?.package?.publish ?? shouldPublish;
       }
 
       const wait: string[] = [];
-
-      for (const { table, tablePath } of dependencyTables(pkg.manifest)) {
-        for (const [rawName, spec] of Object.entries(table)) {
-          const resolved = resolveLinkedDep(
-            pkg.workspaceFile,
-            pkg.file,
-            this.cargo.graph,
-            tablePath,
-            rawName,
-            spec,
-          );
-          if (!resolved) continue;
-
-          wait.push(resolved.linked.id);
-        }
+      for (const { resolved } of pkg.file.listDependencies(this.cargo.graph)) {
+        if (resolved) wait.push(resolved.id);
       }
 
       return { shouldPublish, wait };
@@ -186,36 +190,21 @@ export function cargo({
         if (bumped) pkg.setVersion(bumped);
       }
 
-      for (const pkg of graph.packages.values()) {
-        for (const { table, tablePath } of dependencyTables(pkg.manifest)) {
-          for (const [rawName, spec] of Object.entries(table)) {
-            const resolved = resolveLinkedDep(
-              pkg.workspaceFile,
-              pkg.file,
-              graph,
-              tablePath,
-              rawName,
-              spec,
-            );
-            if (
-              !resolved ||
-              !resolved.range ||
-              !resolved.setRange ||
-              semver.satisfies(resolved.linked.version, resolved.range)
-            )
-              continue;
+      for (const file of graph.files.values()) {
+        for (const { range, resolved, setRange } of file.listDependencies(graph)) {
+          if (!resolved || !range || !setRange || semver.satisfies(resolved.version, range))
+            continue;
 
-            let updatedRange: string;
-            if (resolved.range.startsWith("^")) {
-              updatedRange = `^${resolved.linked.version}`;
-            } else if (resolved.range.startsWith("~")) {
-              updatedRange = `~${resolved.linked.version}`;
-            } else {
-              updatedRange = resolved.linked.version;
-            }
-
-            table[rawName] = resolved.setRange(updatedRange);
+          let updatedRange: string;
+          if (range.startsWith("^")) {
+            updatedRange = `^${resolved.version}`;
+          } else if (range.startsWith("~")) {
+            updatedRange = `~${resolved.version}`;
+          } else {
+            updatedRange = resolved.version;
           }
+
+          setRange(updatedRange);
         }
       }
 
@@ -252,25 +241,14 @@ function depsPolicy(
   const dependentMap = new Map<string, DependentRef[]>();
 
   for (const pkg of cargoGraph.packages.values()) {
-    for (const { table, tablePath } of dependencyTables(pkg.manifest)) {
-      for (const [name, spec] of Object.entries(table)) {
-        const resolved = resolveLinkedDep(
-          pkg.workspaceFile,
-          pkg.file,
-          cargoGraph,
-          tablePath,
-          name,
-          spec,
-        );
-        if (!resolved) continue;
+    for (const { resolved, path, spec, range } of pkg.file.listDependencies(cargoGraph)) {
+      if (!resolved) continue;
+      const refs = dependentMap.get(resolved.id);
+      const kind = path[path.length - 2] as DepKind;
+      const name = path[path.length - 1]!;
 
-        const id = resolved.linked.id;
-        const refs = dependentMap.get(id);
-        const kind = tablePath.at(-1) as (typeof DEP_FIELDS)[number];
-
-        if (refs) refs.push({ dependent: pkg, kind, name, spec, version: resolved.range });
-        else dependentMap.set(id, [{ dependent: pkg, kind, name, spec, version: resolved.range }]);
-      }
+      if (refs) refs.push({ dependent: pkg, kind, name, spec, version: range });
+      else dependentMap.set(resolved.id, [{ dependent: pkg, kind, name, spec, version: range }]);
     }
   }
 
@@ -321,11 +299,7 @@ async function buildEntry(dir: string): Promise<CargoToml | undefined> {
   try {
     const filePath = path.join(dir, "Cargo.toml");
     const content = await readFile(filePath, "utf8");
-    return {
-      path: filePath,
-      data: cargoManifestSchema.parse(parse(content)),
-      content,
-    };
+    return new CargoToml(filePath, content, cargoManifestSchema.parse(parse(content)));
   } catch {
     return;
   }
@@ -346,27 +320,33 @@ async function resolveCargoGraph(cwd: string): Promise<CargoGraph> {
   const root = await buildEntry(cwd);
   if (!root) return out;
 
-  const rootWorkspace = root.data.workspace;
   out.files.set(root.path, root);
 
   if (root.data.package) {
-    const pkg = new CargoPackage(cwd, root as never, rootWorkspace ? (root as never) : undefined);
+    const pkg = new CargoPackage(cwd, root as never);
     out.packages.set(pkg.name, pkg);
   }
 
-  if (!rootWorkspace || !rootWorkspace.members) return out;
+  if (root.data.workspace?.members) {
+    root.workspace = root as never;
+    const dirs = await expandWorkspaceMembers(
+      cwd,
+      root.data.workspace.members,
+      root.data.workspace.exclude,
+    );
 
-  const dirs = await expandWorkspaceMembers(cwd, rootWorkspace.members, rootWorkspace.exclude);
-  await Promise.all(
-    dirs.map(async (dir) => {
-      const entry = await buildEntry(dir);
-      if (!entry || !entry.data.package) return;
+    await Promise.all(
+      dirs.map(async (dir) => {
+        const entry = await buildEntry(dir);
+        if (!entry || !entry.data.package) return;
 
-      const pkg = new CargoPackage(dir, entry as never, root as never);
-      out.files.set(entry.path, entry);
-      out.packages.set(pkg.name, pkg);
-    }),
-  );
+        entry.workspace = root as never;
+        const pkg = new CargoPackage(dir, entry as never);
+        out.files.set(entry.path, entry);
+        out.packages.set(pkg.name, pkg);
+      }),
+    );
+  }
 
   return out;
 }
@@ -392,38 +372,51 @@ async function expandWorkspaceMembers(
   });
 }
 
-function dependencyTables(manifest: CargoManifest, prefix: string[] = []) {
-  const tables: {
-    table: Record<string, CargoDependency>;
-    tablePath: [...string[], (typeof DEP_FIELDS)[number]];
-  }[] = [];
+function listDependencies(graph: CargoGraph, file: CargoToml): ResolvedDependency[] {
+  const out: ResolvedDependency[] = [];
+  function scan(
+    obj: Partial<Record<DepKind, Record<string, CargoDependency>>>,
+    prefix: string[] = [],
+  ) {
+    for (const field of DEP_FIELDS) {
+      const table = obj[field];
+      if (!table) continue;
 
-  for (const field of DEP_FIELDS) {
-    const table = manifest[field];
-    if (!table) continue;
-    tables.push({ table, tablePath: [...prefix, field] });
-  }
-
-  const target = manifest.target;
-  if (target) {
-    for (const [targetKey, targetConfig] of Object.entries(target)) {
-      for (const field of DEP_FIELDS) {
-        const table = targetConfig[field];
-        if (!table) continue;
-        tables.push({ table, tablePath: [...prefix, "target", targetKey, field] });
+      const tablePath = [...prefix, field] as const;
+      for (const [key, spec] of Object.entries(table)) {
+        const { linked, range, setRange } =
+          resolveLinkedDep(file, graph, tablePath, key, spec) ?? {};
+        out.push({
+          path: [...tablePath, key],
+          spec,
+          resolved: linked,
+          range,
+          setRange:
+            setRange &&
+            ((v) => {
+              table[key] = setRange(v);
+            }),
+        });
       }
     }
   }
 
-  return tables;
+  scan(file.data);
+  if (file.data.target) {
+    for (const [key, config] of Object.entries(file.data.target)) scan(config, ["target", key]);
+  }
+  if (file.data.workspace) {
+    scan(file.data.workspace);
+  }
+
+  return out;
 }
 
 function resolveLinkedDep(
-  workspaceFile: CargoToml | undefined,
   file: CargoToml,
   graph: CargoGraph,
-  tablePath: [...string[], (typeof DEP_FIELDS)[number]],
-  rawName: string,
+  tablePath: readonly [...string[], DepKind],
+  key: string,
   spec: CargoDependency,
 ):
   | {
@@ -433,14 +426,14 @@ function resolveLinkedDep(
     }
   | undefined {
   if (typeof spec === "string") {
-    const linked = graph.packages.get(rawName);
+    const linked = graph.packages.get(key);
     if (!linked) return;
 
     return {
       linked,
       range: spec,
       setRange(v) {
-        patchFile(file, [...tablePath, rawName].join("."), v);
+        file.patch([...tablePath, key].join("."), v);
         return v;
       },
     };
@@ -449,26 +442,14 @@ function resolveLinkedDep(
   if ("git" in spec) return;
 
   if ("workspace" in spec) {
-    const kind = tablePath[tablePath.length - 1] as (typeof DEP_FIELDS)[number];
-    const entry = workspaceFile?.data.workspace?.[kind]?.[rawName];
+    const kind = tablePath[tablePath.length - 1] as DepKind;
+    const entry = file.workspace?.data.workspace?.[kind]?.[key];
     if (!entry) return;
-    const resolved = resolveLinkedDep(
-      undefined,
-      workspaceFile,
-      graph,
-      ["workspace", kind],
-      rawName,
-      entry,
-    );
-    if (!resolved || !resolved.setRange) return resolved;
+    const resolved = resolveLinkedDep(file.workspace!, graph, ["workspace", kind], key, entry);
+    if (!resolved) return;
 
-    return {
-      ...resolved,
-      setRange(v) {
-        workspaceFile.data.workspace![kind]![rawName] = resolved.setRange!(v);
-        return spec;
-      },
-    };
+    delete resolved.setRange;
+    return resolved;
   }
 
   if ("path" in spec) {
@@ -480,7 +461,7 @@ function resolveLinkedDep(
         linked: pkg,
         range: spec.version,
         setRange(v) {
-          patchFile(file, [...tablePath, rawName, "version"].join("."), v);
+          file.patch([...tablePath, key, "version"].join("."), v);
           return { ...spec, version: v };
         },
       };
@@ -488,14 +469,14 @@ function resolveLinkedDep(
     return;
   }
 
-  const linked = graph.packages.get(spec.package ?? rawName);
+  const linked = graph.packages.get(spec.package ?? key);
   if (!linked) return;
 
   return {
     linked,
     range: spec.version,
     setRange(v) {
-      patchFile(file, [...tablePath, rawName, "version"].join("."), v);
+      file.patch([...tablePath, key, "version"].join("."), v);
       return { ...spec, version: v };
     },
   };
