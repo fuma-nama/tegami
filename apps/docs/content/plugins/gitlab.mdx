@@ -42,18 +42,26 @@ gitlab({
   versionMr: {
     branch: "tegami/version-packages",
     base: "main",
+    groups: ["group:fumadocs", ["@fumadocs/local-md", "fumadocs-mdx"]],
   },
 });
 ```
 
-| Setting       | Default                   | Description                                      |
-| ------------- | ------------------------- | ------------------------------------------------ |
-| `branch`      | `tegami/version-packages` | Source branch for the version MR                 |
-| `base`        | `main`                    | Target branch for the version MR                 |
-| `forceCreate` | `false`                   | Create the MR outside CI as well                 |
-| `create`      | —                         | Override the MR title and body before it is sent |
+| Setting       | Default                   | Description                                       |
+| ------------- | ------------------------- | ------------------------------------------------- |
+| `branch`      | `tegami/version-packages` | Source branch for the version MR                  |
+| `base`        | `main`                    | Target branch for the version MR                  |
+| `groups`      | —                         | Publish groups to split into separate version MRs |
+| `forceCreate` | `false`                   | Create the MR outside CI as well                  |
+| `create`      | —                         | Override the MR title and body before it is sent  |
 
 Set `versionMr: false` to disable MR creation. Set `versionMr: { forceCreate: true }` to always create the MR, including locally.
+
+### Publish groups
+
+With `groups`, versioning opens one MR per publish group instead of a single "Version Packages" MR. Each entry is a package (or a list of packages) released together; packages not covered by any group get an extra "unlisted packages" MR. Group MRs are created under `<branch>/`, e.g. `tegami/version-packages/unlisted` — delete an existing `tegami/version-packages` branch on origin before enabling groups.
+
+Merging a group MR publishes only its members. On every publish run, the remaining MRs are re-created from the latest target branch, so they never go stale or conflict. The publish lock stays pending — blocking new version cycles — until every group MR is merged and published.
 
 ## CLI commands
 

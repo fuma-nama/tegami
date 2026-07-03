@@ -155,6 +155,9 @@ export interface TegamiPlugin {
     "success" | "pending" | undefined | void | Awaitable<"success" | "pending" | undefined>[]
   >;
 
+  /** Called after preflights, before Tegami starts publishing the packages of a plan. */
+  beforePublishAll?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
+
   /** Called before a package will be published, return `false` to prevent from publishing. */
   willPublish?(
     this: TegamiContext,

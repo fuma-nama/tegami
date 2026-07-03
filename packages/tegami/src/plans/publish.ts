@@ -169,6 +169,12 @@ export type PackagePublishResult =
 export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) {
   const { dryRun = false, unstable_maxChunk = 5 } = plan.options;
 
+  for (const plugin of context.plugins) {
+    await handlePluginError(plugin, "beforePublishAll", () =>
+      plugin.beforePublishAll?.call(context, { plan }),
+    );
+  }
+
   async function publish(pkg: WorkspacePackage): Promise<PackagePublishResult> {
     if (dryRun) {
       return { type: "published" };
