@@ -101,31 +101,36 @@ export async function initPublishPlan(
 function resolvePublishTargets(plan: PublishPlan) {
   /** the iteration order = publish order */
   const orderedMap = new Map<string, { split: boolean }>();
-  const stack = new Set<string>();
+  /** package id -> true while scanning hard wait, false while scanning optional wait */
+  const stack = new Map<string, boolean>();
 
   function scan(id: string) {
     const preflight = plan.packages.get(id)?.preflight;
     if (!preflight || !preflight.shouldPublish) return;
 
-    if (stack.has(id)) {
-      throw new Error(`circular reference of deps: ${[...stack, id].join(" -> ")}`);
+    switch (stack.get(id)) {
+      case true:
+        throw new Error(`circular reference of deps: ${[...stack.keys(), id].join(" -> ")}`);
+      case false:
+        return;
     }
 
     if (orderedMap.has(id)) return;
 
     let split = false;
     if (preflight.wait) {
-      stack.add(id);
+      stack.set(id, true);
       split ||= preflight.wait.length > 0;
       for (const dep of preflight.wait) scan(dep);
-      stack.delete(id);
     }
 
     if (preflight.optionalWait) {
+      stack.set(id, false);
       split ||= preflight.optionalWait.length > 0;
       for (const dep of preflight.optionalWait) scan(dep);
     }
 
+    stack.delete(id);
     orderedMap.set(id, { split });
   }
 
