@@ -3,7 +3,8 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { parse, parseDocument, stringify } from "yaml";
+import { parseDocument } from "yaml";
+import type { Document } from "yaml";
 import { isNodeError } from "../../utils/error";
 import { AgentName } from "package-manager-detector";
 import { WorkspacePackage } from "../../graph";
@@ -291,10 +292,10 @@ export async function resolveNpmGraph(cwd: string, client: AgentName): Promise<N
       if (isNodeError(error) && error.code === "ENOENT") return undefined;
       throw error;
     });
-    const data = content && assertPnpmWorkspace(parse(content));
-
-    if (data) {
-      catalogSources.push(createPnpmCatalogSource(pnpmWorkspacePath, data));
+    if (content) {
+      const doc = parseDocument(content);
+      const data = assertPnpmWorkspace(doc.toJSON());
+      catalogSources.push(createPnpmCatalogSource(pnpmWorkspacePath, doc));
       patterns.push(...(data.packages ?? []));
     }
   } else if (client === "yarn") {
@@ -420,24 +421,23 @@ async function readManifest(packagePath: string): Promise<PackageManifest> {
   return parsed;
 }
 
-function createPnpmCatalogSource(filePath: string, workspace: PnpmWorkspace): CatalogSource {
+function createPnpmCatalogSource(filePath: string, doc: Document): CatalogSource {
   return {
     resolve(name, catalogName) {
-      if (catalogName === "default") return workspace.catalog?.[name];
-      return workspace.catalogs?.[catalogName]?.[name];
+      const value = doc.getIn(
+        catalogName === "default" ? ["catalog", name] : ["catalogs", catalogName, name],
+      );
+      return typeof value === "string" ? value : undefined;
     },
     setRange(name, catalogName, range) {
-      if (catalogName === "default") {
-        workspace.catalog ??= {};
-        workspace.catalog[name] = range;
-      } else {
-        workspace.catalogs ??= {};
-        workspace.catalogs[catalogName] ??= {};
-        workspace.catalogs[catalogName]![name] = range;
-      }
+      doc.setIn(
+        catalogName === "default" ? ["catalog", name] : ["catalogs", catalogName, name],
+        range,
+      );
     },
     async write() {
-      await writeFile(filePath, `${stringify(workspace, { lineWidth: 0 }).trim()}\n`);
+      const output = doc.toString();
+      await writeFile(filePath, output.endsWith("\n") ? output : `${output}\n`);
     },
   };
 }
