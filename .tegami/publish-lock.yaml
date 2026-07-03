@@ -1,9 +1,15 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix update lock file of npm plugin\n"
-    filename: 2026-07-03-mr3qzsxv.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Split version requests by publish group\n\nGitHub and GitLab version requests now split grouped packages into separate release PRs or MRs, with ungrouped packages published from a separate request.\n"
+    filename: 2026-07-03-g4p9x2kq.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support catalog for npm plugin\n\nTegami can now bump deps correctly with catalog protocol.\n"
-    filename: 2026-07-03-mr3tot0m.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Preserve formatting of pnpm-workspace file\n"
+    filename: 2026-07-03-mr4swz1q.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n---\n\n## Support Partial Publishing\n\nOnly publish a subset of bumped packages.\n"
+    filename: 2026-07-03-mr50ryi9.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support concurrent publishing\n\nAutomatically publish independent packages concurrently.\n"
+    filename: 2026-07-03-mr50sokm.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,13 +17,17 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-03-mr3qzsxv.md
-      - 2026-07-03-mr3tot0m.md
+      - 2026-07-03-g4p9x2kq.md
+      - 2026-07-03-mr4swz1q.md
+      - 2026-07-03-mr50ryi9.md
+      - 2026-07-03-mr50sokm.md
     id: npm:tegami
     updated: true
-  - id: npm:@tegami/pip
-    updated: true
   - id: npm:@tegami/dart
+    updated: true
+  - changelogIds:
+      - 2026-07-03-mr50ryi9.md
+    id: npm:@tegami/pip
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
@@ -25,6 +35,6 @@ npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
-  - id: npm:@tegami/pip
   - id: npm:@tegami/dart
+  - id: npm:@tegami/pip
   - id: npm:@repo/typescript-config
