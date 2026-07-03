@@ -90,8 +90,13 @@ function registerCoreCommands(cli: TegamiCliRegistry, tegami: Tegami, options: T
       type: "boolean",
       description: "validate the publish lock without publishing",
     })
-    .action(async ({ values }) => {
-      await publishPackages(tegami, { dryRun: values["dry-run"], cli: options });
+    .positionals("packages")
+    .action(async ({ values, positionals }) => {
+      await publishPackages(tegami, {
+        dryRun: values["dry-run"],
+        packages: positionals.packages?.length ? positionals.packages : undefined,
+        cli: options,
+      });
     });
 
   cli
@@ -195,6 +200,7 @@ async function publishPackages(
   options: {
     cli: TegamiCLIOptions;
     dryRun?: boolean;
+    packages?: string[];
   },
 ): Promise<boolean> {
   const dryRun = options.dryRun ?? false;
@@ -204,7 +210,9 @@ async function publishPackages(
 
   const s = spinner();
   s.start(dryRun ? "Validating publish lock" : "Publishing packages");
-  const plan = customPublish ? await customPublish() : await tegami.publish({ dryRun });
+  const plan = customPublish
+    ? await customPublish()
+    : await tegami.publish({ dryRun, packages: options.packages });
 
   if (plan === "skipped") {
     s.stop(dryRun ? "No publish lock to validate" : "Nothing to publish");

@@ -121,8 +121,21 @@ export function pip({
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof PipPackage)) return;
 
+      const optionalWait: string[] = [];
+
+      for (const { table } of dependencyTables(pkg.manifest)) {
+        for (const rawSpec of table) {
+          const spec = parseDependencySpec(rawSpec);
+          if (!spec) continue;
+
+          const linked = resolveLinkedPackage(this.graph, pkg, spec);
+          if (linked) optionalWait.push(linked.id);
+        }
+      }
+
       return {
         shouldPublish: pkg.version !== undefined && pkg.projectInfo.private !== true,
+        optionalWait: optionalWait.length > 0 ? optionalWait : undefined,
       };
     },
     resolvePlanStatus({ plan }) {

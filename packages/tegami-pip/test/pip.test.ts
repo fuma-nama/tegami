@@ -520,6 +520,25 @@ Release with separators.
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  test("publishPreflight declares optionalWait for workspace dependencies", async () => {
+    const cwd = await createMixedWorkspace();
+    tempDirs.push(cwd);
+
+    const context = await tegami({ cwd, plugins: [pip()] })._internal.context();
+    const api = context.graph.get("pip:acme-api")!;
+    const pipPlugin = context.plugins.find((plugin) => plugin.name === "pip")!;
+
+    await expect(
+      pipPlugin.publishPreflight?.call(context, {
+        pkg: api,
+        plan: { options: {}, changelogs: new Map(), packages: new Map() },
+      }),
+    ).resolves.toEqual({
+      shouldPublish: true,
+      optionalWait: ["pip:acme-core"],
+    });
+  });
+
   test("publishes circular pip workspace dependencies", async () => {
     const cwd = await createCircularPipWorkspace();
     tempDirs.push(cwd);

@@ -1,7 +1,7 @@
 {
   "name": "tegami",
   "version": "1.1.2",
-  "description": "Utility for package versioning & publish",
+  "description": "A tool to manage changelogs, versioning, and publishing in monorepo",
   "license": "MIT",
   "author": "Fuma Nama",
   "repository": "github:fuma-nama/tegami",

@@ -3,9 +3,11 @@ import type { TegamiContext } from "../context";
 import type { Awaitable } from "../types";
 import type { Tegami } from "..";
 
+type ArgValue = boolean | string | string[] | boolean[];
+type PositionalValue = string | string[];
 export interface TegamiCliCommand<
-  Values extends Record<string, boolean | string | undefined>,
-  Positionals extends Record<string, string | undefined>,
+  Values extends Record<string, ArgValue | undefined>,
+  Positionals extends Record<string, PositionalValue | undefined>,
 > {
   option<
     const Name extends string,
@@ -39,6 +41,15 @@ export interface TegamiCliCommand<
     Values,
     Positionals & {
       [K in Name]: Required extends true ? string : string | undefined;
+    }
+  >;
+
+  positionals<const Name extends string>(
+    name: Name,
+  ): TegamiCliCommand<
+    Values,
+    Positionals & {
+      [K in Name]: string[];
     }
   >;
 
@@ -76,8 +87,8 @@ interface CommandDefinition {
   resolve: boolean;
   action?: (options: {
     context: TegamiContext;
-    values: Record<string, string | boolean | undefined>;
-    positionals: Record<string, string | undefined>;
+    values: Record<string, ArgValue | undefined>;
+    positionals: Record<string, PositionalValue | undefined>;
   }) => Awaitable<void>;
 }
 
@@ -92,6 +103,7 @@ interface OptionDefinition {
 interface PositionalDefinition {
   name: string;
   required: boolean;
+  multiple?: boolean;
 }
 
 export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
@@ -132,6 +144,14 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
           definition.positionals.push({
             name,
             required: required ?? true,
+          });
+          return api as never;
+        },
+        positionals(name) {
+          definition.positionals.push({
+            name,
+            required: false,
+            multiple: true,
           });
           return api as never;
         },
@@ -179,12 +199,12 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
 }
 
 function formatUsage(command: CommandDefinition): string {
-  return [
-    ...command.path,
-    ...command.positionals.map((positional) =>
-      positional.required ? `<${positional.name}>` : `[${positional.name}]`,
-    ),
-  ].join(" ");
+  const s: string[] = [...command.path];
+  for (const positional of command.positionals) {
+    let c = positional.multiple ? `...${positional.name}` : positional.name;
+    s.push(positional.required ? `<${c}>` : `[${c}]`);
+  }
+  return s.join(" ");
 }
 
 function findCommand(
@@ -206,8 +226,8 @@ function parseCommandArgs(
   command: CommandDefinition,
   args: string[],
 ): {
-  values: Record<string, string | boolean | undefined>;
-  positionals: Record<string, string | undefined>;
+  values: Record<string, ArgValue | undefined>;
+  positionals: Record<string, PositionalValue | undefined>;
 } {
   const optionsConfig: ParseArgsOptionsConfig = {
     help: { type: "boolean", short: "h" },
@@ -226,20 +246,27 @@ function parseCommandArgs(
     strict: true,
     allowPositionals: command.positionals.length > 0,
   });
-  const positionals: Record<string, string> = {};
-
-  if (parsed.positionals.length > command.positionals.length) {
-    throw new Error("Too many arguments");
-  }
+  const positionals: Record<string, PositionalValue> = {};
 
   for (const positional of command.positionals) {
-    const value = parsed.positionals.shift();
+    if (positional.multiple) {
+      const value: string[] = (positionals[positional.name] = []);
+      while (parsed.positionals.length > 0) {
+        value.push(parsed.positionals.shift()!);
+      }
+      continue;
+    }
 
+    const value = parsed.positionals.shift();
     if (value === undefined && positional.required)
       throw new Error(`missing required argument: ${positional.name}`);
     if (value === undefined) continue;
 
     positionals[positional.name] = value;
+  }
+
+  if (parsed.positionals.length > 0) {
+    throw new Error("Too many arguments");
   }
 
   return {
