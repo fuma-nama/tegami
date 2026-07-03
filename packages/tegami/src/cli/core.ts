@@ -1,4 +1,4 @@
-import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
+import { parseArgs, ParseArgsOptionDescriptor, type ParseArgsOptionsConfig } from "node:util";
 import type { TegamiContext } from "../context";
 import type { Awaitable } from "../types";
 import type { Tegami } from "..";
@@ -7,16 +7,27 @@ export interface TegamiCliCommand<
   Values extends Record<string, boolean | string | undefined>,
   Positionals extends Record<string, string | undefined>,
 > {
-  option<const Name extends string, const T extends "string" | "boolean">(
+  option<
+    const Name extends string,
+    const T extends "string" | "boolean",
+    const Multiple extends boolean = false,
+  >(
     name: Name,
     opts: {
       type: T;
       short?: string;
       description?: string;
+      multiple?: Multiple;
     },
   ): TegamiCliCommand<
     Values & {
-      [k in Name]?: T extends "string" ? string : boolean;
+      [k in Name]?: Multiple extends true
+        ? T extends "string"
+          ? string[]
+          : boolean[]
+        : T extends "string"
+          ? string
+          : boolean;
     },
     Positionals
   >;
@@ -75,6 +86,7 @@ interface OptionDefinition {
   short?: string;
   description?: string;
   type: "boolean" | "string";
+  multiple?: boolean;
 }
 
 interface PositionalDefinition {
@@ -106,11 +118,12 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
       commands.set(definition.path.join("\0"), definition);
 
       const api: TegamiCliCommand<Record<never, never>, Record<never, never>> = {
-        option(name, { short, description = "", type }) {
+        option(name, { short, description = "", type, multiple }) {
           definition.options.push({
             name,
             short,
             type,
+            multiple,
             description,
           });
           return api as never;
@@ -196,18 +209,20 @@ function parseCommandArgs(
   values: Record<string, string | boolean | undefined>;
   positionals: Record<string, string | undefined>;
 } {
-  const optionConfig: ParseArgsOptionsConfig = {
+  const optionsConfig: ParseArgsOptionsConfig = {
     help: { type: "boolean", short: "h" },
   };
   for (const option of command.options) {
-    optionConfig[option.name] = option.short
-      ? { type: option.type, short: option.short }
-      : { type: option.type };
+    const config: ParseArgsOptionDescriptor = (optionsConfig[option.name] = {
+      type: option.type,
+    });
+    if (option.short) config.short = option.short;
+    if (option.multiple) config.multiple = true;
   }
 
   const parsed = parseArgs({
     args,
-    options: optionConfig,
+    options: optionsConfig,
     strict: true,
     allowPositionals: command.positionals.length > 0,
   });
