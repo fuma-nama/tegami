@@ -1,3 +1,9 @@
+## @tegami/pip@1.1.3
+
+### Support Partial Publishing
+
+Only publish a subset of bumped packages.
+
 ## @tegami/pip@1.1.1
 
 ### Experiment `typia` compile-time validation

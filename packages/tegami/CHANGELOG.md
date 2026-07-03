@@ -1,3 +1,19 @@
+## tegami@1.1.3
+
+### Split version requests by publish group
+
+GitHub and GitLab version requests now split grouped packages into separate release PRs or MRs, with ungrouped packages published from a separate request.
+
+### Preserve formatting of pnpm-workspace file
+
+### Support Partial Publishing
+
+Only publish a subset of bumped packages.
+
+### Support concurrent publishing
+
+Automatically publish independent packages concurrently.
+
 ## tegami@1.1.2
 
 ### Fix update lock file of npm plugin
