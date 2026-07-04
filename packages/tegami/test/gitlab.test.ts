@@ -546,19 +546,22 @@ describe("gitlab version merge request", () => {
       const draft = versionDraft(context);
 
       exec.mockImplementation((command, args = []) => {
-        if (command === "git" && args[0] === "status") {
-          return commandResult({ stdout: " M package.json\n" });
-        }
+        if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
 
-        if (command === "git" && args[0] === "rev-parse") {
-          return commandResult({ stdout: "base-commit\n" });
+        switch (args[0]) {
+          case "status":
+            return commandResult({ stdout: " M package.json\n" });
+          case "show":
+            return commandResult({ stdout: "base-commit\n2026-07-04T00:00:00+00:00\n" });
+          case "hash-object":
+            return commandResult({ stdout: "blob-sha\n" });
+          case "write-tree":
+            return commandResult({ stdout: "tree-sha\n" });
+          case "commit-tree":
+            return commandResult({ stdout: "commit-sha\n" });
+          default:
+            return commandResult();
         }
-
-        if (command === "git") {
-          return commandResult();
-        }
-
-        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
       findOpenMergeRequest.mockResolvedValue(42);
 
@@ -566,7 +569,7 @@ describe("gitlab version merge request", () => {
 
       expect(updateMergeRequest).toHaveBeenCalledWith("acme/repo", 42, {
         title: "Version Packages",
-        body: expect.stringContaining("Merge this MR to publish the versioned packages."),
+        body: expect.stringContaining("All bumped packages."),
         base: "main",
         apiUrl: "https://gitlab.com/api/v4",
         token: testToken,
@@ -657,19 +660,22 @@ describe("gitlab version merge request", () => {
       const draft = versionDraft(context);
 
       exec.mockImplementation((command, args = []) => {
-        if (command === "git" && args[0] === "status") {
-          return commandResult({ stdout: " M package.json\n" });
-        }
+        if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
 
-        if (command === "git" && args[0] === "rev-parse") {
-          return commandResult({ stdout: "base-commit\n" });
+        switch (args[0]) {
+          case "status":
+            return commandResult({ stdout: " M package.json\n" });
+          case "show":
+            return commandResult({ stdout: "base-commit\n2026-07-04T00:00:00+00:00\n" });
+          case "hash-object":
+            return commandResult({ stdout: "blob-sha\n" });
+          case "write-tree":
+            return commandResult({ stdout: "tree-sha\n" });
+          case "commit-tree":
+            return commandResult({ stdout: "commit-sha\n" });
+          default:
+            return commandResult();
         }
-
-        if (command === "git") {
-          return commandResult();
-        }
-
-        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
       await runVersionMergeRequest(plugin, context, draft);
@@ -778,6 +784,13 @@ describe("gitlab version merge request", () => {
       };
       context.graph.registerGroup("test", {});
       context.graph.addGroupMember("test", "test:@acme/core");
+      // publish every updated package, so predicted publish plans appear in request bodies
+      context.plugins = [
+        {
+          name: "test-provider",
+          publishPreflight: () => ({ shouldPublish: true }),
+        },
+      ];
 
       const lock = new PublishLock();
       lock.write("core:packages", { id: "test:@acme/core", updated: true });
@@ -813,19 +826,22 @@ describe("gitlab version merge request", () => {
       }
 
       exec.mockImplementation((command, args = []) => {
-        if (command === "git" && args[0] === "status") {
-          return commandResult({ stdout: " M package.json\n" });
-        }
+        if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
 
-        if (command === "git" && args[0] === "rev-parse") {
-          return commandResult({ stdout: "base-commit\n" });
+        switch (args[0]) {
+          case "status":
+            return commandResult({ stdout: " M package.json\n" });
+          case "show":
+            return commandResult({ stdout: "base-commit\n2026-07-04T00:00:00+00:00\n" });
+          case "hash-object":
+            return commandResult({ stdout: "blob-sha\n" });
+          case "write-tree":
+            return commandResult({ stdout: "tree-sha\n" });
+          case "commit-tree":
+            return commandResult({ stdout: "commit-sha\n" });
+          default:
+            return commandResult();
         }
-
-        if (command === "git") {
-          return commandResult();
-        }
-
-        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
       await plugin.initCliDraft?.call(context, draft);
@@ -836,7 +852,7 @@ describe("gitlab version merge request", () => {
       await plugin.applyCliDraft?.call(context, draft);
 
       expect(createMergeRequest).toHaveBeenCalledWith("acme/repo", {
-        title: "Release group:test",
+        title: "Release @acme/core (test)",
         body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages/group-test",
         base: "main",
@@ -844,15 +860,15 @@ describe("gitlab version merge request", () => {
         token: testToken,
       });
       expect(createMergeRequest).toHaveBeenCalledWith("acme/repo", {
-        title: "Release @acme/ui, @acme/docs",
+        title: "Release @acme/ui (test), @acme/docs (test)",
         body: expect.stringContaining("| `@acme/docs` | `1.0.0` | `1.1.0` |"),
-        head: "tegami/version-packages/acme-ui-acme-docs",
+        head: "tegami/version-packages/acme-docs-acme-ui",
         base: "main",
         apiUrl: "https://gitlab.com/api/v4",
         token: testToken,
       });
       expect(createMergeRequest).toHaveBeenCalledWith("acme/repo", {
-        title: "Release unlisted packages",
+        title: "Release @acme/cli (test)",
         body: expect.stringContaining("| `@acme/cli` | `1.0.0` | `1.1.0` |"),
         head: "tegami/version-packages/unlisted",
         base: "main",
@@ -860,38 +876,31 @@ describe("gitlab version merge request", () => {
         token: testToken,
       });
 
-      // group request bodies only list their own packages
+      // the predicted publish plan only covers the group members
       const groupBody = createMergeRequest.mock.calls.find(
-        ([, request]) => request.title === "Release group:test",
+        ([, request]) => request.head === "tegami/version-packages/group-test",
       )![1].body;
-      expect(groupBody).not.toContain("`@acme/ui`");
-      expect(groupBody).not.toContain("`@acme/cli`");
+      expect(groupBody).toContain("The following packages will be published if merged:");
+      expect(groupBody).toContain("- test:@acme/core");
+      expect(groupBody).not.toContain("- test:@acme/ui");
 
-      // the last written lock belongs to the unlisted group's branch
-      const lockContent = await readFile(context.lockPath, "utf8");
-      expect(lockContent).toContain("gitlab:publish-group");
-      expect(lockContent).toContain("active:");
-      expect(lockContent).toContain("pending:");
-      expect(lockContent).toContain("test:@acme/cli: 1.0.0");
-
+      // group branches are committed & pushed directly, the working tree stays on the version commit
+      expect(await readFile(context.lockPath, "utf8")).not.toContain("gitlab:publish-group");
       expect(
-        exec.mock.calls
-          .filter(([, args]) => args?.[0] === "checkout" && args[1] === "-B")
-          .map(([, args]) => args),
+        exec.mock.calls.filter(([, args]) => args?.[0] === "push").map(([, args]) => args),
       ).toEqual([
-        ["checkout", "-B", "tegami/version-packages/group-test"],
-        ["checkout", "-B", "tegami/version-packages/acme-ui-acme-docs"],
-        ["checkout", "-B", "tegami/version-packages/unlisted"],
+        ["push", "--force", "origin", "commit-sha:refs/heads/tegami/version-packages/group-test"],
+        [
+          "push",
+          "--force",
+          "origin",
+          "commit-sha:refs/heads/tegami/version-packages/acme-docs-acme-ui",
+        ],
+        ["push", "--force", "origin", "commit-sha:refs/heads/tegami/version-packages/unlisted"],
       ]);
       expect(
-        exec.mock.calls
-          .filter(([, args]) => args?.[0] === "checkout" && args[1] === "--detach")
-          .map(([, args]) => args),
-      ).toEqual([
-        ["checkout", "--detach"],
-        ["checkout", "--detach", "base-commit"],
-        ["checkout", "--detach", "base-commit"],
-      ]);
+        exec.mock.calls.filter(([, args]) => args?.[0] === "checkout").map(([, args]) => args),
+      ).toEqual([["checkout", "--detach"]]);
       expect(exec.mock.calls.some(([, args]) => args?.includes("--amend"))).toBe(false);
     } finally {
       if (previousCi === undefined) delete process.env.CI;
@@ -900,27 +909,15 @@ describe("gitlab version merge request", () => {
   });
 
   test("restores publish groups from the lock into the publish plan", async () => {
-    const plugin = gitlabPlugin();
-    const context = publishContext();
+    const plugin = gitlabPlugin({ versionMr: { groups: ["group:test", "@acme/ui"] } });
+    const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
+    context.graph.registerGroup("test", {});
+    context.graph.addGroupMember("test", "test:@acme/core");
     const plan = releasePlan(context, [{}]);
     const lock = new PublishLock();
 
     lock.write("gitlab:publish-group", {
-      active: [
-        {
-          title: "Release group:test",
-          branch: "tegami/version-packages/group-test",
-          packages: ["group:test"],
-        },
-      ],
-      pending: [
-        {
-          title: "Release @acme/ui",
-          branch: "tegami/version-packages/acme-ui",
-          packages: ["@acme/ui"],
-        },
-      ],
-      versions: { "test:@acme/core": "1.0.0" },
+      groups: { "group-test": "active", "acme-ui": "pending" },
     });
     await plugin.initPublishPlan?.call(context, { lock, plan });
 
@@ -934,7 +931,10 @@ describe("gitlab version merge request", () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-gitlab-"));
     tempDirs.push(cwd);
 
-    const plugin = gitlabPlugin({ repo: "acme/repo" });
+    const plugin = gitlabPlugin({
+      repo: "acme/repo",
+      versionMr: { groups: ["@acme/core", "@acme/ui"] },
+    });
     const context = {
       ...publishContext([testPackage("@acme/core", "1.1.0"), testPackage("@acme/ui", "1.1.0")]),
       cwd,
@@ -944,68 +944,106 @@ describe("gitlab version merge request", () => {
 
     const lock = new PublishLock();
     lock.write("gitlab:publish-group", {
-      active: [
-        {
-          title: "Release @acme/core",
-          branch: "tegami/version-packages/acme-core",
-          packages: ["@acme/core"],
-        },
-      ],
-      pending: [
-        {
-          title: "Release @acme/ui",
-          branch: "tegami/version-packages/acme-ui",
-          packages: ["@acme/ui"],
-        },
-      ],
-      versions: { "test:@acme/core": "1.0.0", "test:@acme/ui": "1.0.0" },
+      groups: { "acme-core": "active", "acme-ui": "pending" },
     });
+    const lockContent = lock.serialize();
     await mkdir(context.changelogDir, { recursive: true });
-    await writeFile(context.lockPath, lock.serialize());
+    await writeFile(context.lockPath, lockContent);
 
     exec.mockImplementation((command, args = []) => {
-      if (command === "git" && args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
-        return commandResult({ stdout: "main\n" });
-      }
+      if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
 
-      if (command === "git" && args[0] === "rev-parse") {
-        return commandResult({ stdout: "main-commit\n" });
+      switch (args[0]) {
+        case "show":
+          return commandResult({ stdout: "main-commit\n2026-07-04T00:00:00+00:00\n" });
+        case "hash-object":
+          return commandResult({ stdout: "blob-sha\n" });
+        case "write-tree":
+          return commandResult({ stdout: "tree-sha\n" });
+        case "commit-tree":
+          return commandResult({ stdout: "commit-sha\n" });
+        case "ls-remote":
+          return commandResult({ stdout: "" });
+        default:
+          return commandResult();
       }
-
-      if (command === "git") {
-        return commandResult();
-      }
-
-      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     });
 
     const plan = releasePlan(context, [{ name: "@acme/core" }, { name: "@acme/ui" }]);
     await plugin.initPublishPlan?.call(context, { lock, plan });
     await plugin.beforePublishAll?.call(context, { plan });
 
-    expect(createMergeRequest).toHaveBeenCalledWith("acme/repo", {
-      title: "Release @acme/ui",
-      body: expect.stringContaining("| `@acme/ui` | `1.0.0` | `1.1.0` |"),
-      head: "tegami/version-packages/acme-ui",
-      base: "main",
-      apiUrl: "https://gitlab.com/api/v4",
-      token: testToken,
+    // re-syncs are push-only: the request tracks the branch, its body never changes
+    expect(findOpenMergeRequest).not.toHaveBeenCalled();
+    expect(createMergeRequest).not.toHaveBeenCalled();
+    expect(updateMergeRequest).not.toHaveBeenCalled();
+
+    // the lock commit activates the pending group without touching the working tree
+    expect(await readFile(context.lockPath, "utf8")).toBe(lockContent);
+    expect(exec.mock.calls.some(([, args]) => args?.[0] === "checkout")).toBe(false);
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["update-index", "--add", "--cacheinfo", "100644,blob-sha,.tegami/publish-lock.yaml"],
+      expect.anything(),
+    );
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["ls-remote", "origin", "refs/heads/tegami/version-packages/acme-ui"],
+      expect.anything(),
+    );
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["push", "--force", "origin", "commit-sha:refs/heads/tegami/version-packages/acme-ui"],
+      expect.anything(),
+    );
+  });
+
+  test("skips pushing publish group branches that are already in sync", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-gitlab-"));
+    tempDirs.push(cwd);
+
+    const plugin = gitlabPlugin({ repo: "acme/repo", versionMr: { groups: ["@acme/ui"] } });
+    const context = {
+      ...publishContext([testPackage("@acme/ui", "1.1.0")]),
+      cwd,
+      changelogDir: join(cwd, ".tegami"),
+      lockPath: join(cwd, ".tegami/publish-lock.yaml"),
+    };
+
+    const lock = new PublishLock();
+    lock.write("gitlab:publish-group", { groups: { "acme-ui": "pending" } });
+    await mkdir(context.changelogDir, { recursive: true });
+    await writeFile(context.lockPath, lock.serialize());
+
+    exec.mockImplementation((command, args = []) => {
+      if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+
+      switch (args[0]) {
+        case "show":
+          return commandResult({ stdout: "main-commit\n2026-07-04T00:00:00+00:00\n" });
+        case "hash-object":
+          return commandResult({ stdout: "blob-sha\n" });
+        case "write-tree":
+          return commandResult({ stdout: "tree-sha\n" });
+        case "commit-tree":
+          return commandResult({ stdout: "commit-sha\n" });
+        case "ls-remote":
+          return commandResult({
+            stdout: "commit-sha\trefs/heads/tegami/version-packages/acme-ui\n",
+          });
+        default:
+          return commandResult();
+      }
     });
+    findOpenMergeRequest.mockResolvedValue(42);
 
-    // the branch lock activates the pending group
-    const lockContent = await readFile(context.lockPath, "utf8");
-    expect(lockContent).toContain("Release @acme/core");
-    expect(lockContent).toContain("Release @acme/ui");
+    const plan = releasePlan(context, [{ name: "@acme/ui" }]);
+    await plugin.initPublishPlan?.call(context, { lock, plan });
+    await plugin.beforePublishAll?.call(context, { plan });
 
-    const checkouts = exec.mock.calls
-      .filter(([, args]) => args?.[0] === "checkout")
-      .map(([, args]) => args);
-    expect(checkouts).toEqual([
-      ["checkout", "--detach", "main-commit"],
-      ["checkout", "-B", "tegami/version-packages/acme-ui"],
-      // the original checkout is restored for the rest of the publish flow
-      ["checkout", "main"],
-    ]);
+    expect(exec.mock.calls.some(([, args]) => args?.[0] === "push")).toBe(false);
+    expect(createMergeRequest).not.toHaveBeenCalled();
+    expect(updateMergeRequest).not.toHaveBeenCalled();
   });
 
   test("skips version merge requests outside CI by default", async () => {

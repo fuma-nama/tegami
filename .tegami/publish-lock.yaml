@@ -1,15 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Split version requests by publish group\n\nGitHub and GitLab version requests now split grouped packages into separate release PRs or MRs, with ungrouped packages published from a separate request.\n"
-    filename: 2026-07-03-g4p9x2kq.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix npm workspace protocol matching\n\nIn general, workspace protocol should assume ranges to include prerelease.\n"
+    filename: 2026-07-04-mr6d42kq.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Preserve formatting of pnpm-workspace file\n"
-    filename: 2026-07-03-mr4swz1q.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n---\n\n## Support Partial Publishing\n\nOnly publish a subset of bumped packages.\n"
-    filename: 2026-07-03-mr50ryi9.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support concurrent publishing\n\nAutomatically publish independent packages concurrently.\n"
-    filename: 2026-07-03-mr50sokm.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Redesign Publish Groups\n\nThe Version PRs will now display published packages based on preflight results, rather than updated packages only.\n"
+    filename: 2026-07-05-mr6nhqc6.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -17,17 +11,13 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-03-g4p9x2kq.md
-      - 2026-07-03-mr4swz1q.md
-      - 2026-07-03-mr50ryi9.md
-      - 2026-07-03-mr50sokm.md
+      - 2026-07-04-mr6d42kq.md
+      - 2026-07-05-mr6nhqc6.md
     id: npm:tegami
     updated: true
   - id: npm:@tegami/dart
     updated: true
-  - changelogIds:
-      - 2026-07-03-mr50ryi9.md
-    id: npm:@tegami/pip
+  - id: npm:@tegami/pip
     updated: true
   - id: npm:@repo/typescript-config
     updated: false

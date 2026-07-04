@@ -64,9 +64,30 @@ Set `versionPr: false` to disable PR creation. Set `versionPr: { forceCreate: tr
 
 ### Publish groups
 
-With `groups`, versioning opens one PR per publish group instead of a single "Version Packages" PR. Each entry is a package (or a list of packages) released together; packages not covered by any group get an extra "unlisted packages" PR. Group PRs are created under `<branch>/`, e.g. `tegami/version-packages/unlisted` — delete an existing `tegami/version-packages` branch on origin before enabling groups.
+Create one PR per `groups` entry, unlisted packages get an `unlisted` PR. Accepts [package groups](/package-groups), package names and IDs.
 
-Merging a group PR publishes only its members. On every publish run, the remaining PRs are re-created from the latest base branch, so they never go stale or conflict. The publish lock stays pending — blocking new version cycles — until every group PR is merged and published.
+```ts
+github({
+  versionPr: {
+    branch: "tegami/version-packages",
+    groups: ["group:fumadocs", ["@fumadocs/local-md", "fumadocs-mdx"]],
+  },
+});
+```
+
+Branches are `<branch>/<group-id>`:
+
+```
+tegami/version-packages/group-fumadocs
+tegami/version-packages/fumadocs-local-md-fumadocs-mdx
+tegami/version-packages/unlisted
+```
+
+<Callout type="Avoid branch conflicts">
+
+Delete the flat `tegami/version-packages` branch on origin before enabling `groups`.
+
+</Callout>
 
 ## CLI commands
 

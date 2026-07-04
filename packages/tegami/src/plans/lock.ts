@@ -5,10 +5,21 @@ import typia from "typia";
  * the data structure of `publish-lock.yaml` file.
  */
 export class PublishLock {
-  constructor(
-    /** namespace -> data array */
-    private readonly data = new Map<string, unknown[]>(),
-  ) {}
+  /** namespace -> data array */
+  private readonly data: Map<string, unknown[]>;
+  constructor(lock: PublishLock);
+  constructor(data?: Map<string, unknown[]>);
+
+  constructor(input: PublishLock | Map<string, unknown[]> = new Map()) {
+    if (input instanceof PublishLock) {
+      this.data = new Map();
+      for (const [k, v] of input.data) {
+        this.data.set(k, [...v]);
+      }
+    } else {
+      this.data = input;
+    }
+  }
 
   /** write data to namespace, note that the `data` must be serializable in yaml */
   write(namespace: string, data: unknown) {

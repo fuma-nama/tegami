@@ -59,9 +59,30 @@ Set `versionMr: false` to disable MR creation. Set `versionMr: { forceCreate: tr
 
 ### Publish groups
 
-With `groups`, versioning opens one MR per publish group instead of a single "Version Packages" MR. Each entry is a package (or a list of packages) released together; packages not covered by any group get an extra "unlisted packages" MR. Group MRs are created under `<branch>/`, e.g. `tegami/version-packages/unlisted` — delete an existing `tegami/version-packages` branch on origin before enabling groups.
+Create one MR per `groups` entry, unlisted packages get an `unlisted` MR. Accepts [package groups](/package-groups), package names and IDs.
 
-Merging a group MR publishes only its members. On every publish run, the remaining MRs are re-created from the latest target branch, so they never go stale or conflict. The publish lock stays pending — blocking new version cycles — until every group MR is merged and published.
+```ts
+gitlab({
+  versionMr: {
+    branch: "tegami/version-packages",
+    groups: ["group:fumadocs", ["@fumadocs/local-md", "fumadocs-mdx"]],
+  },
+});
+```
+
+Branches are `<branch>/<group-id>`:
+
+```
+tegami/version-packages/group-fumadocs
+tegami/version-packages/fumadocs-local-md-fumadocs-mdx
+tegami/version-packages/unlisted
+```
+
+<Callout type="Avoid branch conflicts">
+
+Delete the flat `tegami/version-packages` branch on origin before enabling `groups`.
+
+</Callout>
 
 ## CLI commands
 

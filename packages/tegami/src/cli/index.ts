@@ -212,7 +212,10 @@ async function publishPackages(
   s.start(dryRun ? "Validating publish lock" : "Publishing packages");
   const plan = customPublish
     ? await customPublish()
-    : await tegami.publish({ dryRun, packages: options.packages });
+    : await tegami.publish({
+        dryRun,
+        packages: options.packages && options.packages.length > 0 ? options.packages : undefined,
+      });
 
   if (plan === "skipped") {
     s.stop(dryRun ? "No publish lock to validate" : "Nothing to publish");
