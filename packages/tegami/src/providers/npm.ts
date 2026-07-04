@@ -218,8 +218,13 @@ export function npm({
 
       for (const pkg of npmGraph.packages.values()) {
         for (const dep of pkg.listDependencies(npmGraph)) {
-          if (!dep.linked || !dep.range || !dep.setRange) continue;
-          if (!dep.linked.version || semver.satisfies(dep.linked.version, dep.range)) continue;
+          if (!dep.linked?.version || !dep.range || !dep.setRange) continue;
+          if (
+            semver.satisfies(dep.linked.version, dep.range, {
+              includePrerelease: dep.spec.protocol === "workspace",
+            })
+          )
+            continue;
 
           const isPeer = dep.field === "peerDependencies";
           if (isPeer && onBreakPeerDep === "ignore") continue;
@@ -309,6 +314,9 @@ function depsPolicy(
             return !semver.satisfies(
               target,
               `${resolved.spec.range}${resolved.linked.version ?? "0.0.0"}`,
+              {
+                includePrerelease: true,
+              },
             );
         }
     }
