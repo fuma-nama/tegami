@@ -98,38 +98,63 @@ export async function initPublishPlan(
   return plan;
 }
 
-function resolvePublishTargets(plan: PublishPlan): string[] {
-  const ordered: string[] = [];
-  const scanned = new Set<string>();
+function resolvePublishTargets(plan: PublishPlan) {
+  /** the iteration order = publish order */
+  const orderedMap = new Map<string, { split: boolean }>();
+  /** package id -> true while scanning hard wait, false while scanning optional wait */
+  const stack = new Map<string, boolean>();
 
-  function scan(id: string, stack: Set<string>) {
+  function scan(id: string) {
     const preflight = plan.packages.get(id)?.preflight;
     if (!preflight || !preflight.shouldPublish) return;
 
-    if (stack.has(id)) {
-      throw new Error(`circular reference of deps: ${[...stack, id].join(" -> ")}`);
+    switch (stack.get(id)) {
+      case true:
+        throw new Error(`circular reference of deps: ${[...stack.keys(), id].join(" -> ")}`);
+      case false:
+        return;
     }
 
-    if (scanned.has(id)) return;
+    if (orderedMap.has(id)) return;
 
+    let split = false;
     if (preflight.wait) {
-      stack.add(id);
-      for (const dep of preflight.wait) scan(dep, stack);
-      stack.delete(id);
+      stack.set(id, true);
+      split ||= preflight.wait.length > 0;
+      for (const dep of preflight.wait) scan(dep);
     }
 
-    ordered.push(id);
-    scanned.add(id);
+    if (preflight.optionalWait) {
+      stack.set(id, false);
+      split ||= preflight.optionalWait.length > 0;
+      for (const dep of preflight.optionalWait) scan(dep);
+    }
+
+    stack.delete(id);
+    orderedMap.set(id, { split });
   }
 
-  const stack = new Set<string>();
-  for (const id of plan.packages.keys()) scan(id, stack);
-  return ordered;
+  for (const id of plan.packages.keys()) scan(id);
+  return orderedMap;
 }
 
 export interface PublishOptions {
   /** Validate the publish plan without publishing packages, creating tags, or running release plugins. */
   dryRun?: boolean;
+
+  /**
+   * Publish only the given packages and their dependencies.
+   *
+   * Each entry can be a package id, package name, or `group:name`.
+   */
+  packages?: string[];
+
+  /**
+   * The max amount of concurrent publishes (unstable, can change in anytime).
+   *
+   * @default 5
+   */
+  unstable_maxChunk?: number;
 }
 
 export type PackagePublishResult =
@@ -142,61 +167,77 @@ export type PackagePublishResult =
     };
 
 export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) {
-  const { dryRun = false } = plan.options;
+  const { dryRun = false, unstable_maxChunk = 5 } = plan.options;
 
-  const onPublishResult = async (pkg: WorkspacePackage, publishResult: PackagePublishResult) => {
-    const packagePlan = plan.packages.get(pkg.id);
-    if (!packagePlan) return;
-    packagePlan.publishResult = publishResult;
-    if (publishResult.type === "skipped") return;
-
-    for (const plugin of context.plugins) {
-      await handlePluginError(plugin, "afterPublish", () =>
-        plugin.afterPublish?.call(context, {
-          pkg,
-          plan,
-        }),
-      );
-    }
-  };
-
-  publishLoop: for (const id of resolvePublishTargets(plan)) {
-    const pkg = context.graph.get(id)!;
-
-    if (dryRun) {
-      await onPublishResult(pkg, {
-        type: "published",
-      });
-      continue;
-    }
-
-    for (const plugin of context.plugins) {
-      const next = await handlePluginError(plugin, "willPublish", () =>
-        plugin.willPublish?.call(context, { pkg }),
-      );
-
-      if (next === false) {
-        continue publishLoop;
-      }
-    }
-
-    for (const plugin of context.plugins) {
-      const publishResult = await handlePluginError(plugin, "publish", () =>
-        plugin.publish?.call(context, { pkg, plan }),
-      );
-
-      if (publishResult) {
-        await onPublishResult(pkg, publishResult);
-        continue publishLoop;
-      }
-    }
-
-    await onPublishResult(pkg, {
-      type: "failed",
-      error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
-    });
+  for (const plugin of context.plugins) {
+    await handlePluginError(plugin, "beforePublishAll", () =>
+      plugin.beforePublishAll?.call(context, { plan }),
+    );
   }
 
+  async function publish(pkg: WorkspacePackage): Promise<PackagePublishResult> {
+    if (dryRun) {
+      return { type: "published" };
+    }
+
+    try {
+      for (const plugin of context.plugins) {
+        const next = await handlePluginError(plugin, "willPublish", () =>
+          plugin.willPublish?.call(context, { pkg }),
+        );
+
+        if (next === false) return { type: "skipped" };
+      }
+
+      for (const plugin of context.plugins) {
+        const publishResult = await handlePluginError(plugin, "publish", () =>
+          plugin.publish?.call(context, { pkg, plan }),
+        );
+
+        if (publishResult) return publishResult;
+      }
+    } catch (e) {
+      return {
+        type: "failed",
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+
+    return {
+      type: "failed",
+      error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
+    };
+  }
+
+  let promises: Promise<void>[] = [];
+  for (const [id, { split }] of resolvePublishTargets(plan)) {
+    const pkg = context.graph.get(id)!;
+    const packagePlan = plan.packages.get(pkg.id);
+    if (!pkg || !packagePlan) continue;
+
+    if (split || promises.length >= unstable_maxChunk) {
+      await Promise.all(promises);
+      promises = [];
+    }
+
+    promises.push(
+      publish(pkg).then(async (result) => {
+        packagePlan.publishResult = result;
+        if (result.type === "skipped") return;
+
+        for (const plugin of context.plugins) {
+          await handlePluginError(plugin, "afterPublish", () =>
+            plugin.afterPublish?.call(context, {
+              pkg,
+              plan,
+            }),
+          );
+        }
+      }),
+    );
+  }
+
+  await Promise.all(promises);
   for (const packagePlan of plan.packages.values()) {
     packagePlan.publishResult ??= {
       type: "skipped",
@@ -211,31 +252,50 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
 }
 
 export async function runPreflights(context: TegamiContext, plan: PublishPlan): Promise<void> {
-  const promises: Promise<void>[] = [];
+  const { graph } = context;
 
-  for (const [id, packagePlan] of plan.packages) {
-    const pkg = context.graph.get(id)!;
+  await Promise.all(
+    Array.from(plan.packages, async ([id, packagePlan]) => {
+      const pkg = graph.get(id)!;
 
-    packagePlan.preflight = { shouldPublish: false };
-    if (!packagePlan.updated) continue;
+      packagePlan.preflight = { shouldPublish: false };
+      if (!packagePlan.updated) return;
 
-    promises.push(
-      (async () => {
-        for (const plugin of context.plugins) {
-          const res = await handlePluginError(plugin, "publishPreflight", () =>
-            plugin.publishPreflight?.call(context, { pkg, plan }),
-          );
+      for (const plugin of context.plugins) {
+        const res = await handlePluginError(plugin, "publishPreflight", () =>
+          plugin.publishPreflight?.call(context, { pkg, plan }),
+        );
 
-          if (res) {
-            packagePlan.preflight = res;
-            break;
-          }
+        if (res) {
+          packagePlan.preflight = res;
+          break;
         }
-      })(),
-    );
+      }
+    }),
+  );
+
+  if (plan.options.packages?.length) {
+    const only = new Set<string>();
+    function addOnly(id: string) {
+      if (only.has(id)) return;
+      const preflight = plan.packages.get(id)?.preflight;
+      if (!preflight) return;
+
+      only.add(id);
+      if (preflight.wait) for (const dep of preflight.wait) addOnly(dep);
+      if (preflight.optionalWait) for (const dep of preflight.optionalWait) addOnly(dep);
+    }
+
+    for (const name of plan.options.packages) {
+      for (const pkg of graph.getByName(name)) addOnly(pkg.id);
+    }
+
+    for (const [id, packagePlan] of plan.packages) {
+      if (only.has(id)) continue;
+      packagePlan.preflight!.shouldPublish = false;
+    }
   }
 
-  await Promise.all(promises);
   for (const plugin of context.plugins) {
     await handlePluginError(plugin, "afterPreflight", () =>
       plugin.afterPreflight?.call(context, { plan }),

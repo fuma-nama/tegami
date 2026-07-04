@@ -674,6 +674,41 @@ catalog:
     expect(await readFile(join(cwd, "pnpm-workspace.yaml"), "utf8")).toContain("react: ^18.3.0");
   });
 
+  test("preserves pnpm-workspace.yaml formatting when updating catalog dependencies", async () => {
+    const cwd = await createGraphRoot();
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+
+# pinned versions
+catalog:
+  react: ^18.0.0 # react
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+      dependencies: { react: "catalog:" },
+    });
+
+    const graph = await resolveNpmGraph(cwd, "pnpm");
+    const react = graph.packages
+      .get("@acme/core")!
+      .listDependencies(graph)
+      .find((dep) => dep.name === "react")!;
+
+    expect(react.range).toBe("^18.0.0");
+    react.setRange?.("^18.3.0");
+
+    await Promise.all(graph.catalogs.map((source) => source.write?.()));
+
+    const written = await readFile(join(cwd, "pnpm-workspace.yaml"), "utf8");
+    expect(written).toContain("# pinned versions");
+    expect(written).toContain("# react");
+    expect(written).toContain("react: ^18.3.0");
+  });
+
   test("preserves .yarnrc.yml formatting when updating catalog dependencies", async () => {
     const cwd = await createGraphRoot();
     await writeFile(

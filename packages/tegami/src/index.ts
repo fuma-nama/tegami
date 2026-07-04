@@ -58,9 +58,9 @@ export interface Tegami {
    *
    * Prefer `publish()` over this if you are publishing packages, it will also check the publish status.
    */
-  publishStatus(): Promise<"pending" | "success" | "idle">;
+  publishStatus(options?: PublishOptions): Promise<"pending" | "success" | "idle">;
   /** Remove the publish lock file after publishing has finished successfully. */
-  cleanup(): Promise<
+  cleanup(options?: PublishOptions): Promise<
     | {
         state: "removed";
       }
@@ -133,9 +133,9 @@ export function tegami<const Groups extends string = string>(
 
       return createDraft(changelogs, context);
     },
-    async publishStatus() {
+    async publishStatus(publishOptions = {}) {
       const context = await getContextResolved();
-      const plan = await initPublishPlan(context, {});
+      const plan = await initPublishPlan(context, publishOptions);
       if (!plan) return "idle";
 
       await runPreflights(context, plan);
@@ -163,9 +163,9 @@ export function tegami<const Groups extends string = string>(
       return plan;
     },
 
-    async cleanup() {
+    async cleanup(publishOptions = {}) {
       const context = await getContextResolved();
-      const plan = await initPublishPlan(context, {});
+      const plan = await initPublishPlan(context, publishOptions);
       if (!plan) {
         return { state: "skipped", reason: "no-plan" };
       }

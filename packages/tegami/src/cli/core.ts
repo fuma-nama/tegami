@@ -1,22 +1,35 @@
-import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
+import { parseArgs, ParseArgsOptionDescriptor, type ParseArgsOptionsConfig } from "node:util";
 import type { TegamiContext } from "../context";
 import type { Awaitable } from "../types";
 import type { Tegami } from "..";
 
+type ArgValue = boolean | string | string[] | boolean[];
+type PositionalValue = string | string[];
 export interface TegamiCliCommand<
-  Values extends Record<string, boolean | string | undefined>,
-  Positionals extends Record<string, string | undefined>,
+  Values extends Record<string, ArgValue | undefined>,
+  Positionals extends Record<string, PositionalValue | undefined>,
 > {
-  option<const Name extends string, const T extends "string" | "boolean">(
+  option<
+    const Name extends string,
+    const T extends "string" | "boolean",
+    const Multiple extends boolean = false,
+  >(
     name: Name,
     opts: {
       type: T;
       short?: string;
       description?: string;
+      multiple?: Multiple;
     },
   ): TegamiCliCommand<
     Values & {
-      [k in Name]?: T extends "string" ? string : boolean;
+      [k in Name]?: Multiple extends true
+        ? T extends "string"
+          ? string[]
+          : boolean[]
+        : T extends "string"
+          ? string
+          : boolean;
     },
     Positionals
   >;
@@ -28,6 +41,15 @@ export interface TegamiCliCommand<
     Values,
     Positionals & {
       [K in Name]: Required extends true ? string : string | undefined;
+    }
+  >;
+
+  positionals<const Name extends string>(
+    name: Name,
+  ): TegamiCliCommand<
+    Values,
+    Positionals & {
+      [K in Name]: string[];
     }
   >;
 
@@ -65,8 +87,8 @@ interface CommandDefinition {
   resolve: boolean;
   action?: (options: {
     context: TegamiContext;
-    values: Record<string, string | boolean | undefined>;
-    positionals: Record<string, string | undefined>;
+    values: Record<string, ArgValue | undefined>;
+    positionals: Record<string, PositionalValue | undefined>;
   }) => Awaitable<void>;
 }
 
@@ -75,11 +97,13 @@ interface OptionDefinition {
   short?: string;
   description?: string;
   type: "boolean" | "string";
+  multiple?: boolean;
 }
 
 interface PositionalDefinition {
   name: string;
   required: boolean;
+  multiple?: boolean;
 }
 
 export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
@@ -106,11 +130,12 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
       commands.set(definition.path.join("\0"), definition);
 
       const api: TegamiCliCommand<Record<never, never>, Record<never, never>> = {
-        option(name, { short, description = "", type }) {
+        option(name, { short, description = "", type, multiple }) {
           definition.options.push({
             name,
             short,
             type,
+            multiple,
             description,
           });
           return api as never;
@@ -119,6 +144,14 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
           definition.positionals.push({
             name,
             required: required ?? true,
+          });
+          return api as never;
+        },
+        positionals(name) {
+          definition.positionals.push({
+            name,
+            required: false,
+            multiple: true,
           });
           return api as never;
         },
@@ -166,12 +199,12 @@ export function createTegamiCliRegistry(tegami: Tegami): TegamiCliRegistry {
 }
 
 function formatUsage(command: CommandDefinition): string {
-  return [
-    ...command.path,
-    ...command.positionals.map((positional) =>
-      positional.required ? `<${positional.name}>` : `[${positional.name}]`,
-    ),
-  ].join(" ");
+  const s: string[] = [...command.path];
+  for (const positional of command.positionals) {
+    let c = positional.multiple ? `...${positional.name}` : positional.name;
+    s.push(positional.required ? `<${c}>` : `[${c}]`);
+  }
+  return s.join(" ");
 }
 
 function findCommand(
@@ -193,38 +226,47 @@ function parseCommandArgs(
   command: CommandDefinition,
   args: string[],
 ): {
-  values: Record<string, string | boolean | undefined>;
-  positionals: Record<string, string | undefined>;
+  values: Record<string, ArgValue | undefined>;
+  positionals: Record<string, PositionalValue | undefined>;
 } {
-  const optionConfig: ParseArgsOptionsConfig = {
+  const optionsConfig: ParseArgsOptionsConfig = {
     help: { type: "boolean", short: "h" },
   };
   for (const option of command.options) {
-    optionConfig[option.name] = option.short
-      ? { type: option.type, short: option.short }
-      : { type: option.type };
+    const config: ParseArgsOptionDescriptor = (optionsConfig[option.name] = {
+      type: option.type,
+    });
+    if (option.short) config.short = option.short;
+    if (option.multiple) config.multiple = true;
   }
 
   const parsed = parseArgs({
     args,
-    options: optionConfig,
+    options: optionsConfig,
     strict: true,
     allowPositionals: command.positionals.length > 0,
   });
-  const positionals: Record<string, string> = {};
-
-  if (parsed.positionals.length > command.positionals.length) {
-    throw new Error("Too many arguments");
-  }
+  const positionals: Record<string, PositionalValue> = {};
 
   for (const positional of command.positionals) {
-    const value = parsed.positionals.shift();
+    if (positional.multiple) {
+      const value: string[] = (positionals[positional.name] = []);
+      while (parsed.positionals.length > 0) {
+        value.push(parsed.positionals.shift()!);
+      }
+      continue;
+    }
 
+    const value = parsed.positionals.shift();
     if (value === undefined && positional.required)
       throw new Error(`missing required argument: ${positional.name}`);
     if (value === undefined) continue;
 
     positionals[positional.name] = value;
+  }
+
+  if (parsed.positionals.length > 0) {
+    throw new Error("Too many arguments");
   }
 
   return {

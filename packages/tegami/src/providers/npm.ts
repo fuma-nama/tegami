@@ -115,10 +115,16 @@ export function npm({
       active = true;
     },
     async publishPreflight({ pkg }) {
-      if (!(pkg instanceof NpmPackage)) return;
+      if (!(pkg instanceof NpmPackage) || !this.npm?.graph) return;
+
+      const optionalWait: string[] = [];
+      for (const { linked } of pkg.listDependencies(this.npm.graph)) {
+        if (linked) optionalWait.push(linked.id);
+      }
 
       return {
         shouldPublish: pkg.version !== undefined && pkg.manifest.private !== true,
+        optionalWait: optionalWait.length > 0 ? optionalWait : undefined,
       };
     },
     resolvePlanStatus({ plan }) {

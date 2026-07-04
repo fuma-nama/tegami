@@ -47,18 +47,26 @@ github({
   versionPr: {
     branch: "tegami/version-packages",
     base: "main",
+    groups: ["group:fumadocs", ["@fumadocs/local-md", "fumadocs-mdx"]],
   },
 });
 ```
 
-| Setting       | Default                   | Description                                      |
-| ------------- | ------------------------- | ------------------------------------------------ |
-| `branch`      | `tegami/version-packages` | Head branch for the version PR                   |
-| `base`        | `main`                    | Base branch for the version PR                   |
-| `forceCreate` | `false`                   | Create the PR outside CI as well                 |
-| `create`      | —                         | Override the PR title and body before it is sent |
+| Setting       | Default                   | Description                                       |
+| ------------- | ------------------------- | ------------------------------------------------- |
+| `branch`      | `tegami/version-packages` | Head branch for the version PR                    |
+| `base`        | `main`                    | Base branch for the version PR                    |
+| `groups`      | —                         | Publish groups to split into separate version PRs |
+| `forceCreate` | `false`                   | Create the PR outside CI as well                  |
+| `create`      | —                         | Override the PR title and body before it is sent  |
 
 Set `versionPr: false` to disable PR creation. Set `versionPr: { forceCreate: true }` to always create the PR, including locally.
+
+### Publish groups
+
+With `groups`, versioning opens one PR per publish group instead of a single "Version Packages" PR. Each entry is a package (or a list of packages) released together; packages not covered by any group get an extra "unlisted packages" PR. Group PRs are created under `<branch>/`, e.g. `tegami/version-packages/unlisted` — delete an existing `tegami/version-packages` branch on origin before enabling groups.
+
+Merging a group PR publishes only its members. On every publish run, the remaining PRs are re-created from the latest base branch, so they never go stale or conflict. The publish lock stays pending — blocking new version cycles — until every group PR is merged and published.
 
 ## CLI commands
 

@@ -10,11 +10,7 @@ import { git, type GitPluginOptions } from "./git";
 import { cached, isCI, joinPath } from "../utils/common";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
-import {
-  commitVersionBranchChanges,
-  createVersionRequestBody,
-  hasGitChanges,
-} from "../utils/version-request";
+import { onVersionRequest } from "../utils/version-request";
 import {
   createMergeRequest,
   createRelease as createGitLabRelease,
@@ -52,7 +48,7 @@ interface VersionMergeRequestOptions {
    */
   forceCreate?: boolean;
   /**
-   * Merge request branch.
+   * Merge request branch. Publish group MRs are created under `<branch>/`.
    *
    * @default "tegami/version-packages"
    */
@@ -63,9 +59,26 @@ interface VersionMergeRequestOptions {
    * @default "main"
    */
   base?: string;
+  /**
+   * Publish groups to split into separate version MRs, each entry is a package (or a list of
+   * packages) to version & publish together. Packages not covered by any group are collected
+   * into an extra "unlisted packages" MR.
+   *
+   * Merging a group MR publishes only its members, the remaining MRs are re-synced on every
+   * publish run until all of them are merged & published.
+   */
+  groups?: (string | string[])[];
 
-  /** Override details for "Version Packages" MR. */
-  create?: (this: TegamiContext, opts: { draft: Draft }) => Awaitable<VersionMergeRequest>;
+  /**
+   * Override details for a version MR.
+   *
+   * Only called at version-time: publish group MRs re-synced at publish-time keep the stored
+   * title and use a default body.
+   */
+  create?: (
+    this: TegamiContext,
+    opts: { draft: Draft; publishGroup?: string[] },
+  ) => Awaitable<VersionMergeRequest>;
 }
 
 /** Options for creating GitLab releases after a successful publish. */
@@ -123,7 +136,40 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
     return (renderer ??= createChangelogRenderer(context));
   }
 
-  const cliOriginalPackageVersions = new Map<string, string | undefined>();
+  const versionRequests = onVersionRequest<number>({
+    name: "gitlab",
+    summary: "Merge this MR to publish the versioned packages.",
+    options: options.versionMr,
+    enabled(context) {
+      const { repo, token } = context.gitlab ?? {};
+      return Boolean(repo && token);
+    },
+    find(context, { head, base }) {
+      return findOpenMergeRequest(context.gitlab!.repo!, {
+        head,
+        base,
+        ...gitLabApiOptions(context.gitlab),
+      });
+    },
+    create(context, request) {
+      return createMergeRequest(context.gitlab!.repo!, {
+        title: request.title,
+        body: request.body,
+        head: request.head,
+        base: request.base,
+        ...gitLabApiOptions(context.gitlab),
+      });
+    },
+    update(context, number, request) {
+      return updateMergeRequest(context.gitlab!.repo!, number, {
+        title: request.title,
+        body: request.body,
+        base: request.base,
+        ...gitLabApiOptions(context.gitlab),
+      });
+    },
+  });
+
   const plugin: TegamiPlugin = {
     name: "gitlab",
     init() {
@@ -143,6 +189,8 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       };
     },
     async resolvePlanStatus({ plan }) {
+      if (versionRequests.resolvePlanStatus() === "pending") return "pending";
+
       const { repo, token } = this.gitlab!;
       if (!repo || !token || releaseOptions === false) return;
       const requiredTags = new Set<string>();
@@ -233,55 +281,16 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       }
     },
     initCliDraft() {
-      for (const pkg of this.graph.getPackages()) {
-        cliOriginalPackageVersions.set(pkg.id, pkg.version);
-      }
+      versionRequests.initCliDraft.call(this);
     },
-    async applyCliDraft(draft) {
-      const config = options.versionMr ?? {};
-      if (config === false || !(config.forceCreate || isCI()) || !(await hasGitChanges(this.cwd))) {
-        return;
-      }
-
-      const repo = this.gitlab?.repo;
-      const { branch = "tegami/version-packages", base = "main" } = config;
-      const baseMR = await config.create?.call(this, { draft });
-      const mr: Required<VersionMergeRequest> = {
-        title: baseMR?.title ?? "Version Packages",
-        body:
-          baseMR?.body ??
-          createVersionRequestBody(
-            draft,
-            this,
-            cliOriginalPackageVersions,
-            "Merge this MR to publish the versioned packages.",
-          ),
-      };
-
-      await commitVersionBranchChanges(this.cwd, branch, mr.title);
-
-      const api = gitLabApiOptions(this.gitlab);
-      if (!repo) return;
-
-      const openMr = await findOpenMergeRequest(repo, { head: branch, base, ...api });
-
-      if (openMr !== undefined) {
-        await updateMergeRequest(repo, openMr, {
-          title: mr.title,
-          body: mr.body,
-          base,
-          ...api,
-        });
-        return;
-      }
-
-      await createMergeRequest(repo, {
-        title: mr.title,
-        body: mr.body,
-        head: branch,
-        base,
-        ...api,
-      });
+    applyCliDraft(draft) {
+      return versionRequests.applyCliDraft.call(this, draft);
+    },
+    initPublishPlan(opts) {
+      versionRequests.initPublishPlan.call(this, opts);
+    },
+    beforePublishAll(opts) {
+      return versionRequests.beforePublishAll.call(this, opts);
     },
   };
 

@@ -224,6 +224,156 @@ Included again on 2.0.0.
       }).publish(),
     ).resolves.toBe("skipped");
   });
+
+  test("partial publish only publishes selected packages", async () => {
+    const { cwd, lockPath } = await createMultiPackagePublishFixture();
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
+    const plan = await publishFixture(context, { dryRun: false, packages: ["@acme/core"] });
+
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(plan.packages.get("npm:@acme/ui")?.preflight?.shouldPublish).toBe(false);
+    expect(plan.packages.get("npm:@acme/ui")?.publishResult).toEqual({ type: "skipped" });
+    expect(exec.mock.calls).toHaveLength(1);
+  });
+
+  test("partial publish includes wait dependencies from preflight", async () => {
+    const { cwd, lockPath } = await createMultiPackagePublishFixture();
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
+    withPreflightWait(context, {
+      "npm:@acme/ui": { wait: ["npm:@acme/core"] },
+    });
+    const plan = await publishFixture(context, { dryRun: false, packages: ["npm:@acme/ui"] });
+
+    expect(plan.packages.get("npm:@acme/core")?.preflight?.shouldPublish).toBe(true);
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(plan.packages.get("npm:@acme/ui")?.publishResult).toEqual({ type: "published" });
+    expect(exec.mock.calls).toHaveLength(2);
+  });
+
+  test("partial publish includes optionalWait dependencies from preflight", async () => {
+    const { cwd, lockPath } = await createMultiPackagePublishFixture();
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const context = await createResolvedContext({ cwd, lockPath: lockPath });
+    const plan = await publishFixture(context, { dryRun: false, packages: ["npm:@acme/ui"] });
+
+    expect(plan.packages.get("npm:@acme/core")?.preflight?.shouldPublish).toBe(true);
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(plan.packages.get("npm:@acme/ui")?.publishResult).toEqual({ type: "published" });
+    expect(exec.mock.calls).toHaveLength(2);
+  });
+
+  test("partial publish includes transitive wait dependencies", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-publish-"));
+    const basePath = join(cwd, "packages/base");
+    const corePath = join(cwd, "packages/core");
+    const uiPath = join(cwd, "packages/ui");
+    const lockPath = join(cwd, ".tegami/publish-lock.yaml");
+    tempDirs.push(cwd);
+
+    await mkdir(basePath, { recursive: true });
+    await mkdir(corePath, { recursive: true });
+    await mkdir(uiPath, { recursive: true });
+    await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+    await writeJson(join(basePath, "package.json"), { name: "@acme/base", version: "1.0.1" });
+    await writeJson(join(corePath, "package.json"), { name: "@acme/core", version: "1.0.1" });
+    await writeJson(join(uiPath, "package.json"), { name: "@acme/ui", version: "1.0.1" });
+    await writePublishLock(cwd, {
+      path: lockPath,
+      packages: [
+        { id: "npm:@acme/base", updated: true },
+        { id: "npm:@acme/core", updated: true },
+        { id: "npm:@acme/ui", updated: true },
+      ],
+      npm: [
+        { id: "npm:@acme/base", distTag: "latest" },
+        { id: "npm:@acme/core", distTag: "latest" },
+        { id: "npm:@acme/ui", distTag: "latest" },
+      ],
+    });
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const context = await createResolvedContext({ cwd, lockPath });
+    withPreflightWait(context, {
+      "npm:@acme/ui": { wait: ["npm:@acme/core"] },
+      "npm:@acme/core": { wait: ["npm:@acme/base"] },
+    });
+    const plan = await publishFixture(context, { dryRun: false, packages: ["npm:@acme/ui"] });
+
+    expect(plan.packages.get("npm:@acme/base")?.preflight?.shouldPublish).toBe(true);
+    expect(plan.packages.get("npm:@acme/core")?.preflight?.shouldPublish).toBe(true);
+    expect(plan.packages.get("npm:@acme/base")?.publishResult).toEqual({ type: "published" });
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(plan.packages.get("npm:@acme/ui")?.publishResult).toEqual({ type: "published" });
+    expect(exec.mock.calls).toHaveLength(3);
+  });
+
+  test("partial publish resolves group references", async () => {
+    const { cwd, lockPath } = await createMultiPackagePublishFixture();
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const context = await createResolvedContext({
+      cwd,
+      lockPath,
+      groups: { acme: {} },
+      packages: {
+        "@acme/core": { group: "acme" },
+        "@acme/ui": { group: "acme" },
+      },
+    });
+    const plan = await publishFixture(context, { dryRun: false, packages: ["group:acme"] });
+
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(plan.packages.get("npm:@acme/ui")?.publishResult).toEqual({ type: "published" });
+    expect(exec.mock.calls).toHaveLength(2);
+  });
+
+  test("partial publish skips when package references match nothing", async () => {
+    const { cwd, lockPath } = await createPublishFixture();
+
+    await expect(
+      tegami({ cwd, lockPath: lockPath }).publish({ packages: ["@acme/missing"] }),
+    ).resolves.toBe("skipped");
+  });
 });
 
 describe("cleanup publish plan", () => {
@@ -336,6 +486,9 @@ async function createMultiPackagePublishFixture(): Promise<{
   await writeJson(join(uiPath, "package.json"), {
     name: "@acme/ui",
     version: "1.0.1",
+    dependencies: {
+      "@acme/core": "workspace:*",
+    },
   });
   await writePublishLock(cwd, {
     path: lockPath,
@@ -359,7 +512,7 @@ async function createMultiPackagePublishFixture(): Promise<{
 
 async function publishFixture(
   context: Awaited<ReturnType<typeof createTegamiContext>>,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; packages?: string[] } = {},
 ) {
   const plan = await initPublishPlan(context, options);
   if (!plan) throw new Error("missing plan");
@@ -431,4 +584,26 @@ function normalizeChangelog(changelog: {
 function normalizeDirPath(path: string): string {
   const normalized = normalize(path);
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
+}
+
+function withPreflightWait(
+  context: Awaited<ReturnType<typeof createTegamiContext>>,
+  waits: Record<string, { wait?: string[]; optionalWait?: string[] }>,
+) {
+  const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm");
+  if (!npmPlugin?.publishPreflight) {
+    throw new Error("npm publishPreflight hook is missing");
+  }
+
+  const original = npmPlugin.publishPreflight;
+  npmPlugin.publishPreflight = async function (opts) {
+    const preflight = await original.call(this, opts);
+    const extra = waits[opts.pkg.id];
+    if (!preflight || !extra) return preflight;
+
+    return {
+      ...preflight,
+      ...extra,
+    };
+  };
 }

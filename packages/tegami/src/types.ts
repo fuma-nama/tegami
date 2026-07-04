@@ -155,6 +155,9 @@ export interface TegamiPlugin {
     "success" | "pending" | undefined | void | Awaitable<"success" | "pending" | undefined>[]
   >;
 
+  /** Called after preflights, before Tegami starts publishing the packages of a plan. */
+  beforePublishAll?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
+
   /** Called before a package will be published, return `false` to prevent from publishing. */
   willPublish?(
     this: TegamiContext,
@@ -184,16 +187,23 @@ export type RequireFields<Obj, K extends keyof Obj> = Obj & {
 
 export interface PublishPreflight {
   /**
-   * Whether the package should be published, the state **must not** be changed across different runs.
+   * Whether the package should be published, the state **must only depend on local inputs** (e.g. local `package.json` or `publish-lock.yaml`).
    *
    * To note if the package is already published, hook `resolvePlanStatus` on plugins, or skip at publish-time.
    */
   shouldPublish: boolean;
 
   /**
-   * Package ids that must be published before this one, this will automatically disallow circular dependency.
+   * Package ids that **must be** published before this one, this disallows circular dependency.
    *
-   * It is okay to add unpublished packages to `wait`, they will be ignored.
+   * It is okay to add unpublished packages, they will be ignored.
    */
   wait?: string[];
+
+  /**
+   * Package ids that **are preferred** to publish before this one, this allows circular dependency.
+   *
+   * It is okay to add unpublished packages, they will be ignored.
+   */
+  optionalWait?: string[];
 }

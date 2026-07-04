@@ -1,8 +1,12 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { x } from "tinyexec";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ChangelogEntry } from "../src/changelog/parse";
 import { Draft } from "../src/plans/draft";
 import type { PackagePublishPlan, PackagePublishResult, PublishPlan } from "../src/plans/publish";
+import { PublishLock } from "../src/plans/lock";
 import * as githubClient from "../src/plugins/github/api";
 import { tegami } from "../src";
 import { github } from "../src/plugins/github";
@@ -32,6 +36,7 @@ const findOpenPullRequest = vi.mocked(githubClient.findOpenPullRequest);
 const updatePullRequest = vi.mocked(githubClient.updatePullRequest);
 const createPullRequest = vi.mocked(githubClient.createPullRequest);
 const listPullRequestsForCommit = vi.mocked(githubClient.listPullRequestsForCommit);
+const tempDirs: string[] = [];
 
 beforeEach(() => {
   exec.mockReset();
@@ -48,6 +53,10 @@ beforeEach(() => {
   createPullRequest.mockResolvedValue(undefined);
   listPullRequestsForCommit.mockReset();
   listPullRequestsForCommit.mockResolvedValue([]);
+});
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
 describe("github release plugin", () => {
@@ -493,6 +502,10 @@ describe("github version pull request", () => {
           return commandResult({ stdout: " M package.json\n" });
         }
 
+        if (command === "git" && args[0] === "rev-parse") {
+          return commandResult({ stdout: "base-commit\n" });
+        }
+
         if (command === "git") {
           return commandResult();
         }
@@ -523,8 +536,7 @@ describe("github version pull request", () => {
           {
             "args": [
               "checkout",
-              "-B",
-              "tegami/version-packages",
+              "--detach",
             ],
             "command": "git",
             "cwd": "/repo",
@@ -544,6 +556,16 @@ describe("github version pull request", () => {
               "commit",
               "-m",
               "Version Packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": undefined,
+          },
+          {
+            "args": [
+              "checkout",
+              "-B",
+              "tegami/version-packages",
             ],
             "command": "git",
             "cwd": "/repo",
@@ -583,6 +605,10 @@ describe("github version pull request", () => {
           return commandResult({ stdout: " M package.json\n" });
         }
 
+        if (command === "git" && args[0] === "rev-parse") {
+          return commandResult({ stdout: "base-commit\n" });
+        }
+
         if (command === "git") {
           return commandResult();
         }
@@ -613,8 +639,7 @@ describe("github version pull request", () => {
           {
             "args": [
               "checkout",
-              "-B",
-              "tegami/version-packages",
+              "--detach",
             ],
             "command": "git",
             "cwd": "/repo",
@@ -641,6 +666,16 @@ describe("github version pull request", () => {
           },
           {
             "args": [
+              "checkout",
+              "-B",
+              "tegami/version-packages",
+            ],
+            "command": "git",
+            "cwd": "/repo",
+            "throwOnError": undefined,
+          },
+          {
+            "args": [
               "push",
               "--force",
               "-u",
@@ -657,6 +692,287 @@ describe("github version pull request", () => {
       if (previousCi === undefined) delete process.env.CI;
       else process.env.CI = previousCi;
     }
+  });
+
+  test("creates one version pull request per publish group", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const cwd = await mkdtemp(join(tmpdir(), "tegami-github-"));
+      tempDirs.push(cwd);
+
+      const plugin = githubPlugin({
+        repo: "acme/repo",
+        versionPr: {
+          groups: ["group:test", ["@acme/ui", "@acme/docs"]],
+        },
+      });
+      const context = {
+        ...publishContext([
+          testPackage("@acme/core", "1.0.0"),
+          testPackage("@acme/ui", "1.0.0"),
+          testPackage("@acme/docs", "1.0.0"),
+          testPackage("@acme/cli", "1.0.0"),
+        ]),
+        cwd,
+        changelogDir: join(cwd, ".tegami"),
+        lockPath: join(cwd, ".tegami/publish-lock.yaml"),
+      };
+      context.graph.registerGroup("test", {});
+      context.graph.addGroupMember("test", "test:@acme/core");
+
+      const lock = new PublishLock();
+      lock.write("core:packages", { id: "test:@acme/core", updated: true });
+      lock.write("core:packages", { id: "test:@acme/ui", updated: true });
+      lock.write("core:packages", { id: "test:@acme/docs", updated: true });
+      lock.write("core:packages", { id: "test:@acme/cli", updated: true });
+      await mkdir(context.changelogDir, { recursive: true });
+      await writeFile(context.lockPath, lock.serialize());
+
+      const draft = new Draft(context);
+      draft.addChangelog(
+        testChangelogEntry({
+          packages: new Map([
+            ["@acme/core", { type: "minor" }],
+            ["@acme/ui", { type: "minor" }],
+            ["@acme/docs", { type: "minor" }],
+            ["@acme/cli", { type: "minor" }],
+          ]),
+        }),
+      );
+
+      const core = context.graph.get("test:@acme/core");
+      const ui = context.graph.get("test:@acme/ui");
+      const docs = context.graph.get("test:@acme/docs");
+      const cli = context.graph.get("test:@acme/cli");
+      if (
+        !(core instanceof TestPackage) ||
+        !(ui instanceof TestPackage) ||
+        !(docs instanceof TestPackage) ||
+        !(cli instanceof TestPackage)
+      ) {
+        throw new Error("missing packages");
+      }
+
+      exec.mockImplementation((command, args = []) => {
+        if (command === "git" && args[0] === "status") {
+          return commandResult({ stdout: " M package.json\n" });
+        }
+
+        if (command === "git" && args[0] === "rev-parse") {
+          return commandResult({ stdout: "base-commit\n" });
+        }
+
+        if (command === "git") {
+          return commandResult();
+        }
+
+        throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      });
+
+      await plugin.initCliDraft?.call(context, draft);
+      core.setVersion("1.1.0");
+      ui.setVersion("1.1.0");
+      docs.setVersion("1.1.0");
+      cli.setVersion("1.1.0");
+      await plugin.applyCliDraft?.call(context, draft);
+
+      expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
+        title: "Release group:test",
+        body: expect.stringContaining("| `@acme/core` | `1.0.0` | `1.1.0` |"),
+        head: "tegami/version-packages/group-test",
+        base: "main",
+        token: "test-token",
+      });
+      expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
+        title: "Release @acme/ui, @acme/docs",
+        body: expect.stringContaining("| `@acme/docs` | `1.0.0` | `1.1.0` |"),
+        head: "tegami/version-packages/acme-ui-acme-docs",
+        base: "main",
+        token: "test-token",
+      });
+      expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
+        title: "Release unlisted packages",
+        body: expect.stringContaining("| `@acme/cli` | `1.0.0` | `1.1.0` |"),
+        head: "tegami/version-packages/unlisted",
+        base: "main",
+        token: "test-token",
+      });
+
+      // group request bodies only list their own packages
+      const groupBody = createPullRequest.mock.calls.find(
+        ([, request]) => request.title === "Release group:test",
+      )![1].body;
+      expect(groupBody).not.toContain("`@acme/ui`");
+      expect(groupBody).not.toContain("`@acme/cli`");
+
+      // the last written lock belongs to the unlisted group's branch
+      const lockContent = await readFile(context.lockPath, "utf8");
+      expect(lockContent).toContain("github:publish-group");
+      expect(lockContent).toContain("active:");
+      expect(lockContent).toContain("pending:");
+      expect(lockContent).toContain("test:@acme/cli: 1.0.0");
+
+      expect(
+        exec.mock.calls
+          .filter(([, args]) => args?.[0] === "checkout" && args[1] === "-B")
+          .map(([, args]) => args),
+      ).toEqual([
+        ["checkout", "-B", "tegami/version-packages/group-test"],
+        ["checkout", "-B", "tegami/version-packages/acme-ui-acme-docs"],
+        ["checkout", "-B", "tegami/version-packages/unlisted"],
+      ]);
+      expect(
+        exec.mock.calls
+          .filter(([, args]) => args?.[0] === "checkout" && args[1] === "--detach")
+          .map(([, args]) => args),
+      ).toEqual([
+        ["checkout", "--detach"],
+        ["checkout", "--detach", "base-commit"],
+        ["checkout", "--detach", "base-commit"],
+      ]);
+      expect(exec.mock.calls.some(([, args]) => args?.includes("--amend"))).toBe(false);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("restores publish groups from the lock into the publish plan", async () => {
+    const plugin = githubPlugin();
+    const context = publishContext();
+    const plan = releasePlan(context, [{}]);
+    const lock = new PublishLock();
+
+    lock.write("github:publish-group", {
+      active: [
+        {
+          title: "Release group:test",
+          branch: "tegami/version-packages/group-test",
+          packages: ["group:test"],
+        },
+      ],
+      pending: [
+        {
+          title: "Release @acme/ui",
+          branch: "tegami/version-packages/acme-ui",
+          packages: ["@acme/ui"],
+        },
+      ],
+      versions: { "test:@acme/core": "1.0.0" },
+    });
+    await plugin.initPublishPlan?.call(context, { lock, plan });
+
+    // only active groups are published
+    expect(plan.options.packages).toEqual(["group:test"]);
+    // pending groups keep the plan (and the lock) pending
+    expect(await plugin.resolvePlanStatus?.call(context, { plan })).toBe("pending");
+  });
+
+  test("re-syncs pending publish group pull requests before publishing", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-github-"));
+    tempDirs.push(cwd);
+
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = {
+      ...publishContext([testPackage("@acme/core", "1.1.0"), testPackage("@acme/ui", "1.1.0")]),
+      cwd,
+      changelogDir: join(cwd, ".tegami"),
+      lockPath: join(cwd, ".tegami/publish-lock.yaml"),
+    };
+
+    const store = {
+      active: [
+        {
+          title: "Release @acme/core",
+          branch: "tegami/version-packages/acme-core",
+          packages: ["@acme/core"],
+        },
+      ],
+      pending: [
+        {
+          title: "Release @acme/ui",
+          branch: "tegami/version-packages/acme-ui",
+          packages: ["@acme/ui"],
+        },
+      ],
+      versions: { "test:@acme/core": "1.0.0", "test:@acme/ui": "1.0.0" },
+    };
+    const lock = new PublishLock();
+    lock.write("github:publish-group", store);
+    await mkdir(context.changelogDir, { recursive: true });
+    await writeFile(context.lockPath, lock.serialize());
+
+    exec.mockImplementation((command, args = []) => {
+      if (command === "git" && args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
+        return commandResult({ stdout: "main\n" });
+      }
+
+      if (command === "git" && args[0] === "rev-parse") {
+        return commandResult({ stdout: "main-commit\n" });
+      }
+
+      if (command === "git") {
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    });
+
+    const plan = releasePlan(context, [{ name: "@acme/core" }, { name: "@acme/ui" }]);
+    await plugin.initPublishPlan?.call(context, { lock, plan });
+    await plugin.beforePublishAll?.call(context, { plan });
+
+    expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
+      title: "Release @acme/ui",
+      body: expect.stringContaining("| `@acme/ui` | `1.0.0` | `1.1.0` |"),
+      head: "tegami/version-packages/acme-ui",
+      base: "main",
+      token: "test-token",
+    });
+
+    // the branch lock activates the pending group
+    const lockContent = await readFile(context.lockPath, "utf8");
+    expect(lockContent).toContain("Release @acme/core");
+    expect(lockContent).toContain("Release @acme/ui");
+
+    const checkouts = exec.mock.calls
+      .filter(([, args]) => args?.[0] === "checkout")
+      .map(([, args]) => args);
+    expect(checkouts).toEqual([
+      ["checkout", "--detach", "main-commit"],
+      ["checkout", "-B", "tegami/version-packages/acme-ui"],
+      // the original checkout is restored for the rest of the publish flow
+      ["checkout", "main"],
+    ]);
+  });
+
+  test("skips re-syncing publish group requests on dry-run", async () => {
+    const plugin = githubPlugin({ repo: "acme/repo" });
+    const context = publishContext([testPackage("@acme/ui", "1.1.0")]);
+    const plan = releasePlan(context, [{ name: "@acme/ui" }]);
+    plan.options.dryRun = true;
+
+    const lock = new PublishLock();
+    lock.write("github:publish-group", {
+      active: [],
+      pending: [
+        {
+          title: "Release @acme/ui",
+          branch: "tegami/version-packages/acme-ui",
+          packages: ["@acme/ui"],
+        },
+      ],
+      versions: { "test:@acme/ui": "1.0.0" },
+    });
+
+    await plugin.initPublishPlan?.call(context, { lock, plan });
+    await plugin.beforePublishAll?.call(context, { plan });
+
+    expect(exec).not.toHaveBeenCalled();
+    expect(createPullRequest).not.toHaveBeenCalled();
+    expect(updatePullRequest).not.toHaveBeenCalled();
   });
 
   test("skips version pull requests outside CI by default", async () => {
