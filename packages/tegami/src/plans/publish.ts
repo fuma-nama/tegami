@@ -100,11 +100,12 @@ export async function initPublishPlan(
 
 function resolvePublishTargets(plan: PublishPlan) {
   /** the iteration order = publish order */
-  const orderedMap = new Map<string, { split: boolean }>();
+  const orderedMap = new Map<string, { split: boolean; index: number }>();
+  let lastSplitIndex = -1;
   /** package id -> true while scanning hard wait, false while scanning optional wait */
   const stack = new Map<string, boolean>();
 
-  function scan(id: string) {
+  function scan(id: string): { split: boolean; index: number } | undefined {
     const preflight = plan.packages.get(id)?.preflight;
     if (!preflight || !preflight.shouldPublish) return;
 
@@ -115,23 +116,31 @@ function resolvePublishTargets(plan: PublishPlan) {
         return;
     }
 
-    if (orderedMap.has(id)) return;
+    let ordered = orderedMap.get(id);
+    if (ordered) return ordered;
 
     let split = false;
     if (preflight.wait) {
       stack.set(id, true);
-      split ||= preflight.wait.length > 0;
-      for (const dep of preflight.wait) scan(dep);
+      for (const dep of preflight.wait) {
+        const ordered = scan(dep);
+        split ||= ordered !== undefined && ordered.index >= lastSplitIndex;
+      }
     }
 
     if (preflight.optionalWait) {
       stack.set(id, false);
-      split ||= preflight.optionalWait.length > 0;
-      for (const dep of preflight.optionalWait) scan(dep);
+      for (const dep of preflight.optionalWait) {
+        const ordered = scan(dep);
+        split ||= ordered !== undefined && ordered.index >= lastSplitIndex;
+      }
     }
 
     stack.delete(id);
-    orderedMap.set(id, { split });
+    ordered = { split, index: orderedMap.size };
+    if (split) lastSplitIndex = ordered.index;
+    orderedMap.set(id, ordered);
+    return ordered;
   }
 
   for (const id of plan.packages.keys()) scan(id);
