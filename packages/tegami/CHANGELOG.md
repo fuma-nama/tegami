@@ -1,3 +1,13 @@
+## tegami@1.2.0
+
+### Fix npm workspace protocol matching
+
+In general, workspace protocol should assume ranges to include prerelease.
+
+### Redesign Publish Groups
+
+The Version PRs will now display published packages based on preflight results, rather than updated packages only.
+
 ## tegami@1.1.3
 
 ### Split version requests by publish group
