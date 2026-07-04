@@ -2,7 +2,6 @@ import { x } from "tinyexec";
 import { join, relative } from "node:path";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
-import type { Draft } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatPackageVersion } from "../utils/semver";
@@ -10,7 +9,7 @@ import { git, type GitPluginOptions } from "./git";
 import { cached, isCI, joinPath } from "../utils/common";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
-import { onVersionRequest } from "../utils/version-request";
+import { onVersionRequest, VersionRequestOptions } from "../utils/version-request";
 import {
   createMergeRequest,
   createRelease as createGitLabRelease,
@@ -32,54 +31,6 @@ interface GitlabRelease {
 }
 
 type ResolvedGitlabRelease = Required<GitlabRelease>;
-
-interface VersionMergeRequest {
-  /** Merge request title. */
-  title?: string;
-  /** Merge request body. */
-  body?: string;
-}
-
-interface VersionMergeRequestOptions {
-  /**
-   * Create the MR even outside of CI.
-   *
-   * @default false
-   */
-  forceCreate?: boolean;
-  /**
-   * Merge request branch. Publish group MRs are created under `<branch>/`.
-   *
-   * @default "tegami/version-packages"
-   */
-  branch?: string;
-  /**
-   * Merge request base branch.
-   *
-   * @default "main"
-   */
-  base?: string;
-  /**
-   * Publish groups to split into separate version MRs, each entry is a package (or a list of
-   * packages) to version & publish together. Packages not covered by any group are collected
-   * into an extra "unlisted packages" MR.
-   *
-   * Merging a group MR publishes only its members, the remaining MRs are re-synced on every
-   * publish run until all of them are merged & published.
-   */
-  groups?: (string | string[])[];
-
-  /**
-   * Override details for a version MR.
-   *
-   * Only called at version-time: publish group MRs re-synced at publish-time keep the stored
-   * title and use a default body.
-   */
-  create?: (
-    this: TegamiContext,
-    opts: { draft: Draft; publishGroup?: string[] },
-  ) => Awaitable<VersionMergeRequest>;
-}
 
 /** Options for creating GitLab releases after a successful publish. */
 export interface GitLabPluginOptions extends GitPluginOptions {
@@ -124,7 +75,7 @@ export interface GitLabPluginOptions extends GitPluginOptions {
    *
    * Defaults to enabled in CI and disabled locally.
    */
-  versionMr?: VersionMergeRequestOptions | false;
+  versionMr?: VersionRequestOptions | false;
 }
 
 /** Create GitLab releases for successfully published packages after the whole plan succeeds. */
@@ -136,41 +87,43 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
     return (renderer ??= createChangelogRenderer(context));
   }
 
-  const versionRequests = onVersionRequest<number>({
+  const versionRequests = onVersionRequest({
     name: "gitlab",
-    summary: "Merge this MR to publish the versioned packages.",
     options: options.versionMr,
-    enabled(context) {
+    canCreate(context) {
       const { repo, token } = context.gitlab ?? {};
       return Boolean(repo && token);
     },
-    find(context, { head, base }) {
-      return findOpenMergeRequest(context.gitlab!.repo!, {
-        head,
-        base,
-        ...gitLabApiOptions(context.gitlab),
-      });
-    },
-    create(context, request) {
-      return createMergeRequest(context.gitlab!.repo!, {
-        title: request.title,
-        body: request.body,
+    async upsert(context, request, update) {
+      const repo = context.gitlab!.repo!;
+      const api = gitLabApiOptions(context.gitlab);
+      const openMr = await findOpenMergeRequest(repo, {
         head: request.head,
         base: request.base,
-        ...gitLabApiOptions(context.gitlab),
+        ...api,
       });
-    },
-    update(context, number, request) {
-      return updateMergeRequest(context.gitlab!.repo!, number, {
-        title: request.title,
-        body: request.body,
-        base: request.base,
-        ...gitLabApiOptions(context.gitlab),
-      });
+
+      if (openMr === undefined) {
+        await createMergeRequest(repo, {
+          title: request.title,
+          body: request.body,
+          head: request.head,
+          base: request.base,
+          ...api,
+        });
+      } else if (update) {
+        await updateMergeRequest(repo, openMr, {
+          title: request.title,
+          body: request.body,
+          base: request.base,
+          ...api,
+        });
+      }
     },
   });
 
   const plugin: TegamiPlugin = {
+    ...versionRequests,
     name: "gitlab",
     init() {
       this.gitlab = {
@@ -189,7 +142,7 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       };
     },
     async resolvePlanStatus({ plan }) {
-      if (versionRequests.resolvePlanStatus() === "pending") return "pending";
+      if (versionRequests.resolvePlanStatus.call(this, { plan }) === "pending") return "pending";
 
       const { repo, token } = this.gitlab!;
       if (!repo || !token || releaseOptions === false) return;
@@ -279,18 +232,6 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
       if (result.exitCode !== 0) {
         throw execFailure("Failed to configure git remote for GitLab CI.", result);
       }
-    },
-    initCliDraft() {
-      versionRequests.initCliDraft.call(this);
-    },
-    applyCliDraft(draft) {
-      return versionRequests.applyCliDraft.call(this, draft);
-    },
-    initPublishPlan(opts) {
-      versionRequests.initPublishPlan.call(this, opts);
-    },
-    beforePublishAll(opts) {
-      return versionRequests.beforePublishAll.call(this, opts);
     },
   };
 

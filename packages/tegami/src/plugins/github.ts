@@ -3,7 +3,6 @@ import { join, relative } from "node:path";
 import semver from "semver";
 import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
-import type { Draft } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { formatPackageVersion } from "../utils/semver";
@@ -11,7 +10,7 @@ import { git, type GitPluginOptions } from "./git";
 import { cached, isCI } from "../utils/common";
 import { PackagePublishPlan, PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
-import { onVersionRequest } from "../utils/version-request";
+import { onVersionRequest, VersionRequestOptions } from "../utils/version-request";
 import {
   createPullRequest,
   createRelease as createGitHubRelease,
@@ -33,54 +32,6 @@ interface GithubRelease {
 }
 
 type ResolvedGithubRelease = Required<GithubRelease>;
-
-interface VersionPullRequest {
-  /** Pull request title. */
-  title?: string;
-  /** Pull request body. */
-  body?: string;
-}
-
-interface VersionPullRequestOptions {
-  /**
-   * Create the PR even outside of CI.
-   *
-   * @default false
-   */
-  forceCreate?: boolean;
-  /**
-   * Pull request branch. Publish group PRs are created under `<branch>/`.
-   *
-   * @default "tegami/version-packages"
-   */
-  branch?: string;
-  /**
-   * Pull request base branch.
-   *
-   * @default "main"
-   */
-  base?: string;
-  /**
-   * Publish groups to split into separate version PRs, each entry is a package (or a list of
-   * packages) to version & publish together. Packages not covered by any group are collected
-   * into an extra "unlisted packages" PR.
-   *
-   * Merging a group PR publishes only its members, the remaining PRs are re-synced on every
-   * publish run until all of them are merged & published.
-   */
-  groups?: (string | string[])[];
-
-  /**
-   * Override details for a version PR.
-   *
-   * Only called at version-time: publish group PRs re-synced at publish-time keep the stored
-   * title and use a default body.
-   */
-  create?: (
-    this: TegamiContext,
-    opts: { draft: Draft; publishGroup?: string[] },
-  ) => Awaitable<VersionPullRequest>;
-}
 
 /** Options for creating GitHub releases after a successful publish. */
 export interface GitHubPluginOptions extends GitPluginOptions {
@@ -121,7 +72,7 @@ export interface GitHubPluginOptions extends GitPluginOptions {
    *
    * Defaults to enabled in CI and disabled locally.
    */
-  versionPr?: VersionPullRequestOptions | false;
+  versionPr?: VersionRequestOptions | false;
 }
 
 /** Create GitHub releases for successfully published packages after the whole plan succeeds. */
@@ -133,39 +84,37 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
     return (renderer ??= createChangelogRenderer(context));
   }
 
-  const versionRequests = onVersionRequest<number>({
+  const versionRequests = onVersionRequest({
     name: "github",
-    summary: "Merge this PR to publish the versioned packages.",
     options: options.versionPr,
-    enabled(context) {
+    canCreate(context) {
       const { repo, token } = context.github ?? {};
       return Boolean(repo && token);
     },
-    find(context, { head }) {
+    async upsert(context, request, update) {
       const { repo, token } = context.github!;
-      return findOpenPullRequest(repo!, head, token);
-    },
-    create(context, request) {
-      const { repo, token } = context.github!;
-      return createPullRequest(repo!, {
-        title: request.title,
-        body: request.body,
-        head: request.head,
-        base: request.base,
-        token,
-      });
-    },
-    update(context, number, request) {
-      const { repo, token } = context.github!;
-      return updatePullRequest(repo!, number, {
-        title: request.title,
-        body: request.body,
-        token,
-      });
+      const openPr = await findOpenPullRequest(repo!, request.head, token);
+
+      if (openPr === undefined) {
+        await createPullRequest(repo!, {
+          title: request.title,
+          body: request.body,
+          head: request.head,
+          base: request.base,
+          token,
+        });
+      } else if (update) {
+        await updatePullRequest(repo!, openPr, {
+          title: request.title,
+          body: request.body,
+          token,
+        });
+      }
     },
   });
 
   const plugin: TegamiPlugin = {
+    ...versionRequests,
     name: "github",
     init() {
       this.github = {
@@ -174,7 +123,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       };
     },
     async resolvePlanStatus({ plan }) {
-      if (versionRequests.resolvePlanStatus() === "pending") return "pending";
+      if (versionRequests.resolvePlanStatus.call(this, { plan }) === "pending") return "pending";
 
       const { repo, token } = this.github!;
       if (!repo || !token || releaseOptions === false) return;
@@ -270,18 +219,6 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
       if (result.exitCode !== 0) {
         throw execFailure("Failed to configure git remote for GitHub Actions.", result);
       }
-    },
-    initCliDraft() {
-      versionRequests.initCliDraft.call(this);
-    },
-    applyCliDraft(draft) {
-      return versionRequests.applyCliDraft.call(this, draft);
-    },
-    initPublishPlan(opts) {
-      versionRequests.initPublishPlan.call(this, opts);
-    },
-    beforePublishAll(opts) {
-      return versionRequests.beforePublishAll.call(this, opts);
     },
   };
 
