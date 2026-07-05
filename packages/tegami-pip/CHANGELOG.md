@@ -1,3 +1,9 @@
+## @tegami/pip@1.2.1
+
+### Support custom commit messages
+
+### Improve error messages for HTTP requests
+
 ## @tegami/pip@1.1.3
 
 ### Support Partial Publishing

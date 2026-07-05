@@ -1,3 +1,9 @@
+## @tegami/dart@1.2.1
+
+### Support custom commit messages
+
+### Improve error messages for HTTP requests
+
 ## @tegami/dart@1.1.1
 
 ### Replace `js-yaml` with `yaml`
