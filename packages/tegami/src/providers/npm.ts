@@ -90,20 +90,17 @@ export function npm({
   },
 }: NpmPluginOptions = {}): TegamiPlugin {
   let active = false;
-  let client: AgentName;
 
   return {
     name: "npm",
     enforce: "pre",
     async init() {
       if (defaultClient) {
-        client = defaultClient;
+        this.npm = { client: defaultClient, agent: defaultClient };
       } else {
         const result = await detect({ cwd: this.cwd });
-        client = result?.name ?? "npm";
+        this.npm = { client: result?.name ?? "npm", agent: result?.agent ?? "npm" };
       }
-
-      this.npm = { client };
     },
     async resolve() {
       if (!this.npm) return;
@@ -173,10 +170,10 @@ export function npm({
       }
     },
     async publish({ pkg, plan }) {
-      if (!(pkg instanceof NpmPackage)) return;
+      if (!(pkg instanceof NpmPackage) || !this.npm) return;
       const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
 
-      const result = await publish(client, pkg, distTag);
+      const result = await publish(this.npm.client, pkg, distTag);
       if (result.type === "published" && markLatest) {
         const tagResult = await x(
           "npm",
@@ -257,9 +254,28 @@ export function npm({
       await Promise.all(writes);
     },
     async applyCliDraft() {
-      if (!active || !updateLockFile) return;
+      if (!this.npm || !active || !updateLockFile) return;
 
-      const result = await x(client, ["install"], { nodeOptions: { cwd: this.cwd } });
+      let args: string[];
+      switch (this.npm.agent) {
+        case "pnpm":
+        case "pnpm@6":
+          args = ["install", "--lockfile-only", "--no-frozen-lockfile"];
+          break;
+        case "npm":
+          args = ["install", "--package-lock-only"];
+          break;
+        case "bun":
+          args = ["install", "--lockfile-only"];
+          break;
+        case "yarn@berry":
+          args = ["install", "--mode=update-lockfile", "--no-immutable"];
+          break;
+        default:
+          args = ["install"];
+      }
+
+      const result = await x(this.npm.client, args, { nodeOptions: { cwd: this.cwd } });
       if (result.exitCode !== 0) {
         throw execFailure("Failed to update lockfile.", result);
       }
