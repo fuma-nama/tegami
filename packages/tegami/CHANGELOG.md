@@ -1,3 +1,7 @@
+## tegami@1.2.2
+
+### Improve lockfile command
+
 ## tegami@1.2.1
 
 ### Support custom commit messages
