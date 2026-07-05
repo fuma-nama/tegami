@@ -55,8 +55,8 @@ export interface VersionRequestOptions {
     this: TegamiContext,
     opts:
       | { type: "version-packages" }
-      | { type: "publish-group"; publishGroup: string; packages: WorkspacePackage[] },
-  ) => Awaitable<{ title?: string; body?: string }>;
+      | { type: "update-lock"; store: PublishGroupStore; updatedLock: PublishLock },
+  ) => Awaitable<{ title?: string; body?: string } | undefined>;
 }
 
 interface VersionRequestContext {
@@ -139,26 +139,31 @@ export function onVersionRequest(provider: GitProvider) {
    */
   async function syncGroupBranch(
     context: TegamiContext,
-    baseLock: PublishLock,
     opts: {
+      config: NonNullable<ReturnType<typeof resolveConfig>>;
+      baseLock: PublishLock;
       branch: string;
       store: PublishGroupStore;
       parent: CommitData;
-      message?: string;
       /** known remote branches, always pushes when omitted */
       remote?: Map<string, string>;
     },
   ): Promise<boolean> {
-    const lock = new PublishLock(baseLock);
+    const lock = new PublishLock(opts.baseLock);
     while (lock.read(namespace)) {}
     lock.write(namespace, opts.store);
 
-    const commit = await createLockCommit(context, {
-      parent: opts.parent,
-      content: lock.serialize(),
-      message: opts.message ?? "Update Lock",
-    });
-    if (opts.remote?.get(opts.branch) === commit) return true;
+    const commit = await createLockCommit(
+      context,
+      opts.parent,
+      lock.serialize(),
+      await opts.config.commit?.call(context, {
+        type: "update-lock",
+        store: opts.store,
+        updatedLock: lock,
+      }),
+    );
+    if (opts.remote && opts.remote.get(opts.branch) === commit) return true;
 
     await run(
       context.cwd,
@@ -222,11 +227,10 @@ export function onVersionRequest(provider: GitProvider) {
 
       if (requests.length === 0) return;
 
-      const commitCustom = await config.commit?.call(this, { type: "version-packages" });
-      await createVersionCommit(this.cwd, {
-        title: commitCustom?.title ?? "Version Packages",
-        body: commitCustom?.body,
-      });
+      await createVersionCommit(
+        this.cwd,
+        await config.commit?.call(this, { type: "version-packages" }),
+      );
 
       let baseLock: PublishLock | undefined;
       let parent: CommitData | undefined;
@@ -259,18 +263,14 @@ export function onVersionRequest(provider: GitProvider) {
             newGroups[req.publishGroup] = req.publishGroup !== publishGroup ? "pending" : "active";
           }
 
-          const groupCommitCustom = await config.commit?.call(this, {
-            type: "publish-group",
-            publishGroup,
-            packages,
-          });
-          const inSync = await syncGroupBranch(this, baseLock!, {
+          const inSync = await syncGroupBranch(this, {
+            baseLock,
+            config,
             branch,
-            parent: parent!,
+            parent,
             store: {
               groups: newGroups,
             },
-            message: groupCommitCustom?.title ?? "Update Lock",
           });
           tasks.push(
             provider.upsert(
@@ -369,10 +369,12 @@ export function onVersionRequest(provider: GitProvider) {
         const newGroups = Object.fromEntries(publishGroups.entries());
         newGroups[id] = "active";
 
-        await syncGroupBranch(this, baseLock, {
+        await syncGroupBranch(this, {
           branch: `${config.branch}/${id}`,
+          baseLock,
           parent,
           remote,
+          config,
           store: {
             groups: newGroups,
           },
@@ -464,14 +466,16 @@ function renderRequestBody(
  */
 async function createLockCommit(
   context: TegamiContext,
-  opts: { parent: CommitData; content: string; message: string },
+  parent: CommitData,
+  content: string,
+  commit: { title?: string; body?: string } = {},
 ): Promise<string> {
   const { cwd } = context;
   const dir = await mkdtemp(join(tmpdir(), "tegami-"));
 
   try {
     const blobFile = join(dir, "lock");
-    await writeFile(blobFile, opts.content);
+    await writeFile(blobFile, content);
     const blob = await run(
       cwd,
       ["hash-object", "-w", blobFile],
@@ -480,7 +484,7 @@ async function createLockCommit(
 
     const path = relative(cwd, context.lockPath).replaceAll("\\", "/");
     const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
-    await run(cwd, ["read-tree", opts.parent.commit], "Failed to read the current git tree.", env);
+    await run(cwd, ["read-tree", parent.commit], "Failed to read the current git tree.", env);
     await run(
       cwd,
       ["update-index", "--add", "--cacheinfo", `100644,${blob},${path}`],
@@ -489,12 +493,20 @@ async function createLockCommit(
     );
     const tree = await run(cwd, ["write-tree"], "Failed to write the updated git tree.", env);
 
-    return await run(
-      cwd,
-      ["commit-tree", tree, "-p", opts.parent.commit, "-m", opts.message],
-      "Failed to commit the lock file update.",
-      { ...env, GIT_AUTHOR_DATE: opts.parent.date, GIT_COMMITTER_DATE: opts.parent.date },
-    );
+    const args = [
+      "commit-tree",
+      tree,
+      "-p",
+      parent.commit,
+      "-m",
+      commit.title ?? "Update lock file",
+    ];
+    if (commit.body) args.push("-m", commit.body);
+    return await run(cwd, args, "Failed to commit the lock file update.", {
+      ...env,
+      GIT_AUTHOR_DATE: parent.date,
+      GIT_COMMITTER_DATE: parent.date,
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -543,12 +555,12 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
 /** commit the working tree changes onto a detached HEAD */
 async function createVersionCommit(
   cwd: string,
-  message: { title: string; body?: string },
+  { title = "Version Packages", body }: { title?: string; body?: string } = {},
 ): Promise<void> {
   await run(cwd, ["checkout", "--detach"], "Failed to detach HEAD for version branches.");
   await run(cwd, ["add", "-A"], "Failed to stage version changes.");
-  const args = ["commit", "-m", message.title];
-  if (message.body) args.push("-m", message.body);
+  const args = ["commit", "-m", title];
+  if (body) args.push("-m", body);
   await run(cwd, args, "Failed to commit version changes.");
 }
 

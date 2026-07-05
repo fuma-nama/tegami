@@ -745,13 +745,13 @@ describe("github version pull request", () => {
     }
   });
 
-  test("uses versionPr.commit for publish group commits", async () => {
+  test("uses versionPr.commit for lock update commits", async () => {
     const previousCi = process.env.CI;
     process.env.CI = "true";
 
     try {
       const commit = vi.fn(async (opts: { type: string }) => {
-        if (opts.type === "publish-group") return { title: "custom group commit" };
+        if (opts.type === "update-lock") return { title: "custom group commit" };
       });
       const plugin = githubPlugin({
         repo: "acme/repo",
@@ -824,10 +824,16 @@ describe("github version pull request", () => {
 
       expect(commit).toHaveBeenCalledWith({ type: "version-packages" });
       expect(commit).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "publish-group", publishGroup: "group-test" }),
+        expect.objectContaining({
+          type: "update-lock",
+          store: { groups: { "group-test": "active", unlisted: "pending" } },
+        }),
       );
       expect(commit).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "publish-group", publishGroup: "unlisted" }),
+        expect.objectContaining({
+          type: "update-lock",
+          store: { groups: { "group-test": "pending", unlisted: "active" } },
+        }),
       );
       expect(
         exec.mock.calls.filter(([, args]) => args?.[0] === "commit").map(([, args]) => args),
