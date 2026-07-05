@@ -5,7 +5,7 @@ import typia from "typia";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
 import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure, isNodeError } from "../utils/error";
+import { execFailure, fetchFailure, isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 
@@ -461,7 +461,8 @@ async function isModulePublished(module: string, version: string): Promise<boole
 
   if (response.status === 200) return true;
   if (response.status === 404) return false;
-  throw new Error(
-    `Unable to validate ${module}@${formatted} against proxy.golang.org: ${await response.text()}`,
+  throw await fetchFailure(
+    `Unable to validate ${module}@${formatted} against proxy.golang.org`,
+    response,
   );
 }

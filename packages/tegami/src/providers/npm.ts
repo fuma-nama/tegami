@@ -6,7 +6,7 @@ import typia from "typia";
 import type { TegamiContext } from "../context";
 import type { PackagePublishResult } from "../plans/publish";
 import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure } from "../utils/error";
+import { execFailure, fetchFailure } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
 import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
@@ -441,8 +441,9 @@ async function isPackagePublished(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw new Error(
-      `Unable to validate ${name}@${version} against the npm registry${registry ? ` "${registry}"` : ""}.`,
+    throw await fetchFailure(
+      `Unable to validate ${name}@${version} against the npm registry${registry ? ` "${registry}"` : ""}`,
+      response,
     );
   }
 

@@ -1,9 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix npm workspace protocol matching\n\nIn general, workspace protocol should assume ranges to include prerelease.\n"
-    filename: 2026-07-04-mr6d42kq.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/dart:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n---\n\n## Support custom commit messages\n"
+    filename: 2026-07-05-mr7becuo.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Redesign Publish Groups\n\nThe Version PRs will now display published packages based on preflight results, rather than updated packages only.\n"
-    filename: 2026-07-05-mr6nhqc6.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n  npm:@tegami/dart:\n    type: patch\n---\n\n## Improve error messages for HTTP requests\n"
+    filename: 2026-07-05-mr7bex6y.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,13 +11,19 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-04-mr6d42kq.md
-      - 2026-07-05-mr6nhqc6.md
+      - 2026-07-05-mr7becuo.md
+      - 2026-07-05-mr7bex6y.md
     id: npm:tegami
     updated: true
-  - id: npm:@tegami/dart
+  - changelogIds:
+      - 2026-07-05-mr7becuo.md
+      - 2026-07-05-mr7bex6y.md
+    id: npm:@tegami/dart
     updated: true
-  - id: npm:@tegami/pip
+  - changelogIds:
+      - 2026-07-05-mr7becuo.md
+      - 2026-07-05-mr7bex6y.md
+    id: npm:@tegami/pip
     updated: true
   - id: npm:@repo/typescript-config
     updated: false

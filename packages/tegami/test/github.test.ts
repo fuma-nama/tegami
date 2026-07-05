@@ -700,6 +700,156 @@ describe("github version pull request", () => {
     }
   });
 
+  test("uses versionPr.commit for version commits", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const commit = vi.fn(async function (this: TegamiContext) {
+        return {
+          title: `chore: release v${this.graph.get("test:@acme/core")?.version}`,
+          body: "Release notes",
+        };
+      });
+      const plugin = githubPlugin({
+        repo: "acme/repo",
+        versionPr: { commit },
+      });
+      const context = publishContext([testPackage("@acme/core", "1.0.0")]);
+      const draft = versionDraft(context);
+
+      exec.mockImplementation((command, args = []) => {
+        if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+
+        switch (args[0]) {
+          case "status":
+            return commandResult({ stdout: " M package.json\n" });
+          default:
+            return commandResult();
+        }
+      });
+
+      await runVersionPullRequest(plugin, context, draft);
+
+      expect(commit).toHaveBeenCalledWith({ type: "version-packages" });
+      expect(exec.mock.calls.find(([, args]) => args?.[0] === "commit")?.[1]).toEqual([
+        "commit",
+        "-m",
+        "chore: release v1.1.0",
+        "-m",
+        "Release notes",
+      ]);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("uses versionPr.commit for lock update commits", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    try {
+      const commit = vi.fn(async (opts: { type: string }) => {
+        if (opts.type === "update-lock") return { title: "custom group commit" };
+      });
+      const plugin = githubPlugin({
+        repo: "acme/repo",
+        versionPr: {
+          groups: ["group:test"],
+          commit,
+        },
+      });
+      const cwd = await mkdtemp(join(tmpdir(), "tegami-github-"));
+      tempDirs.push(cwd);
+      const context = {
+        ...publishContext([testPackage("@acme/core", "1.0.0"), testPackage("@acme/ui", "1.0.0")]),
+        cwd,
+        changelogDir: join(cwd, ".tegami"),
+        lockPath: join(cwd, ".tegami/publish-lock.yaml"),
+      };
+      context.graph.registerGroup("test", {});
+      context.graph.addGroupMember("test", "test:@acme/core");
+      context.plugins = [
+        {
+          name: "test-provider",
+          publishPreflight: () => ({ shouldPublish: true }),
+        },
+      ];
+
+      const lock = new PublishLock();
+      lock.write("core:packages", { id: "test:@acme/core", updated: true });
+      lock.write("core:packages", { id: "test:@acme/ui", updated: true });
+      await mkdir(context.changelogDir, { recursive: true });
+      await writeFile(context.lockPath, lock.serialize());
+
+      const draft = new Draft(context);
+      draft.addChangelog(
+        testChangelogEntry({
+          packages: new Map([
+            ["@acme/core", { type: "minor" }],
+            ["@acme/ui", { type: "minor" }],
+          ]),
+        }),
+      );
+
+      exec.mockImplementation((command, args = []) => {
+        if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+
+        switch (args[0]) {
+          case "status":
+            return commandResult({ stdout: " M package.json\n" });
+          case "show":
+            return commandResult({ stdout: "base-commit\n2026-07-04T00:00:00+00:00\n" });
+          case "hash-object":
+            return commandResult({ stdout: "blob-sha\n" });
+          case "write-tree":
+            return commandResult({ stdout: "tree-sha\n" });
+          case "commit-tree":
+            return commandResult({ stdout: "commit-sha\n" });
+          default:
+            return commandResult();
+        }
+      });
+
+      await plugin.initCliDraft?.call(context, draft);
+      const core = context.graph.get("test:@acme/core");
+      const ui = context.graph.get("test:@acme/ui");
+      if (!(core instanceof TestPackage) || !(ui instanceof TestPackage)) {
+        throw new Error("missing packages");
+      }
+      core.setVersion("1.1.0");
+      ui.setVersion("1.1.0");
+      await plugin.applyCliDraft?.call(context, draft);
+
+      expect(commit).toHaveBeenCalledWith({ type: "version-packages" });
+      expect(commit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "update-lock",
+          store: { groups: { "group-test": "active", unlisted: "pending" } },
+        }),
+      );
+      expect(commit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "update-lock",
+          store: { groups: { "group-test": "pending", unlisted: "active" } },
+        }),
+      );
+      expect(
+        exec.mock.calls.filter(([, args]) => args?.[0] === "commit").map(([, args]) => args),
+      ).toEqual([["commit", "-m", "Version Packages"]]);
+      expect(
+        exec.mock.calls.filter(([, args]) => args?.[0] === "commit-tree").map(([, args]) => args),
+      ).toEqual([
+        ["commit-tree", "tree-sha", "-p", "base-commit", "-m", "custom group commit"],
+        ["commit-tree", "tree-sha", "-p", "base-commit", "-m", "custom group commit"],
+      ]);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
   test("creates one version pull request per publish group", async () => {
     const previousCi = process.env.CI;
     process.env.CI = "true";

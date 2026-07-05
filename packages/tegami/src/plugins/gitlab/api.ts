@@ -1,4 +1,5 @@
 import { joinPath } from "../../utils/common";
+import { fetchFailure } from "../../utils/error";
 
 export function parseGitLabRepo(repo: string): { projectPath: string; encodedProjectPath: string } {
   const projectPath = repo.replace(/^\/+|\/+$/g, "");
@@ -53,7 +54,7 @@ export async function releaseExistsByTag(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw new Error(`Failed to get GitLab release for ${tag}.`);
+    throw await fetchFailure(`Failed to get GitLab release for ${tag}`, response);
   }
 
   return true;
@@ -79,7 +80,7 @@ export async function createRelease(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to create GitLab release for ${options.tag}.`);
+    throw await fetchFailure(`Failed to create GitLab release for ${options.tag}`, response);
   }
 }
 
@@ -103,7 +104,7 @@ export async function findOpenMergeRequest(
   );
 
   if (!response.ok) {
-    throw new Error("Failed to check for an existing version merge request.");
+    throw await fetchFailure("Failed to check for an existing version merge request", response);
   }
 
   const mergeRequests = (await response.json()) as Array<{ iid: number }>;
@@ -135,7 +136,7 @@ export async function updateMergeRequest(
   );
 
   if (!response.ok) {
-    throw new Error("Failed to update the version merge request.");
+    throw await fetchFailure("Failed to update the version merge request", response);
   }
 }
 
@@ -161,7 +162,7 @@ export async function createMergeRequest(
   });
 
   if (!response.ok) {
-    throw new Error("Failed to create the version merge request.");
+    throw await fetchFailure("Failed to create the version merge request", response);
   }
 }
 
@@ -182,7 +183,7 @@ export async function getMergeRequest(
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to resolve merge request !${number}.`);
+    throw await fetchFailure(`Failed to resolve merge request !${number}`, response);
   }
 
   const data = (await response.json()) as {
@@ -227,7 +228,10 @@ export async function listMergeRequestsForCommit(
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to list merge requests for commit ${commitSha.slice(0, 7)}.`);
+    throw await fetchFailure(
+      `Failed to list merge requests for commit ${commitSha.slice(0, 7)}`,
+      response,
+    );
   }
 
   const mergeRequests = (await response.json()) as Array<{
@@ -259,7 +263,7 @@ export async function findMergeRequestCommentByPrefix(
     );
 
     if (!response.ok) {
-      throw new Error("Failed to list merge request comments.");
+      throw await fetchFailure("Failed to list merge request comments", response);
     }
 
     const batch = (await response.json()) as Array<{ id: number; body: string }>;
@@ -292,7 +296,7 @@ export async function updateMergeRequestComment(
   );
 
   if (!response.ok) {
-    throw new Error("Failed to update merge request comment.");
+    throw await fetchFailure("Failed to update merge request comment", response);
   }
 }
 
@@ -314,6 +318,6 @@ export async function createMergeRequestComment(
   );
 
   if (!response.ok) {
-    throw new Error("Failed to create merge request comment.");
+    throw await fetchFailure("Failed to create merge request comment", response);
   }
 }

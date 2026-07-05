@@ -6,7 +6,7 @@ import { x } from "tinyexec";
 import { parseDocument, type Document } from "yaml";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
-import { execFailure, isCI, joinPath } from "tegami/utils";
+import { execFailure, fetchFailure, isCI, joinPath } from "tegami/utils";
 import { assertHostedPackage, assertPubspec, type DartDependency, type Pubspec } from "./schema";
 
 const DEP_FIELDS = ["dependencies", "dev_dependencies", "dependency_overrides"] as const;
@@ -377,7 +377,9 @@ export async function isPackagePublished(
   });
 
   if (response.status === 404) return false;
-  if (!response.ok) return false;
+  if (!response.ok) {
+    throw await fetchFailure(`Unable to validate ${name}@${version} on ${hostedUrl}`, response);
+  }
 
   const body = assertHostedPackage(await response.json());
   return body.versions?.some((entry) => entry.version === version) ?? false;

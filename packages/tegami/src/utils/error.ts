@@ -17,6 +17,12 @@ export function execFailure(context: string, result: Awaited<Result>): Error {
   return new Error(redactSensitiveTokens(lines.join("\n")));
 }
 
+export async function fetchFailure(context: string, response: Response): Promise<Error> {
+  const body = (await response.text()).trim();
+  const message = body ? `${context}: ${body}` : context;
+  return new Error(redactSensitiveTokens(message));
+}
+
 export function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
