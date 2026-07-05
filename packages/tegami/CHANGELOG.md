@@ -1,3 +1,9 @@
+## tegami@1.2.1
+
+### Support custom commit messages
+
+### Improve error messages for HTTP requests
+
 ## tegami@1.2.0
 
 ### Fix npm workspace protocol matching
