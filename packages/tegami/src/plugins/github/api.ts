@@ -1,3 +1,5 @@
+import { fetchFailure } from "../../utils/error";
+
 export function parseGitHubRepo(repo: string): { owner: string; repo: string } {
   const [owner, name] = repo.split("/", 2);
   if (!owner || !name) {
@@ -34,7 +36,7 @@ export async function releaseExistsByTag(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw new Error(`Failed to get GitHub release for ${tag}.`);
+    throw await fetchFailure(`Failed to get GitHub release for ${tag}`, response);
   }
 
   return true;
@@ -63,7 +65,7 @@ export async function createRelease(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to create GitHub release for ${options.tag}.`);
+    throw await fetchFailure(`Failed to create GitHub release for ${options.tag}`, response);
   }
 }
 
@@ -80,7 +82,7 @@ export async function findOpenPullRequest(
   const response = await githubRequest(`/repos/${owner}/${name}/pulls?${params}`, token);
 
   if (!response.ok) {
-    throw new Error("Failed to check for an existing version pull request.");
+    throw await fetchFailure("Failed to check for an existing version pull request", response);
   }
 
   const pullRequests = (await response.json()) as Array<{ number: number }>;
@@ -103,7 +105,7 @@ export async function updatePullRequest(
   });
 
   if (!response.ok) {
-    throw new Error("Failed to update the version pull request.");
+    throw await fetchFailure("Failed to update the version pull request", response);
   }
 }
 
@@ -130,7 +132,7 @@ export async function createPullRequest(
   });
 
   if (!response.ok) {
-    throw new Error("Failed to create the version pull request.");
+    throw await fetchFailure("Failed to create the version pull request", response);
   }
 }
 
@@ -149,7 +151,10 @@ export async function listPullRequestsForCommit(
   const response = await githubRequest(`/repos/${owner}/${name}/commits/${commitSha}/pulls`, token);
 
   if (!response.ok) {
-    throw new Error(`Failed to list pull requests for commit ${commitSha.slice(0, 7)}.`);
+    throw await fetchFailure(
+      `Failed to list pull requests for commit ${commitSha.slice(0, 7)}`,
+      response,
+    );
   }
 
   return (await response.json()) as PullRequestSummary[];
@@ -169,7 +174,7 @@ export async function getPullRequest(
   const response = await githubRequest(`/repos/${owner}/${name}/pulls/${number}`, token);
 
   if (!response.ok) {
-    throw new Error(`Failed to resolve pull request #${number}.`);
+    throw await fetchFailure(`Failed to resolve pull request #${number}`, response);
   }
 
   const data = (await response.json()) as {
@@ -201,7 +206,7 @@ export async function findIssueCommentByPrefix(
     );
 
     if (!response.ok) {
-      throw new Error("Failed to list pull request comments.");
+      throw await fetchFailure("Failed to list pull request comments", response);
     }
 
     const batch = (await response.json()) as Array<{ id: number; body: string }>;
@@ -233,7 +238,7 @@ export async function updateIssueComment(
   );
 
   if (!response.ok) {
-    throw new Error("Failed to update pull request comment.");
+    throw await fetchFailure("Failed to update pull request comment", response);
   }
 }
 
@@ -255,6 +260,6 @@ export async function createIssueComment(
   );
 
   if (!response.ok) {
-    throw new Error("Failed to create pull request comment.");
+    throw await fetchFailure("Failed to create pull request comment", response);
   }
 }

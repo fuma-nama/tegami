@@ -49,6 +49,14 @@ export interface VersionRequestOptions {
     this: TegamiContext,
     opts: VersionRequestContext,
   ) => Awaitable<{ title?: string; body?: string }>;
+
+  /** Override commit summary & message. */
+  commit?: (
+    this: TegamiContext,
+    opts:
+      | { type: "version-packages" }
+      | { type: "publish-group"; publishGroup: string; packages: WorkspacePackage[] },
+  ) => Awaitable<{ title?: string; body?: string }>;
 }
 
 interface VersionRequestContext {
@@ -99,7 +107,7 @@ export function onVersionRequest(provider: GitProvider) {
       branch = "tegami/version-packages",
       base = "main",
       groups,
-      create,
+      ...rest
     } = provider.options ?? {};
     const groupMap = new Map<string, string[]>();
 
@@ -121,7 +129,7 @@ export function onVersionRequest(provider: GitProvider) {
       }
     }
 
-    return { forceCreate, branch, base, groupMap, create };
+    return { forceCreate, branch, base, groupMap, ...rest };
   }
 
   /**
@@ -136,6 +144,7 @@ export function onVersionRequest(provider: GitProvider) {
       branch: string;
       store: PublishGroupStore;
       parent: CommitData;
+      message?: string;
       /** known remote branches, always pushes when omitted */
       remote?: Map<string, string>;
     },
@@ -147,7 +156,7 @@ export function onVersionRequest(provider: GitProvider) {
     const commit = await createLockCommit(context, {
       parent: opts.parent,
       content: lock.serialize(),
-      message: "Update Lock",
+      message: opts.message ?? "Update Lock",
     });
     if (opts.remote?.get(opts.branch) === commit) return true;
 
@@ -212,7 +221,12 @@ export function onVersionRequest(provider: GitProvider) {
       }
 
       if (requests.length === 0) return;
-      await createVersionCommit(this.cwd, "Version Packages");
+
+      const commitCustom = await config.commit?.call(this, { type: "version-packages" });
+      await createVersionCommit(this.cwd, {
+        title: commitCustom?.title ?? "Version Packages",
+        body: commitCustom?.body,
+      });
 
       let baseLock: PublishLock | undefined;
       let parent: CommitData | undefined;
@@ -245,12 +259,18 @@ export function onVersionRequest(provider: GitProvider) {
             newGroups[req.publishGroup] = req.publishGroup !== publishGroup ? "pending" : "active";
           }
 
+          const groupCommitCustom = await config.commit?.call(this, {
+            type: "publish-group",
+            publishGroup,
+            packages,
+          });
           const inSync = await syncGroupBranch(this, baseLock!, {
             branch,
             parent: parent!,
             store: {
               groups: newGroups,
             },
+            message: groupCommitCustom?.title ?? "Update Lock",
           });
           tasks.push(
             provider.upsert(
@@ -521,10 +541,15 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
 }
 
 /** commit the working tree changes onto a detached HEAD */
-async function createVersionCommit(cwd: string, title: string): Promise<void> {
+async function createVersionCommit(
+  cwd: string,
+  message: { title: string; body?: string },
+): Promise<void> {
   await run(cwd, ["checkout", "--detach"], "Failed to detach HEAD for version branches.");
   await run(cwd, ["add", "-A"], "Failed to stage version changes.");
-  await run(cwd, ["commit", "-m", title], "Failed to commit version changes.");
+  const args = ["commit", "-m", message.title];
+  if (message.body) args.push("-m", message.body);
+  await run(cwd, args, "Failed to commit version changes.");
 }
 
 async function pushBranch(cwd: string, branch: string): Promise<void> {

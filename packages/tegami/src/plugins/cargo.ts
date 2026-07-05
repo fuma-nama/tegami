@@ -7,7 +7,7 @@ import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
 import type { RequireFields, TegamiPlugin } from "../types";
-import { execFailure } from "../utils/error";
+import { execFailure, fetchFailure } from "../utils/error";
 import { WorkspacePackage } from "../graph";
 import type { BumpType } from "../utils/semver";
 import { assertCargoManifest, type CargoDependency, type CargoManifest } from "./cargo/schema";
@@ -289,9 +289,7 @@ async function isPackagePublished(name: string, version: string) {
 
   if (response.status === 200) return true;
   if (response.status === 404) return false;
-  throw new Error(
-    `Unable to validate ${name}@${version} against crates.io: ${await response.text()}`,
-  );
+  throw await fetchFailure(`Unable to validate ${name}@${version} against crates.io`, response);
 }
 
 async function buildEntry(dir: string): Promise<CargoToml | undefined> {

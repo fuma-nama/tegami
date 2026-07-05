@@ -1,5 +1,5 @@
 import { RANGE_PATTERN } from "@renovatebot/pep440";
-import { joinPath } from "tegami/utils";
+import { joinPath, fetchFailure } from "tegami/utils";
 import typia from "typia";
 import type { SimpleIndexProject } from "./schema";
 
@@ -42,8 +42,9 @@ export async function isPackagePublished(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw new Error(
-      `Unable to validate ${normalizedName}@${version} on ${indexUrl}: ${await response.text()}`,
+    throw await fetchFailure(
+      `Unable to validate ${normalizedName}@${version} on ${indexUrl}`,
+      response,
     );
   }
 

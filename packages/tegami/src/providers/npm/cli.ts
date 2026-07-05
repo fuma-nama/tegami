@@ -6,7 +6,7 @@ import { x } from "tinyexec";
 import type { TegamiCliRegistry } from "../../cli/core";
 import type { TegamiContext } from "../../context";
 import { initPublishPlan, runPreflights } from "../../plans/publish";
-import { execFailure } from "../../utils/error";
+import { execFailure, fetchFailure } from "../../utils/error";
 import { NpmPackage } from "../npm";
 import { joinPath } from "../../utils/common";
 import { parsePublishLock, type PublishLock } from "../../plans/lock";
@@ -149,8 +149,9 @@ async function isPackageOnRegistry(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw new Error(
-      `Unable to check whether ${name} exists on the npm registry${registry ? ` "${registry}"` : ""}.`,
+    throw await fetchFailure(
+      `Unable to check whether ${name} exists on the npm registry${registry ? ` "${registry}"` : ""}`,
+      response,
     );
   }
 
