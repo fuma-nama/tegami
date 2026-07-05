@@ -1,6 +1,6 @@
 {
   "name": "@tegami/dart",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Dart pub workspace support and pub.dev publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",

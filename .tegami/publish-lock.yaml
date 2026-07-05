@@ -1,9 +1,6 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/dart:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n---\n\n## Support custom commit messages\n"
-    filename: 2026-07-05-mr7becuo.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n  npm:@tegami/dart:\n    type: patch\n---\n\n## Improve error messages for HTTP requests\n"
-    filename: 2026-07-05-mr7bex6y.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Improve lockfile command\n"
+    filename: 2026-07-05-mr7ske8o.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,19 +8,12 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-05-mr7becuo.md
-      - 2026-07-05-mr7bex6y.md
+      - 2026-07-05-mr7ske8o.md
     id: npm:tegami
     updated: true
-  - changelogIds:
-      - 2026-07-05-mr7becuo.md
-      - 2026-07-05-mr7bex6y.md
-    id: npm:@tegami/dart
+  - id: npm:@tegami/dart
     updated: true
-  - changelogIds:
-      - 2026-07-05-mr7becuo.md
-      - 2026-07-05-mr7bex6y.md
-    id: npm:@tegami/pip
+  - id: npm:@tegami/pip
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
