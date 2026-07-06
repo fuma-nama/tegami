@@ -89,8 +89,6 @@ export function npm({
     }
   },
 }: NpmPluginOptions = {}): TegamiPlugin {
-  let active = false;
-
   return {
     name: "npm",
     enforce: "pre",
@@ -109,7 +107,6 @@ export function npm({
 
       this.npm.graph = graph;
       for (const pkg of graph.packages.values()) this.graph.add(pkg);
-      active = true;
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage) || !this.npm?.graph) return;
@@ -125,7 +122,7 @@ export function npm({
       };
     },
     resolvePlanStatus({ plan }) {
-      if (!active) return;
+      if (!this.npm?.graph) return;
 
       return Array.from(plan.packages, async ([id, { preflight }]) => {
         if (!preflight!.shouldPublish) return;
@@ -199,11 +196,11 @@ export function npm({
       return result;
     },
     initDraft(plan) {
-      if (!active) return;
+      if (!this.npm?.graph) return;
       plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async applyDraft(draft) {
-      if (!active || !this.npm?.graph) return;
+      if (!this.npm?.graph) return;
 
       const npmGraph = this.npm.graph;
       const writes: Awaitable<void>[] = [];
@@ -254,7 +251,7 @@ export function npm({
       await Promise.all(writes);
     },
     async applyCliDraft() {
-      if (!this.npm || !active || !updateLockFile) return;
+      if (!this.npm?.graph || !updateLockFile) return;
 
       let args: string[];
       switch (this.npm.agent) {

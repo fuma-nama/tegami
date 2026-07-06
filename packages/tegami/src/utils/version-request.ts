@@ -12,7 +12,6 @@ import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
 import { isCI } from "./common";
-import { formatNpmDistTag } from "./semver";
 
 /** a version request (pull/merge request) to upsert on the git provider */
 interface VersionRequest {
@@ -248,15 +247,20 @@ export function onVersionRequest(provider: GitProvider) {
           getPreviousVersion: (id) => snapshots.get(id),
         };
         const custom = await config.create?.call(this, ctx);
-        const title =
-          custom?.title ??
-          (publishGroup
-            ? `Release ${packages.map((pkg) => `${pkg.name} (${pkg.manager})`).join(", ")}`
-            : "Version Packages");
+        const resolved: VersionRequest = {
+          title:
+            custom?.title ??
+            (publishGroup
+              ? `Release ${packages.map((pkg) => `${pkg.name} (${pkg.manager})`).join(", ")}`
+              : "Version Packages"),
+          body: custom?.body ?? renderRequestBody(this, ctx),
+          head: branch,
+          base: config.base,
+        };
 
         if (publishGroup) {
           parent ??= await resolveHead(this.cwd);
-          baseLock ??= await parsePublishLock(await readFile(this.lockPath, "utf8"));
+          baseLock ??= parsePublishLock(await readFile(this.lockPath, "utf8"));
           const newGroups: Record<string, "pending" | "active"> = {};
           for (const req of requests) {
             if (!req.publishGroup) continue;
@@ -272,32 +276,12 @@ export function onVersionRequest(provider: GitProvider) {
               groups: newGroups,
             },
           });
-          tasks.push(
-            provider.upsert(
-              this,
-              {
-                title,
-                body: custom?.body ?? renderRequestBody(this, ctx),
-                head: branch,
-                base: config.base,
-              },
-              !inSync,
-            ),
-          );
+          tasks.push(provider.upsert(this, resolved, !inSync));
           continue;
         }
 
         await pushBranch(this.cwd, branch);
-        await provider.upsert(
-          this,
-          {
-            title,
-            body: custom?.body ?? renderRequestBody(this, ctx),
-            head: branch,
-            base: config.base,
-          },
-          true,
-        );
+        await provider.upsert(this, resolved, true);
       }
       await Promise.all(tasks);
     },
@@ -405,9 +389,7 @@ function renderRequestBody(
 
     const from = getPreviousVersion(id);
     if (!from || from === pkg.version) continue;
-    packageLines.push(
-      `| \`${pkg.name}\` | \`${from}\` | \`${pkg.version}\`${formatNpmDistTag(packageDraft.npm?.distTag)} |`,
-    );
+    packageLines.push(`| \`${pkg.name}\` | \`${from}\` | \`${pkg.version}\` |`);
   }
 
   for (const [entry, linkedPackages] of changesets) {
@@ -430,8 +412,12 @@ function renderRequestBody(
   }
 
   if (plan)
-    for (const [id, { preflight }] of plan.packages) {
-      if (preflight!.shouldPublish) publishLines.push(`- ${id}`);
+    for (const [id, { preflight, npm }] of plan.packages) {
+      if (!preflight!.shouldPublish) continue;
+      const pkg = ctx.graph.get(id)!;
+      let pm = "";
+      if (npm?.distTag) pm += ` (dist-tag: ${npm.distTag})`;
+      publishLines.push(`| \`${pkg.name}\` | \`${pkg.version}\`${pm} | \`${pkg.manager}\` |`);
     }
 
   const sections = ["## Summary", "", "All bumped packages.", ""];
@@ -450,6 +436,9 @@ function renderRequestBody(
       "## Publish",
       "",
       "The following packages will be published if merged:",
+      "",
+      "| Package | Version | Registry |",
+      "| --- | --- | --- |",
       ...publishLines,
     );
   }

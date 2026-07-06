@@ -880,9 +880,10 @@ describe("gitlab version merge request", () => {
       const groupBody = createMergeRequest.mock.calls.find(
         ([, request]) => request.head === "tegami/version-packages/group-test",
       )![1].body;
-      expect(groupBody).toContain("The following packages will be published if merged:");
-      expect(groupBody).toContain("- test:@acme/core");
-      expect(groupBody).not.toContain("- test:@acme/ui");
+      const publishSection = groupBody.split("## Publish")[1] ?? "";
+      expect(publishSection).toContain("The following packages will be published if merged:");
+      expect(publishSection).toContain("| `@acme/core` | `1.1.0` | `test` |");
+      expect(publishSection).not.toContain("| `@acme/ui`");
 
       // group branches are committed & pushed directly, the working tree stays on the version commit
       expect(await readFile(context.lockPath, "utf8")).not.toContain("gitlab:publish-group");
