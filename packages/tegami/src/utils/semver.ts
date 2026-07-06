@@ -1,4 +1,4 @@
-import { inc, parse } from "semver";
+import { diff, inc, parse } from "semver";
 
 export type BumpType = "major" | "minor" | "patch";
 
@@ -19,8 +19,11 @@ export function formatPackageVersion(
 
 const WEIGHTS = {
   major: 3,
+  premajor: 3,
   minor: 2,
+  preminor: 2,
   patch: 1,
+  prepatch: 1,
 } as const;
 
 const DEPTH = {
@@ -40,6 +43,19 @@ const PRE = {
   minor: "preminor",
   patch: "prepatch",
 } as const;
+
+export function diffWeight(from: string, to: string): number {
+  const d = diff(from, to);
+  if (!d) return 0;
+
+  switch (d) {
+    case "release":
+    case "prerelease":
+      return 4;
+    default:
+      return WEIGHTS[d];
+  }
+}
 
 export function maxBump(a: BumpType, b: BumpType): BumpType {
   if (WEIGHTS[a] > WEIGHTS[b]) return a;
