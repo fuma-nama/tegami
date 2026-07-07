@@ -10,7 +10,6 @@ export default defineConfig({
     "src/providers/*",
     "src/utils/index.ts",
   ],
-  platform: "node",
   fixedExtension: false,
   target: "es2023",
   dts: {
