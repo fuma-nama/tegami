@@ -257,6 +257,8 @@ export function npm({
       switch (this.npm.agent) {
         case "pnpm":
         case "pnpm@6":
+        case "aube":
+        case "nub":
           args = ["install", "--lockfile-only", "--no-frozen-lockfile"];
           break;
         case "npm":
@@ -416,17 +418,23 @@ async function publish(
     return { type: "published" };
   }
 
-  let command: AgentName;
+  let command: string;
   const args = ["publish"];
   if (distTag) args.push("--tag", distTag);
 
-  if (client === "pnpm") {
-    command = "pnpm";
-    args.push("--no-git-checks");
-  } else if (client === "yarn") {
-    command = "yarn";
-  } else {
-    command = "npm";
+  switch (client) {
+    case "pnpm":
+      command = "pnpm";
+      args.push("--no-git-checks");
+      break;
+    case "aube":
+    case "nub":
+    case "yarn":
+      command = client;
+      break;
+    default:
+      command = "npm";
+      break;
   }
 
   const result = await x(command, args, { nodeOptions: { cwd: pkg.path } });

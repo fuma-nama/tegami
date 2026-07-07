@@ -6,6 +6,7 @@ allowBuilds:
   sharp: true
 minimumReleaseAgeExclude:
   - "@fuma-translate/react@1.0.2"
-  - fumadocs-core@16.10.2
-  - fumadocs-ui@16.10.2
-  - fumapress@0.6.1
+  - "fumadocs-*"
+  - "@fumadocs/*"
+  - fumapress
+  - "@fumapress/*"

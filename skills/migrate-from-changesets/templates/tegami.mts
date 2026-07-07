@@ -20,7 +20,7 @@ const paper = tegami({
   // packages: () => ({ group: 'all' }),
 
   npm: {
-    // 'pnpm' | 'npm' | 'yarn' | 'bun' — match your repo's package manager.
+    // 'pnpm' | 'npm' | 'yarn' | 'bun' | 'aube' | 'nub' — match your repo's package manager.
     client: "pnpm",
   },
 

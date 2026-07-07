@@ -18,7 +18,7 @@ export default defineConfig({
   },
   exports: true,
   deps: {
-    onlyBundle: ["typia", "@typia/interface"],
+    onlyBundle: ["typia", "@typia/interface", "package-manager-detector"],
   },
   plugins: [UnpluginTypia() as never],
 });
