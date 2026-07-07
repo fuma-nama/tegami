@@ -89,21 +89,16 @@ export function npm({
     }
   },
 }: NpmPluginOptions = {}): TegamiPlugin {
-  let active = false;
-  let client: AgentName;
-
   return {
     name: "npm",
     enforce: "pre",
     async init() {
       if (defaultClient) {
-        client = defaultClient;
+        this.npm = { client: defaultClient, agent: defaultClient };
       } else {
         const result = await detect({ cwd: this.cwd });
-        client = result?.name ?? "npm";
+        this.npm = { client: result?.name ?? "npm", agent: result?.agent ?? "npm" };
       }
-
-      this.npm = { client };
     },
     async resolve() {
       if (!this.npm) return;
@@ -112,7 +107,6 @@ export function npm({
 
       this.npm.graph = graph;
       for (const pkg of graph.packages.values()) this.graph.add(pkg);
-      active = true;
     },
     async publishPreflight({ pkg }) {
       if (!(pkg instanceof NpmPackage) || !this.npm?.graph) return;
@@ -128,7 +122,7 @@ export function npm({
       };
     },
     resolvePlanStatus({ plan }) {
-      if (!active) return;
+      if (!this.npm?.graph) return;
 
       return Array.from(plan.packages, async ([id, { preflight }]) => {
         if (!preflight!.shouldPublish) return;
@@ -173,10 +167,10 @@ export function npm({
       }
     },
     async publish({ pkg, plan }) {
-      if (!(pkg instanceof NpmPackage)) return;
+      if (!(pkg instanceof NpmPackage) || !this.npm) return;
       const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
 
-      const result = await publish(client, pkg, distTag);
+      const result = await publish(this.npm.client, pkg, distTag);
       if (result.type === "published" && markLatest) {
         const tagResult = await x(
           "npm",
@@ -202,11 +196,11 @@ export function npm({
       return result;
     },
     initDraft(plan) {
-      if (!active) return;
+      if (!this.npm?.graph) return;
       plan.addPolicy(depsPolicy(this, getBumpDepType));
     },
     async applyDraft(draft) {
-      if (!active || !this.npm?.graph) return;
+      if (!this.npm?.graph) return;
 
       const npmGraph = this.npm.graph;
       const writes: Awaitable<void>[] = [];
@@ -257,9 +251,30 @@ export function npm({
       await Promise.all(writes);
     },
     async applyCliDraft() {
-      if (!active || !updateLockFile) return;
+      if (!this.npm?.graph || !updateLockFile) return;
 
-      const result = await x(client, ["install"], { nodeOptions: { cwd: this.cwd } });
+      let args: string[];
+      switch (this.npm.agent) {
+        case "pnpm":
+        case "pnpm@6":
+        case "aube":
+        case "nub":
+          args = ["install", "--lockfile-only", "--no-frozen-lockfile"];
+          break;
+        case "npm":
+          args = ["install", "--package-lock-only"];
+          break;
+        case "bun":
+          args = ["install", "--lockfile-only"];
+          break;
+        case "yarn@berry":
+          args = ["install", "--mode=update-lockfile", "--no-immutable"];
+          break;
+        default:
+          args = ["install"];
+      }
+
+      const result = await x(this.npm.client, args, { nodeOptions: { cwd: this.cwd } });
       if (result.exitCode !== 0) {
         throw execFailure("Failed to update lockfile.", result);
       }
@@ -403,17 +418,23 @@ async function publish(
     return { type: "published" };
   }
 
-  let command: AgentName;
+  let command: string;
   const args = ["publish"];
   if (distTag) args.push("--tag", distTag);
 
-  if (client === "pnpm") {
-    command = "pnpm";
-    args.push("--no-git-checks");
-  } else if (client === "yarn") {
-    command = "yarn";
-  } else {
-    command = "npm";
+  switch (client) {
+    case "pnpm":
+      command = "pnpm";
+      args.push("--no-git-checks");
+      break;
+    case "aube":
+    case "nub":
+    case "yarn":
+      command = client;
+      break;
+    default:
+      command = "npm";
+      break;
   }
 
   const result = await x(command, args, { nodeOptions: { cwd: pkg.path } });

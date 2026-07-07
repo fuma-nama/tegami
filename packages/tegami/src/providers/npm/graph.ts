@@ -3,10 +3,10 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import path from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { parseDocument } from "yaml";
+import { isSeq, parseDocument } from "yaml";
 import type { Document } from "yaml";
 import { isNodeError } from "../../utils/error";
-import { AgentName } from "package-manager-detector";
+import type { AgentName } from "package-manager-detector";
 import { WorkspacePackage } from "../../graph";
 import type { PackageDraft } from "../../plans/draft";
 
@@ -74,12 +74,6 @@ export interface BunWorkspaces {
   catalogs?: Record<string, Record<string, string>>;
 }
 
-export interface PnpmWorkspace {
-  packages?: string[];
-  catalog?: Record<string, string>;
-  catalogs?: Record<string, Record<string, string>>;
-}
-
 export interface PackageManifest {
   name: string;
   version?: string;
@@ -99,7 +93,6 @@ export interface PackageManifest {
   optionalDependencies?: Record<string, string>;
 }
 
-const assertPnpmWorkspace = typia.createAssert<PnpmWorkspace>();
 const assertPackageManifest = typia.createAssert<PackageManifest>();
 
 const DEP_FIELDS = [
@@ -286,21 +279,44 @@ export async function resolveNpmGraph(cwd: string, client: AgentName): Promise<N
     }
   }
 
-  if (client === "pnpm") {
-    const pnpmWorkspacePath = path.join(cwd, "pnpm-workspace.yaml");
-    const content = await readFile(pnpmWorkspacePath, "utf8").catch((error: unknown) => {
-      if (isNodeError(error) && error.code === "ENOENT") return undefined;
-      throw error;
-    });
-    if (content) {
-      const doc = parseDocument(content);
-      const data = assertPnpmWorkspace(doc.toJSON());
-      catalogSources.push(createPnpmCatalogSource(pnpmWorkspacePath, doc));
-      patterns.push(...(data.packages ?? []));
-    }
-  } else if (client === "yarn") {
-    const yarnCatalog = await readYarnCatalog(cwd);
-    if (yarnCatalog) catalogSources.push(yarnCatalog);
+  let workspaceFiles: string[] | undefined;
+  switch (client) {
+    case "pnpm":
+      workspaceFiles = ["pnpm-workspace.yaml"];
+      break;
+    case "nub":
+      workspaceFiles = ["pnpm-workspace.yaml"];
+      break;
+    case "aube":
+      workspaceFiles = ["pnpm-workspace.yaml", "aube-workspace.yaml"];
+      break;
+    case "yarn":
+      const yarnCatalog = await readYarnCatalog(cwd);
+      if (yarnCatalog) catalogSources.push(yarnCatalog);
+      break;
+  }
+
+  if (workspaceFiles) {
+    await Promise.all(
+      workspaceFiles.map(async (name) => {
+        const filePath = path.join(cwd, name);
+        const content = await readFile(filePath, "utf8").catch((error: unknown) => {
+          if (isNodeError(error) && error.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (!content) return;
+
+        const doc = parseDocument(content);
+        const packages = doc.get("packages");
+
+        catalogSources.push(createWorkspaceCatalogSource(filePath, doc));
+        if (isSeq(packages)) {
+          for (const pkg of packages.toJSON()) {
+            if (typeof pkg === "string") patterns.push(pkg);
+          }
+        }
+      }),
+    );
   }
 
   if (patterns?.length) {
@@ -421,7 +437,7 @@ async function readManifest(packagePath: string): Promise<PackageManifest> {
   return parsed;
 }
 
-function createPnpmCatalogSource(filePath: string, doc: Document): CatalogSource {
+function createWorkspaceCatalogSource(filePath: string, doc: Document): CatalogSource {
   return {
     resolve(name, catalogName) {
       const value = doc.getIn(

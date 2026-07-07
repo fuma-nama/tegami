@@ -970,9 +970,43 @@ describe("github version pull request", () => {
       const groupBody = createPullRequest.mock.calls.find(
         ([, request]) => request.head === "tegami/version-packages/group-test",
       )![1].body;
-      expect(groupBody).toContain("The following packages will be published if merged:");
-      expect(groupBody).toContain("- test:@acme/core");
-      expect(groupBody).not.toContain("- test:@acme/ui");
+      expect(groupBody).toMatchInlineSnapshot(`
+        "## Summary
+
+        All bumped packages.
+
+        | Package | From | To |
+        | --- | --- | --- |
+        | \`@acme/core\` | \`1.0.0\` | \`1.1.0\` |
+        | \`@acme/ui\` | \`1.0.0\` | \`1.1.0\` |
+        | \`@acme/docs\` | \`1.0.0\` | \`1.1.0\` |
+        | \`@acme/cli\` | \`1.0.0\` | \`1.1.0\` |
+
+        ## Changelogs
+        ### \`change.md\`
+
+        <details>
+        <summary>Show Bumped Packages (4)</summary>
+
+        | Package | Bump |
+        | --- | --- |
+        | \`test:@acme/core\` | minor |
+        | \`test:@acme/ui\` | minor |
+        | \`test:@acme/docs\` | minor |
+        | \`test:@acme/cli\` | minor |
+
+        </details>
+
+
+        ## Publish
+
+        The following packages will be published if merged:
+
+        | Package | Version | Registry |
+        | --- | --- | --- |
+        | \`@acme/core\` | \`1.1.0\` | \`test\` |
+        "
+      `);
 
       // group branches are committed & pushed directly, the working tree stays on the version commit
       expect(await readFile(context.lockPath, "utf8")).not.toContain("github:publish-group");

@@ -1,7 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { note, outro } from "@clack/prompts";
-import { resolveCommand } from "package-manager-detector";
 import { x } from "tinyexec";
 import { changelogFilename } from "../../changelog/generate";
 import { readChangelogEntries } from "../../changelog/parse";
@@ -10,7 +9,6 @@ import type { TegamiContext } from "../../context";
 import { createDraft, type Draft } from "../../plans/draft";
 import { isCI, joinPath } from "../../utils/common";
 import { execFailure } from "../../utils/error";
-import { formatNpmDistTag } from "../../utils/semver";
 import {
   createMergeRequestComment,
   findMergeRequestCommentByPrefix,
@@ -18,6 +16,7 @@ import {
   type GitLabRequestOptions,
   updateMergeRequestComment,
 } from "./api";
+import { formatPreview } from "../../utils/version-request";
 
 const COMMENT_MARKER = "<!-- tegami -->";
 
@@ -93,96 +92,21 @@ export async function buildMrPreview(
   options: MrPreviewOptions = {},
 ): Promise<string> {
   const mergeRequest = await resolveMergeRequest(context, options);
-  const tegamiCommandRaw = resolveCommand(context.npm?.client ?? "npm", "run", ["tegami"])!;
-  const tegamiCommand = [tegamiCommandRaw.command, ...tegamiCommandRaw.args].join(" ");
   const changelogFiles = await listMergeRequestChangelogFiles(
     context,
     mergeRequest.baseSha,
     mergeRequest.headSha,
   );
-  const createLink = createChangelogUrl(
-    context,
-    mergeRequest.headRepo,
-    mergeRequest.headRef,
-    changelogFilename(),
-  );
-  const pendingPackages: {
-    name: string;
-    type: string;
-    from: string;
-    to: string;
-    distTag?: string;
-  }[] = [];
-  const lines = [
-    "### Tegami",
-    "",
-    `This repository uses [Tegami](https://tegami.fuma-nama.dev) to manage releases. When your changes affect published packages, add a changelog file under \`.tegami/\` before merging.`,
-    "",
-    `[**Create a changelog →**](${createLink}) · [Changelog format](https://tegami.fuma-nama.dev/changelog)`,
-    "",
-  ];
 
-  for (const pkg of context.graph.getPackages()) {
-    const plan = draft.getPackageDraft(pkg.id);
-    if (!plan) continue;
-    const bumped = plan.bumpVersion(pkg);
-    if (!bumped || !pkg.version || bumped === pkg.version) continue;
-
-    pendingPackages.push({
-      name: pkg.name,
-      type: plan.type ?? "—",
-      from: pkg.version,
-      to: bumped,
-      distTag: plan.npm?.distTag,
-    });
-  }
-
-  const requestChangelogs = draft
-    .getChangelogs()
-    .filter((entry) => changelogFiles.has(entry.filename));
-
-  if (pendingPackages.length > 0) {
-    lines.push("#### Release preview", "", "| Package | Bump | Version |", "| --- | --- | --- |");
-
-    for (const { name, type, from, to, distTag } of pendingPackages) {
-      lines.push(`| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)} |`);
-    }
-
-    lines.push("");
-  }
-
-  if (requestChangelogs.length > 0) {
-    lines.push("#### Changelogs in this MR", "", "| Changelog | Title |", "| --- | --- |");
-
-    for (const entry of requestChangelogs) {
-      for (const section of entry.sections) {
-        lines.push(`| \`${entry.filename}\` | ${section.title} |`);
-      }
-    }
-
-    lines.push("");
-  } else if (pendingPackages.length === 0) {
-    lines.push(
-      "#### No changelogs yet",
-      "",
-      "This MR has no pending changelog files. If your changes require a release, add a changelog before merging.",
-      "",
-    );
-  } else if (changelogFiles.size === 0) {
-    lines.push(
-      "This MR does not add changelog files. Pending changelogs from other branches are included in the preview above.",
-      "",
-    );
-  }
-
-  lines.push(
-    `Run \`${tegamiCommand}\` locally to create a changelog interactively.`,
-    "",
-    `<sub>Managed by [Tegami](https://tegami.fuma-nama.dev).</sub>`,
-    "",
-  );
-
-  return lines.join("\n");
+  return formatPreview(context, draft, changelogFiles, {
+    "create-a-changelog-href": createChangelogUrl(
+      context,
+      mergeRequest.headRepo,
+      mergeRequest.headRef,
+      changelogFilename(),
+    ),
+    pr: "MR",
+  });
 }
 
 export async function postMrComment(

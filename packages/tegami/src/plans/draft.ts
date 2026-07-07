@@ -14,7 +14,7 @@ import { PublishLock } from "./lock";
 import type { Awaitable } from "../types";
 import { handlePluginError } from "../utils/error";
 import { groupPolicy } from "./policy";
-import type { ChangelogPackageConfig } from "../changelog/shared";
+import { getPackageBumps, type ChangelogPackageConfig } from "../changelog/shared";
 import * as semver from "semver";
 import typia from "typia";
 
@@ -146,15 +146,8 @@ export class Draft {
 
   addChangelog(entry: ChangelogEntry) {
     this.changelogs.set(entry.id, entry);
-    const { graph } = this.context;
-    const groupPackages = new Map<WorkspacePackage, BumpType>();
 
-    for (const [name, config] of entry.packages) {
-      if (!config.type) continue;
-      for (const pkg of graph.getByName(name)) groupPackages.set(pkg, config.type);
-    }
-
-    for (const [pkg, bumpType] of groupPackages) {
+    for (const [pkg, bumpType] of getPackageBumps(this.context.graph, entry)) {
       const pkgDraft = this.bumpPackage(pkg, { type: bumpType });
       attachChangelog(pkgDraft, entry);
     }

@@ -23,12 +23,6 @@ import { type ChangelogPackageConfig, renderChangelog } from "../changelog/share
 
 export async function runChangelogTui(tegami: Tegami): Promise<void> {
   const context = await tegami._internal.context();
-  if ((await tegami.publishStatus()) === "pending") {
-    throw new Error(
-      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
-    );
-  }
-
   intro("Create changelogs");
   let selectedPackages: string[] = [];
 

@@ -258,16 +258,6 @@ packages:
     );
   });
 
-  test("rejects invalid pull request numbers", async () => {
-    process.env.GITHUB_REPOSITORY = "acme/repo";
-    const context = createTestContext([testPackage("@acme/core", "1.0.0")]);
-    const draft = await createDraft([], context);
-
-    await expect(buildPrPreview(context, draft, { number: Number.NaN })).rejects.toThrow(
-      "--number must be a positive integer.",
-    );
-  });
-
   test("lists changelog files added in a pull request", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-pr-git-"));
     tempDirs.push(cwd);

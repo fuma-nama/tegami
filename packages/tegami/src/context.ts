@@ -3,7 +3,7 @@ import type { PackageOptions, TegamiOptions, TegamiPlugin, TegamiPluginOption } 
 import { npm } from "./providers/npm";
 import { handlePluginError } from "./utils/error";
 import { PackageGraph, type WorkspacePackage } from "./graph";
-import type { AgentName } from "package-manager-detector";
+import type { Agent, AgentName } from "package-manager-detector";
 import type { GitLabToken } from "./plugins/gitlab/api";
 import type { CargoGraph } from "./plugins/cargo";
 import type { NpmGraph } from "./providers/npm/graph";
@@ -33,6 +33,7 @@ export interface TegamiContext {
   };
   /** additional context when npm plugin is configured */
   npm?: {
+    agent: Agent;
     client: AgentName;
     /** available after resolve */
     graph?: NpmGraph;

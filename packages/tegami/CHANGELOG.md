@@ -1,3 +1,21 @@
+## tegami@1.2.3
+
+### Sort release preview packages by bump severity
+
+GitHub PR release previews and Version Packages pull requests now list packages by version delta, largest bump first.
+
+### Support aube and nub in npm releases
+
+The npm plugin now detects aube and nub projects, discovers aube workspaces, refreshes their lockfiles without relinking `node_modules`, and publishes with the matching package manager command.
+
+### Remove publish plan check from changelog TUI
+
+Since adding new changelogs will no longer interfere with publishing, it is safe to skip the checks.
+
+## tegami@1.2.2
+
+### Improve lockfile command
+
 ## tegami@1.2.1
 
 ### Support custom commit messages

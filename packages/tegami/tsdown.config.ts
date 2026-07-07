@@ -10,7 +10,6 @@ export default defineConfig({
     "src/providers/*",
     "src/utils/index.ts",
   ],
-  platform: "node",
   fixedExtension: false,
   target: "es2023",
   dts: {
@@ -18,7 +17,7 @@ export default defineConfig({
   },
   exports: true,
   deps: {
-    onlyBundle: ["typia", "@typia/interface"],
+    onlyBundle: ["typia", "@typia/interface", "package-manager-detector"],
   },
   plugins: [UnpluginTypia() as never],
 });

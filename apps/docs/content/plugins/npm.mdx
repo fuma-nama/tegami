@@ -10,7 +10,9 @@ The npm plugin is enabled by default. It discovers workspace packages, bumps ver
 Tegami scans:
 
 - The root `package.json` (if present).
-- Workspace packages from `pnpm-workspace.yaml` or the `workspaces` field in the root manifest.
+- Workspace packages from the `workspaces` field in the root manifest.
+- `pnpm-workspace.yaml` for pnpm projects and Nub's pnpm-compatible mode.
+- `aube-workspace.yaml` for aube projects.
 
 Private packages are versioned but not published unless you set `publish: true` in `packages`.
 
@@ -28,12 +30,12 @@ const paper = tegami({
 });
 ```
 
-| Option           | Default | Description                                                                    |
-| ---------------- | ------- | ------------------------------------------------------------------------------ |
-| `client`         | auto    | Package manager for registry operations (`npm`, `pnpm`)                        |
-| `updateLockFile` | `true`  | Run install after versioning to refresh the lockfile                           |
-| `onBreakPeerDep` | `"set"` | When a peer dep constraint breaks: `set`, `error`, or `ignore`                 |
-| `trustedPublish` | —       | Enable `tegami npm pretrust` for [npm trusted publishing](#trusted-publishing) |
+| Option           | Default | Description                                                                           |
+| ---------------- | ------- | ------------------------------------------------------------------------------------- |
+| `client`         | auto    | Package manager for registry operations (`npm`, `pnpm`, `yarn`, `bun`, `aube`, `nub`) |
+| `updateLockFile` | `true`  | Run install after versioning to refresh the lockfile                                  |
+| `onBreakPeerDep` | `"set"` | When a peer dep constraint breaks: `set`, `error`, or `ignore`                        |
+| `trustedPublish` | —       | Enable `tegami npm pretrust` for [npm trusted publishing](#trusted-publishing)        |
 
 ### Trusted Publishing
 

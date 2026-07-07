@@ -1,6 +1,6 @@
 {
   "name": "@tegami/dart",
-  "version": "1.2.1",
+  "version": "1.2.3",
   "description": "Dart pub workspace support and pub.dev publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",
@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
-    "@types/node": "^26.0.1",
+    "@types/node": "^26.1.0",
     "@types/semver": "^7.7.1",
     "tegami": "workspace:*",
     "tsdown": "^0.22.3",

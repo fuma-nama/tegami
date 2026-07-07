@@ -12,7 +12,8 @@ import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
 import { isCI } from "./common";
-import { formatNpmDistTag } from "./semver";
+import { diffWeight, formatNpmDistTag } from "./semver";
+import { getPackageBumps } from "../changelog/shared";
 
 /** a version request (pull/merge request) to upsert on the git provider */
 interface VersionRequest {
@@ -248,15 +249,20 @@ export function onVersionRequest(provider: GitProvider) {
           getPreviousVersion: (id) => snapshots.get(id),
         };
         const custom = await config.create?.call(this, ctx);
-        const title =
-          custom?.title ??
-          (publishGroup
-            ? `Release ${packages.map((pkg) => `${pkg.name} (${pkg.manager})`).join(", ")}`
-            : "Version Packages");
+        const resolved: VersionRequest = {
+          title:
+            custom?.title ??
+            (publishGroup
+              ? `Release ${packages.map((pkg) => `${pkg.name} (${pkg.manager})`).join(", ")}`
+              : "Version Packages"),
+          body: custom?.body ?? renderRequestBody(this, ctx),
+          head: branch,
+          base: config.base,
+        };
 
         if (publishGroup) {
           parent ??= await resolveHead(this.cwd);
-          baseLock ??= await parsePublishLock(await readFile(this.lockPath, "utf8"));
+          baseLock ??= parsePublishLock(await readFile(this.lockPath, "utf8"));
           const newGroups: Record<string, "pending" | "active"> = {};
           for (const req of requests) {
             if (!req.publishGroup) continue;
@@ -272,32 +278,12 @@ export function onVersionRequest(provider: GitProvider) {
               groups: newGroups,
             },
           });
-          tasks.push(
-            provider.upsert(
-              this,
-              {
-                title,
-                body: custom?.body ?? renderRequestBody(this, ctx),
-                head: branch,
-                base: config.base,
-              },
-              !inSync,
-            ),
-          );
+          tasks.push(provider.upsert(this, resolved, !inSync));
           continue;
         }
 
         await pushBranch(this.cwd, branch);
-        await provider.upsert(
-          this,
-          {
-            title,
-            body: custom?.body ?? renderRequestBody(this, ctx),
-            head: branch,
-            base: config.base,
-          },
-          true,
-        );
+        await provider.upsert(this, resolved, true);
       }
       await Promise.all(tasks);
     },
@@ -388,7 +374,7 @@ function renderRequestBody(
   ctx: TegamiContext,
   { draft, getPreviousVersion, plan }: VersionRequestContext,
 ): string {
-  const packageLines: string[] = [];
+  const bumpedPackages: { name: string; from: string; to: string; diff: number }[] = [];
   const changelogLines: string[] = [];
   const publishLines: string[] = [];
   const changesets = new Map<ChangelogEntry, WorkspacePackage[]>();
@@ -404,24 +390,35 @@ function renderRequestBody(
     }
 
     const from = getPreviousVersion(id);
-    if (!from || from === pkg.version) continue;
-    packageLines.push(
-      `| \`${pkg.name}\` | \`${from}\` | \`${pkg.version}\`${formatNpmDistTag(packageDraft.npm?.distTag)} |`,
-    );
+    if (!from || !pkg.version || from === pkg.version) continue;
+    bumpedPackages.push({
+      name: pkg.name,
+      from,
+      to: pkg.version,
+      diff: diffWeight(from, pkg.version),
+    });
   }
 
+  const packageLines = bumpedPackages
+    .sort((a, b) => b.diff - a.diff)
+    .map(({ name, from, to }) => `| \`${name}\` | \`${from}\` | \`${to}\` |`);
+
   for (const [entry, linkedPackages] of changesets) {
-    changelogLines.push(`### ${entry.subject ?? `\`${entry.filename}\``}`, "");
+    const bumps = getPackageBumps(ctx.graph, entry);
 
     changelogLines.push(
+      `### ${entry.subject ?? `\`${entry.filename}\``}`,
+      "",
       "<details>",
       `<summary>Show Bumped Packages (${linkedPackages.length})</summary>`,
       "",
-      ...linkedPackages.map((pkg) => `- \`${pkg.id}\``),
-      "",
-      "</details>",
-      "",
+      "| Package | Bump |",
+      "| --- | --- |",
     );
+    for (const pkg of linkedPackages) {
+      changelogLines.push(`| \`${pkg.id}\` | ${bumps.get(pkg) ?? ""} |`);
+    }
+    changelogLines.push("", "</details>", "");
 
     for (const section of entry.sections) {
       changelogLines.push(`#### ${section.title}`, "");
@@ -430,8 +427,12 @@ function renderRequestBody(
   }
 
   if (plan)
-    for (const [id, { preflight }] of plan.packages) {
-      if (preflight!.shouldPublish) publishLines.push(`- ${id}`);
+    for (const [id, { preflight, npm }] of plan.packages) {
+      if (!preflight!.shouldPublish) continue;
+      const pkg = ctx.graph.get(id)!;
+      let pm = "";
+      if (npm?.distTag) pm += ` (dist-tag: ${npm.distTag})`;
+      publishLines.push(`| \`${pkg.name}\` | \`${pkg.version}\`${pm} | \`${pkg.manager}\` |`);
     }
 
   const sections = ["## Summary", "", "All bumped packages.", ""];
@@ -450,6 +451,9 @@ function renderRequestBody(
       "## Publish",
       "",
       "The following packages will be published if merged:",
+      "",
+      "| Package | Version | Registry |",
+      "| --- | --- | --- |",
       ...publishLines,
     );
   }
@@ -595,4 +599,96 @@ function publishGroupId(members: string[]): string {
   }
   if (slugs.length === 0) slugs.push("group");
   return slugs.join("-");
+}
+
+export function formatPreview(
+  { graph, npm }: TegamiContext,
+  draft: Draft,
+  newChangelogNames: Set<string>,
+  labels: Record<"create-a-changelog-href" | "pr", string>,
+): string {
+  const pendingPackages: {
+    name: string;
+    type: string;
+    from: string;
+    to: string;
+    distTag?: string;
+  }[] = [];
+  const lines = [
+    "### Tegami",
+    "",
+    `This repository uses [Tegami](https://tegami.fuma-nama.dev) to manage releases. When your changes affect published packages, add a changelog file under \`.tegami/\` before merging.`,
+    "",
+    `[**Create a changelog →**](${labels["create-a-changelog-href"]}) · [Changelog format](https://tegami.fuma-nama.dev/changelog)`,
+    "",
+  ];
+
+  for (const pkg of graph.getPackages()) {
+    const plan = draft.getPackageDraft(pkg.id);
+    if (!plan) continue;
+    const bumped = plan.bumpVersion(pkg);
+    if (!bumped || !pkg.version || bumped === pkg.version) continue;
+
+    pendingPackages.push({
+      name: pkg.name,
+      type: plan.type ?? "—",
+      from: pkg.version,
+      to: bumped,
+      distTag: plan.npm?.distTag,
+    });
+  }
+
+  if (pendingPackages.length > 0) {
+    lines.push("#### Release preview", "", "| Package | Bump | Version |", "| --- | --- | --- |");
+
+    for (const { name, type, from, to, distTag } of pendingPackages.sort(
+      (a, b) => diffWeight(b.from, b.to) - diffWeight(a.from, a.to),
+    )) {
+      lines.push(`| \`${name}\` | ${type} | \`${from}\` → \`${to}\`${formatNpmDistTag(distTag)} |`);
+    }
+
+    lines.push("");
+  }
+
+  const newChangelogs = draft
+    .getChangelogs()
+    .filter((entry) => newChangelogNames.has(entry.filename));
+
+  if (newChangelogs.length > 0) {
+    lines.push(
+      `#### Changelogs in this ${labels.pr}`,
+      "",
+      "| Changelog | Title |",
+      "| --- | --- |",
+    );
+
+    for (const entry of newChangelogs) {
+      for (const section of entry.sections) {
+        lines.push(`| \`${entry.filename}\` | ${section.title} |`);
+      }
+    }
+
+    lines.push("");
+  } else if (pendingPackages.length === 0) {
+    lines.push(
+      "#### No changelogs yet",
+      "",
+      `This ${labels.pr} has no pending changelog files. If your changes require a release, add a changelog before merging.`,
+      "",
+    );
+  } else if (newChangelogNames.size === 0) {
+    lines.push(
+      `This ${labels.pr} does not add changelog files. Pending changelogs from other branches are included in the preview above.`,
+      "",
+    );
+  }
+
+  lines.push(
+    `Run \`${npm?.client ?? "npm"} run tegami\` locally to create a changelog interactively.`,
+    "",
+    `<sub>Managed by [Tegami](https://tegami.fuma-nama.dev).</sub>`,
+    "",
+  );
+
+  return lines.join("\n");
 }

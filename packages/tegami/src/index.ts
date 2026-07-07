@@ -33,7 +33,7 @@ export type {
   PublishOptions,
   PublishPlan,
 } from "./plans/publish";
-export { PackageGraph, WorkspacePackage, type PackageGroup } from "./graph";
+export { PackageGraph, type PackageGroup } from "./graph";
 export type { TegamiContext } from "./context";
 export type { BumpType } from "./utils/semver";
 
@@ -45,6 +45,10 @@ export interface GenerateChangelogOptions extends GenerateFromCommitsOptions {
    */
   write?: boolean;
 }
+
+// this is required to fix a bundling problem of tsdown, where it exports abstract classes as type-only
+import { WorkspacePackage as b } from "./graph";
+export const WorkspacePackage = b;
 
 export interface Tegami {
   /** Create pending changelog files from git commit history. */

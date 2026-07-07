@@ -77,7 +77,7 @@ Use package IDs when the same name appears in multiple registries (for example n
 
 ## Replay
 
-By default, a changelog file is applied once and then removed from `.tegami/`. Use `replay` to keep it and include its notes again when a package reaches a specific version.
+Use `replay` to persist a changelog and include its notes again conditionally.
 
 Add `replay` on a package in frontmatter:
 
@@ -94,10 +94,19 @@ packages:
 The hover color now matches the design system.
 ```
 
-1. On the first release, Tegami applies the bump and writes the notes to `CHANGELOG.md`. The file stays in `.tegami/` with the `type` removed and the replay condition kept.
+1. On the first release, Tegami applies the bump and writes the notes to `CHANGELOG.md`. The file stays in `.tegami/` as replay-only.
 2. When `tegami` later releases `tegami@1.1.0`, the same notes are appended again and the file is removed.
 
-You can also omit `type` and keep only replay conditions. The file then contributes notes only when a replay condition matches, not on the initial draft.
+<Callout title="Replay-only Entry">
+
+A package entry with only replay conditions becomes replay-only.
+
+The file then contributes notes only when a replay condition matches, rather than bumping packages.
+
+</Callout>
+
+By default, a changelog file is applied once and then removed from `.tegami/`.
+In prerelease, the exit prerelease condition is auto-generated unless you opt-out by specifying an empty `replay` array.
 
 ### Replay conditions
 
@@ -108,7 +117,5 @@ Each item in `replay` is a condition string:
 | `name@version`          | `tegami@1.1.0`, `@acme/core@2.0.0` | A package with that name reaches that exact version                         |
 | `prerelease(name)`      | `prerelease(tegami)`               | A package enters a prerelease line (for example `1.0.0` → `1.1.0-alpha.0`)  |
 | `exit-prerelease(name)` | `exit-prerelease(tegami)`          | A package exits its prerelease line (for example `1.1.0-alpha.2` → `1.1.0`) |
-
-The legacy `exit prerelease: name` syntax is also accepted.
 
 A package can list multiple conditions. Tegami removes each condition as it matches. The file is deleted once every condition has been consumed.

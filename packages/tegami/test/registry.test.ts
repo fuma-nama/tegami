@@ -79,6 +79,24 @@ describe("npm registry preflight", () => {
     });
   });
 
+  test.each(["aube", "nub"] as const)("publishes with %s publish", async (client) => {
+    const context = await createContext(client);
+    const pkg = context.graph.get("npm:@acme/core");
+    if (!(pkg instanceof NpmPackage)) throw new Error("missing package");
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
+
+    exec.mockResolvedValue(execResult());
+    const plan = await loadPlan(context, "next");
+
+    await npmPlugin.publish?.call(context, { pkg, plan });
+
+    expect(exec).toHaveBeenCalledWith(client, ["publish", "--tag", "next"], {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+    });
+  });
+
   test("packs with bun then publishes tarball with npm", async () => {
     const context = await createContext("bun");
     const pkg = context.graph.get("npm:@acme/core");
@@ -204,7 +222,7 @@ async function loadPlan(
 }
 
 async function createContext(
-  client: "pnpm" | "npm" | "yarn" | "bun",
+  client: "pnpm" | "npm" | "yarn" | "bun" | "aube" | "nub",
   registry?: string,
   version = "1.0.1",
 ) {
