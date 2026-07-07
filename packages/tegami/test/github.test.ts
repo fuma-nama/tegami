@@ -988,10 +988,12 @@ describe("github version pull request", () => {
         <details>
         <summary>Show Bumped Packages (4)</summary>
 
-        - \`test:@acme/core\`
-        - \`test:@acme/ui\`
-        - \`test:@acme/docs\`
-        - \`test:@acme/cli\`
+        | Package | Bump |
+        | --- | --- |
+        | \`test:@acme/core\` | minor |
+        | \`test:@acme/ui\` | minor |
+        | \`test:@acme/docs\` | minor |
+        | \`test:@acme/cli\` | minor |
 
         </details>
 

@@ -13,6 +13,7 @@ import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
 import { isCI } from "./common";
 import { diffWeight, formatNpmDistTag } from "./semver";
+import { getPackageBumps } from "../changelog/shared";
 
 /** a version request (pull/merge request) to upsert on the git provider */
 interface VersionRequest {
@@ -403,17 +404,21 @@ function renderRequestBody(
     .map(({ name, from, to }) => `| \`${name}\` | \`${from}\` | \`${to}\` |`);
 
   for (const [entry, linkedPackages] of changesets) {
-    changelogLines.push(`### ${entry.subject ?? `\`${entry.filename}\``}`, "");
+    const bumps = getPackageBumps(ctx.graph, entry);
 
     changelogLines.push(
+      `### ${entry.subject ?? `\`${entry.filename}\``}`,
+      "",
       "<details>",
       `<summary>Show Bumped Packages (${linkedPackages.length})</summary>`,
       "",
-      ...linkedPackages.map((pkg) => `- \`${pkg.id}\``),
-      "",
-      "</details>",
-      "",
+      "| Package | Bump |",
+      "| --- | --- |",
     );
+    for (const pkg of linkedPackages) {
+      changelogLines.push(`| \`${pkg.id}\` | ${bumps.get(pkg) ?? ""} |`);
+    }
+    changelogLines.push("", "</details>", "");
 
     for (const section of entry.sections) {
       changelogLines.push(`#### ${section.title}`, "");
