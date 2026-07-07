@@ -13,7 +13,6 @@ import { github } from "../src/plugins/github";
 import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
-import { somePromise } from "../src/utils/common";
 import { createTegamiCliRegistry } from "../src/cli/core";
 
 vi.mock("tinyexec", () => ({
@@ -37,6 +36,7 @@ const updatePullRequest = vi.mocked(githubClient.updatePullRequest);
 const createPullRequest = vi.mocked(githubClient.createPullRequest);
 const listPullRequestsForCommit = vi.mocked(githubClient.listPullRequestsForCommit);
 const tempDirs: string[] = [];
+const releasePluginOptions = { repo: "acme/repo", token: "test-token" } as const;
 
 beforeEach(() => {
   exec.mockReset();
@@ -61,8 +61,8 @@ afterEach(async () => {
 
 describe("github release plugin", () => {
   test("creates GitHub releases for successful published packages", async () => {
-    const plugin = githubPlugin({
-      repo: "acme/repo",
+    const plugins = githubPlugin({
+      ...releasePluginOptions,
       release: {
         create({ pkg, plan }) {
           const packagePlan = plan.packages.get(pkg.id);
@@ -76,15 +76,18 @@ describe("github release plugin", () => {
     });
 
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/no-tag")]);
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         { npm: { distTag: "alpha" } },
         { name: "@acme/no-tag", git: undefined },
       ]),
-    });
+    );
 
     expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "@acme/core@1.0.1",
       title: "Release 1.0.1",
       notes: "Notes for @acme/core",
@@ -96,16 +99,14 @@ describe("github release plugin", () => {
   test("skips GitHub release creation when the release already exists", async () => {
     releaseExistsByTag.mockResolvedValue(true);
 
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
 
     const context = {
       ...publishContext(),
       github: { repo: "acme/repo", token: "test-token" },
     };
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [{}]),
-    });
+    await runAfterPublishAll(plugins, context, releasePlan(context, [{}]));
 
     expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
     expect(createGitHubRelease).not.toHaveBeenCalled();
@@ -121,11 +122,13 @@ describe("github release plugin", () => {
       return commandResult();
     });
 
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin({ ...releasePluginOptions, createTags: false });
     const context = publishContext();
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {
           changelogs: [
             testChangelogEntry({
@@ -134,19 +137,17 @@ describe("github release plugin", () => {
           ],
         },
       ]),
-    });
+    );
 
     expect(createGitHubRelease).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
   });
 
   test("does not create releases when release is disabled", async () => {
-    const plugin = githubPlugin({ repo: "acme/repo", release: false });
+    const plugins = githubPlugin({ ...releasePluginOptions, release: false });
     const context = publishContext();
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [{}]),
-    });
+    await runAfterPublishAll(plugins, context, releasePlan(context, [{}]));
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
     expect(createGitHubRelease).not.toHaveBeenCalled();
@@ -154,84 +155,89 @@ describe("github release plugin", () => {
 
   test("returns pending from resolvePlanStatus when a release is missing", async () => {
     releaseExistsByTag.mockResolvedValue(false);
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
     const context = publishContext();
 
-    const status = await plugin.resolvePlanStatus?.call(context, {
-      plan: releasePlan(context, [{}]),
-    });
-
-    expect(Array.isArray(status)).toBe(true);
-    expect(
-      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
-    ).toBe(true);
+    await expect(resolvePlanStatus(plugins, context, releasePlan(context, [{}]))).resolves.toBe(
+      "pending",
+    );
   });
 
   test("ignores missing releases when npm preflight is complete", async () => {
     releaseExistsByTag.mockResolvedValue(false);
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
     const context = publishContext();
 
     await expect(
-      plugin.resolvePlanStatus?.call(context, {
-        plan: releasePlan(context, [{ preflight: { shouldPublish: false } }]),
-      }),
-    ).resolves.toEqual([]);
+      resolvePlanStatus(
+        plugins,
+        context,
+        releasePlan(context, [{ preflight: { shouldPublish: false } }]),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
   });
 
   test("creates releases eagerly when another package failed", async () => {
-    const plugin = githubPlugin({
-      repo: "acme/repo",
+    const plugins = githubPlugin({
+      ...releasePluginOptions,
       release: { eager: true },
     });
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {},
         { name: "@acme/ui", publishResult: { type: "failed", error: "publish failed" } },
       ]),
-    });
+    );
 
     expect(createGitHubRelease).toHaveBeenCalledTimes(1);
   });
 
   test("does not create releases when any package failed", async () => {
-    const plugin = githubPlugin();
+    const plugins = githubPlugin(releasePluginOptions);
 
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {},
         { name: "@acme/ui", publishResult: { type: "failed", error: "publish failed" } },
       ]),
-    });
+    );
 
     expect(releaseExistsByTag).not.toHaveBeenCalled();
     expect(createGitHubRelease).not.toHaveBeenCalled();
   });
 
   test("creates GitHub releases for skipped publish results", async () => {
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
     const context = publishContext();
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [{ publishResult: { type: "skipped" } }]),
-    });
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [{ publishResult: { type: "skipped" } }]),
+    );
 
     expect(releaseExistsByTag).toHaveBeenCalledWith("acme/repo", "@acme/core@1.0.1", "test-token");
     expect(createGitHubRelease).toHaveBeenCalledTimes(1);
   });
 
   test("uses changelog entries for default notes", async () => {
-    const plugin = githubPlugin();
+    const plugins = githubPlugin(releasePluginOptions);
 
     const context = publishContext();
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {
           changelogs: [
             testChangelogEntry({
@@ -241,9 +247,10 @@ describe("github release plugin", () => {
           ],
         },
       ]),
-    });
+    );
 
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes: "### Add proxy server\n\nSome description.",
@@ -263,15 +270,17 @@ describe("github release plugin", () => {
       return commandResult();
     });
 
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
 
     const context = {
       ...publishContext(),
       github: { repo: "acme/repo", token: "test-token" },
     };
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {
           changelogs: [
             testChangelogEntry({
@@ -281,9 +290,10 @@ describe("github release plugin", () => {
           ],
         },
       ]),
-    });
+    );
 
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes:
@@ -307,14 +317,16 @@ describe("github release plugin", () => {
       { number: 42, title: "Add proxy server", user: { login: "alice" } },
     ]);
 
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
     const context = {
       ...publishContext(),
       github: { repo: "acme/repo", token: "test-token" },
     };
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {
           changelogs: [
             testChangelogEntry({
@@ -324,14 +336,15 @@ describe("github release plugin", () => {
           ],
         },
       ]),
-    });
+    );
 
     expect(listPullRequestsForCommit).toHaveBeenCalledWith(
       "acme/repo",
       "abc1234567890abcdef1234567890abcdef123456",
       "test-token",
     );
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "@acme/core@1.0.1",
       title: "@acme/core@1.0.1",
       notes:
@@ -342,21 +355,24 @@ describe("github release plugin", () => {
   });
 
   test("marks semver prerelease versions as GitHub prerelease by default", async () => {
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
 
     const context = publishContext();
     const pkg = context.graph.get("test:@acme/core") as TestPackage;
     pkg.setVersion("1.0.1-beta.0");
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         {
           git: { tag: "@acme/core@1.0.1-beta.0" },
         },
       ]),
-    });
+    );
 
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "@acme/core@1.0.1-beta.0",
       title: "@acme/core@1.0.1-beta.0",
       notes: "Published @acme/core@1.0.1-beta.0.",
@@ -366,7 +382,7 @@ describe("github release plugin", () => {
   });
 
   test("summarizes all packages sharing a git tag in release notes", async () => {
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
 
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
     const sharedChangelog = testChangelogEntry({
@@ -374,15 +390,18 @@ describe("github release plugin", () => {
       sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
     });
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         { name: "@acme/core", git: { tag: "acme@1.0.1" }, changelogs: [sharedChangelog] },
         { name: "@acme/ui", git: { tag: "acme@1.0.1" }, changelogs: [sharedChangelog] },
       ]),
-    });
+    );
 
     expect(releaseExistsByTag).toHaveBeenCalledTimes(1);
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "acme@1.0.1",
       title: "acme@1.0.1",
       notes: "- @acme/core@1.0.1\n- @acme/ui@1.0.1\n\n### Add shared API\n\nUseful release note.",
@@ -402,26 +421,28 @@ describe("github release plugin", () => {
       return commandResult();
     });
 
-    const plugin = githubPlugin({ repo: "acme/repo" });
+    const plugins = githubPlugin(releasePluginOptions);
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
     const sharedChangelog = testChangelogEntry({
       sections: [{ title: "Add shared API", content: "Useful release note.", depth: 2 }],
     });
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         { name: "@acme/core", changelogs: [sharedChangelog] },
         { name: "@acme/ui", changelogs: [sharedChangelog] },
       ]),
-    });
+    );
 
     expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "log")).toHaveLength(1);
     expect(createGitHubRelease).toHaveBeenCalledTimes(2);
   });
 
   test("uses release.createGrouped for packages sharing a git tag", async () => {
-    const plugin = githubPlugin({
-      repo: "acme/repo",
+    const plugins = githubPlugin({
+      ...releasePluginOptions,
       release: {
         createGrouped({ packages }) {
           return {
@@ -437,14 +458,17 @@ describe("github release plugin", () => {
 
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: releasePlan(context, [
+    await runAfterPublishAll(
+      plugins,
+      context,
+      releasePlan(context, [
         { name: "@acme/core", git: { tag: "acme@1.0.1" } },
         { name: "@acme/ui", git: { tag: "acme@1.0.1" } },
       ]),
-    });
+    );
 
-    expect(createGitHubRelease).toHaveBeenCalledWith("acme/repo", {
+    expect(createGitHubRelease).toHaveBeenCalledWith({
+      repo: "acme/repo",
       tag: "acme@1.0.1",
       title: "Group release @acme/core",
       notes: "@acme/core, @acme/ui",
@@ -462,12 +486,11 @@ describe("github version pull request", () => {
     process.env.GITHUB_TOKEN = "test-token";
 
     try {
-      const plugin = githubPlugin({ repo: "acme/repo" });
+      const plugins = githubPlugin(releasePluginOptions);
       const context = publishContext();
       exec.mockImplementation(() => commandResult());
 
-      await plugin.init?.call(context);
-      await plugin.initCli?.call(context, createTegamiCliRegistry(tegami({ cwd: "/repo" })));
+      await runInitCli(plugins, context, createTegamiCliRegistry(tegami({ cwd: "/repo" })));
 
       expect(exec).toHaveBeenCalledWith(
         "git",
@@ -493,7 +516,7 @@ describe("github version pull request", () => {
     process.env.CI = "true";
 
     try {
-      const plugin = githubPlugin({ repo: "acme/repo" });
+      const plugins = githubPlugin(releasePluginOptions);
       const context = publishContext([testPackage("@acme/core", "1.0.0")]);
       const draft = versionDraft(context);
 
@@ -517,7 +540,7 @@ describe("github version pull request", () => {
       });
       findOpenPullRequest.mockResolvedValue(42);
 
-      await runVersionPullRequest(plugin, context, draft);
+      await runVersionPullRequest(plugins, context, draft);
 
       expect(updatePullRequest).toHaveBeenCalledWith("acme/repo", 42, {
         title: "Version Packages",
@@ -599,7 +622,7 @@ describe("github version pull request", () => {
     process.env.CI = "true";
 
     try {
-      const plugin = githubPlugin({ repo: "acme/repo" });
+      const plugins = githubPlugin(releasePluginOptions);
       const context = publishContext([testPackage("@acme/core", "1.0.0")]);
       const draft = versionDraft(context);
 
@@ -622,7 +645,7 @@ describe("github version pull request", () => {
         }
       });
 
-      await runVersionPullRequest(plugin, context, draft);
+      await runVersionPullRequest(plugins, context, draft);
 
       expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
         title: "Version Packages",
@@ -711,8 +734,8 @@ describe("github version pull request", () => {
           body: "Release notes",
         };
       });
-      const plugin = githubPlugin({
-        repo: "acme/repo",
+      const plugins = githubPlugin({
+        ...releasePluginOptions,
         versionPr: { commit },
       });
       const context = publishContext([testPackage("@acme/core", "1.0.0")]);
@@ -729,7 +752,7 @@ describe("github version pull request", () => {
         }
       });
 
-      await runVersionPullRequest(plugin, context, draft);
+      await runVersionPullRequest(plugins, context, draft);
 
       expect(commit).toHaveBeenCalledWith({ type: "version-packages" });
       expect(exec.mock.calls.find(([, args]) => args?.[0] === "commit")?.[1]).toEqual([
@@ -753,7 +776,7 @@ describe("github version pull request", () => {
       const commit = vi.fn(async (opts: { type: string }) => {
         if (opts.type === "update-lock") return { title: "custom group commit" };
       });
-      const plugin = githubPlugin({
+      const plugins = githubPlugin({
         repo: "acme/repo",
         versionPr: {
           groups: ["group:test"],
@@ -812,7 +835,9 @@ describe("github version pull request", () => {
         }
       });
 
-      await plugin.initCliDraft?.call(context, draft);
+      for (const plugin of plugins) {
+        await plugin.initCliDraft?.call(context, draft);
+      }
       const core = context.graph.get("test:@acme/core");
       const ui = context.graph.get("test:@acme/ui");
       if (!(core instanceof TestPackage) || !(ui instanceof TestPackage)) {
@@ -820,7 +845,9 @@ describe("github version pull request", () => {
       }
       core.setVersion("1.1.0");
       ui.setVersion("1.1.0");
-      await plugin.applyCliDraft?.call(context, draft);
+      for (const plugin of plugins) {
+        await plugin.applyCliDraft?.call(context, draft);
+      }
 
       expect(commit).toHaveBeenCalledWith({ type: "version-packages" });
       expect(commit).toHaveBeenCalledWith(
@@ -858,7 +885,7 @@ describe("github version pull request", () => {
       const cwd = await mkdtemp(join(tmpdir(), "tegami-github-"));
       tempDirs.push(cwd);
 
-      const plugin = githubPlugin({
+      const plugins = githubPlugin({
         repo: "acme/repo",
         versionPr: {
           groups: ["group:test", ["@acme/ui", "@acme/docs"]],
@@ -937,12 +964,16 @@ describe("github version pull request", () => {
         }
       });
 
-      await plugin.initCliDraft?.call(context, draft);
+      for (const plugin of plugins) {
+        await plugin.initCliDraft?.call(context, draft);
+      }
       core.setVersion("1.1.0");
       ui.setVersion("1.1.0");
       docs.setVersion("1.1.0");
       cli.setVersion("1.1.0");
-      await plugin.applyCliDraft?.call(context, draft);
+      for (const plugin of plugins) {
+        await plugin.applyCliDraft?.call(context, draft);
+      }
 
       expect(createPullRequest).toHaveBeenCalledWith("acme/repo", {
         title: "Release @acme/core (test)",
@@ -1033,7 +1064,7 @@ describe("github version pull request", () => {
   });
 
   test("restores publish groups from the lock into the publish plan", async () => {
-    const plugin = githubPlugin({ versionPr: { groups: ["group:test", "@acme/ui"] } });
+    const plugins = githubPlugin({ versionPr: { groups: ["group:test", "@acme/ui"] } });
     const context = publishContext([testPackage("@acme/core"), testPackage("@acme/ui")]);
     context.graph.registerGroup("test", {});
     context.graph.addGroupMember("test", "test:@acme/core");
@@ -1043,20 +1074,20 @@ describe("github version pull request", () => {
     lock.write("github:publish-group", {
       groups: { "group-test": "active", "acme-ui": "pending" },
     });
-    await plugin.initPublishPlan?.call(context, { lock, plan });
+    await runInitPublishPlan(plugins, context, { lock, plan });
 
     // only active groups are published
     expect(plan.options.packages).toEqual(["group:test"]);
     // pending groups keep the plan (and the lock) pending
-    expect(await plugin.resolvePlanStatus?.call(context, { plan })).toBe("pending");
+    expect(await resolvePlanStatus(plugins, context, plan)).toBe("pending");
   });
 
   test("re-syncs pending publish group pull requests before publishing", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-github-"));
     tempDirs.push(cwd);
 
-    const plugin = githubPlugin({
-      repo: "acme/repo",
+    const plugins = githubPlugin({
+      ...releasePluginOptions,
       versionPr: { groups: ["@acme/core", "@acme/ui"] },
     });
     const context = {
@@ -1094,8 +1125,8 @@ describe("github version pull request", () => {
     });
 
     const plan = releasePlan(context, [{ name: "@acme/core" }, { name: "@acme/ui" }]);
-    await plugin.initPublishPlan?.call(context, { lock, plan });
-    await plugin.beforePublishAll?.call(context, { plan });
+    await runInitPublishPlan(plugins, context, { lock, plan });
+    await runBeforePublishAll(plugins, context, { plan });
 
     // re-syncs are push-only: the request tracks the branch, its body never changes
     expect(findOpenPullRequest).not.toHaveBeenCalled();
@@ -1126,7 +1157,7 @@ describe("github version pull request", () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-github-"));
     tempDirs.push(cwd);
 
-    const plugin = githubPlugin({ repo: "acme/repo", versionPr: { groups: ["@acme/ui"] } });
+    const plugins = githubPlugin({ ...releasePluginOptions, versionPr: { groups: ["@acme/ui"] } });
     const context = {
       ...publishContext([testPackage("@acme/ui", "1.1.0")]),
       cwd,
@@ -1162,8 +1193,8 @@ describe("github version pull request", () => {
     findOpenPullRequest.mockResolvedValue(42);
 
     const plan = releasePlan(context, [{ name: "@acme/ui" }]);
-    await plugin.initPublishPlan?.call(context, { lock, plan });
-    await plugin.beforePublishAll?.call(context, { plan });
+    await runInitPublishPlan(plugins, context, { lock, plan });
+    await runBeforePublishAll(plugins, context, { plan });
 
     expect(exec.mock.calls.some(([, args]) => args?.[0] === "push")).toBe(false);
     expect(createPullRequest).not.toHaveBeenCalled();
@@ -1171,7 +1202,7 @@ describe("github version pull request", () => {
   });
 
   test("skips re-syncing publish group requests on dry-run", async () => {
-    const plugin = githubPlugin({ repo: "acme/repo", versionPr: { groups: ["@acme/ui"] } });
+    const plugins = githubPlugin({ ...releasePluginOptions, versionPr: { groups: ["@acme/ui"] } });
     const context = publishContext([testPackage("@acme/ui", "1.1.0")]);
     const plan = releasePlan(context, [{ name: "@acme/ui" }]);
     plan.options.dryRun = true;
@@ -1179,8 +1210,8 @@ describe("github version pull request", () => {
     const lock = new PublishLock();
     lock.write("github:publish-group", { groups: { "acme-ui": "pending" } });
 
-    await plugin.initPublishPlan?.call(context, { lock, plan });
-    await plugin.beforePublishAll?.call(context, { plan });
+    await runInitPublishPlan(plugins, context, { lock, plan });
+    await runBeforePublishAll(plugins, context, { plan });
 
     expect(exec).not.toHaveBeenCalled();
     expect(createPullRequest).not.toHaveBeenCalled();
@@ -1192,9 +1223,9 @@ describe("github version pull request", () => {
     delete process.env.CI;
 
     try {
-      const plugin = githubPlugin();
+      const plugins = githubPlugin(releasePluginOptions);
       const context = publishContext();
-      await runVersionPullRequest(plugin, context, versionDraft(context));
+      await runVersionPullRequest(plugins, context, versionDraft(context));
       expect(exec).not.toHaveBeenCalled();
     } finally {
       if (previousCi === undefined) delete process.env.CI;
@@ -1207,8 +1238,8 @@ describe("github version pull request", () => {
     delete process.env.CI;
 
     try {
-      const plugin = githubPlugin({
-        repo: "acme/repo",
+      const plugins = githubPlugin({
+        ...releasePluginOptions,
         versionPr: { forceCreate: true },
       });
       const context = publishContext();
@@ -1225,7 +1256,7 @@ describe("github version pull request", () => {
         throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
       });
 
-      await runVersionPullRequest(plugin, context, versionDraft(context));
+      await runVersionPullRequest(plugins, context, versionDraft(context));
 
       expect(createPullRequest).toHaveBeenCalled();
     } finally {
@@ -1235,10 +1266,69 @@ describe("github version pull request", () => {
   });
 });
 
-function githubPlugin(options?: Parameters<typeof github>[0]): TegamiPlugin {
-  const plugin = github(options).find((plugin) => plugin.name === "github");
-  if (!plugin) throw new Error("GitHub plugin not found.");
-  return plugin;
+function githubPlugin(options?: Parameters<typeof github>[0]): TegamiPlugin[] {
+  return github(options);
+}
+
+async function initPlugins(plugins: TegamiPlugin[], context: TegamiContext) {
+  for (const plugin of plugins) {
+    await plugin.init?.call(context);
+  }
+}
+
+async function runAfterPublishAll(
+  plugins: TegamiPlugin[],
+  context: TegamiContext,
+  plan: PublishPlan,
+) {
+  await initPlugins(plugins, context);
+  for (const plugin of plugins) {
+    await plugin.afterPublishAll?.call(context, { plan });
+  }
+}
+
+async function resolvePlanStatus(
+  plugins: TegamiPlugin[],
+  context: TegamiContext,
+  plan: PublishPlan,
+): Promise<"pending" | undefined> {
+  await initPlugins(plugins, context);
+  for (const plugin of plugins) {
+    const status = await plugin.resolvePlanStatus?.call(context, { plan });
+    if (status === "pending") return "pending";
+  }
+}
+
+async function runInitPublishPlan(
+  plugins: TegamiPlugin[],
+  context: TegamiContext,
+  opts: { lock: PublishLock; plan: PublishPlan },
+) {
+  await initPlugins(plugins, context);
+  for (const plugin of plugins) {
+    await plugin.initPublishPlan?.call(context, opts);
+  }
+}
+
+async function runBeforePublishAll(
+  plugins: TegamiPlugin[],
+  context: TegamiContext,
+  opts: { plan: PublishPlan },
+) {
+  for (const plugin of plugins) {
+    await plugin.beforePublishAll?.call(context, opts);
+  }
+}
+
+async function runInitCli(
+  plugins: TegamiPlugin[],
+  context: TegamiContext,
+  cli: ReturnType<typeof createTegamiCliRegistry>,
+) {
+  await initPlugins(plugins, context);
+  for (const plugin of plugins) {
+    await plugin.initCli?.call(context, cli);
+  }
 }
 
 function publishContext(packages: TestPackage[] = [testPackage()]): TegamiContext {
@@ -1296,16 +1386,21 @@ function versionDraft(context = publishContext([testPackage("@acme/core", "1.0.0
 }
 
 async function runVersionPullRequest(
-  plugin: TegamiPlugin,
+  plugins: TegamiPlugin[],
   context: ReturnType<typeof publishContext>,
   draft: Draft,
 ) {
   const pkg = context.graph.get("test:@acme/core");
   if (!(pkg instanceof TestPackage)) throw new Error("missing package");
 
-  await plugin.initCliDraft?.call(context, draft);
+  await initPlugins(plugins, context);
+  for (const plugin of plugins) {
+    await plugin.initCliDraft?.call(context, draft);
+  }
   pkg.setVersion("1.1.0");
-  await plugin.applyCliDraft?.call(context, draft);
+  for (const plugin of plugins) {
+    await plugin.applyCliDraft?.call(context, draft);
+  }
 }
 
 function releasePlan(
