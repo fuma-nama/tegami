@@ -43,7 +43,7 @@ describe("npm registry preflight", () => {
 
     const plan = await loadPlan(context);
 
-    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
+    await expect(publishPlanStatus(plan, context)).resolves.toEqual({ status: "success" });
     expect(fetchMock).toHaveBeenCalledWith(
       npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
       { headers: { Accept: "application/json" } },
@@ -166,7 +166,7 @@ describe("publish plan status", () => {
     );
     const plan = await loadPlan(context);
 
-    await expect(publishPlanStatus(plan, context)).resolves.toBe("success");
+    await expect(publishPlanStatus(plan, context)).resolves.toEqual({ status: "success" });
     expect(fetchMock).toHaveBeenCalledWith(
       npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
       { headers: { Accept: "application/json" } },
@@ -178,7 +178,10 @@ describe("publish plan status", () => {
     fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
     const plan = await loadPlan(context);
 
-    await expect(publishPlanStatus(plan, context)).resolves.toBe("pending");
+    await expect(publishPlanStatus(plan, context)).resolves.toEqual({
+      status: "pending",
+      reason: 'Plugin "npm" has pending tasks',
+    });
   });
 });
 

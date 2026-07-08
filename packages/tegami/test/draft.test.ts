@@ -331,6 +331,10 @@ Core only.
       npm: [{ id: "npm:@acme/core", distTag: "latest" }],
     });
 
+    await expect(tegami({ cwd }).getPublishStatus()).resolves.toEqual({
+      status: "pending",
+      reason: 'Plugin "npm" has pending tasks',
+    });
     await expect(tegami({ cwd }).publishStatus()).resolves.toBe("pending");
   });
 

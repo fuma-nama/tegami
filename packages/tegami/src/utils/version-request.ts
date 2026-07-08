@@ -338,7 +338,7 @@ export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
     },
 
     /** report `pending` while publish groups are waiting for their request */
-    resolvePlanStatus({ plan }): "pending" | undefined {
+    resolvePlanStatus({ plan }) {
       const publishGroups = plan.$versionRequest?.publishGroups;
       if (!publishGroups) return;
       for (const s of publishGroups.values()) {
