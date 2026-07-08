@@ -9,6 +9,7 @@ import { TypeTable } from "fumadocs-ui/components/type-table";
 import { Image } from "fumapress/image";
 import { imagePlugin } from "fumapress/plugins/image/vercel";
 import { Mermaid } from "./src/mermaid";
+import { generateOGImage, loadFonts } from "./src/og";
 
 export default defineConfig({
   content: docs.toFumadocsSource(),
@@ -48,7 +49,24 @@ export default defineConfig({
       },
     }),
   })
-  .plugins(flexsearchPlugin(), llmsPlugin(), takumiPlugin(), imagePlugin())
+  .plugins(
+    flexsearchPlugin(),
+    llmsPlugin(),
+    takumiPlugin({
+      async generate(page) {
+        return {
+          node: generateOGImage({
+            title: page.data.title,
+            description: page.data.description,
+          }),
+          options: {
+            fonts: await loadFonts(),
+          },
+        };
+      },
+    }),
+    imagePlugin(),
+  )
   .adapters(
     fumadocsMdx({
       getMdxComponents() {
