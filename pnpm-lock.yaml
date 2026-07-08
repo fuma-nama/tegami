@@ -84,6 +84,9 @@ importers:
       '@tegami/pip':
         specifier: workspace:*
         version: link:../../packages/tegami-pip
+      '@tegami/zig':
+        specifier: workspace:*
+        version: link:../../packages/tegami-zig
       '@types/mdx':
         specifier: ^2.0.14
         version: 2.0.14
@@ -219,6 +222,34 @@ importers:
       typia:
         specifier: ^12.1.1
         version: 12.1.1(@types/node@26.1.0)(typescript@6.0.3)
+
+  packages/tegami-zig:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.0
+        version: 26.1.0
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.3
+        version: 0.22.3(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/typescript-config: {}
 
