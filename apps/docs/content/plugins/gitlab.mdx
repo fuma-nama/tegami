@@ -17,6 +17,10 @@ const paper = tegami({
 });
 ```
 
+## Configuration
+
+<auto-type-table type="import('tegami/plugins/gitlab').GitLabPluginOptions" />
+
 ## Requirements
 
 - `GITLAB_TOKEN` or `GL_TOKEN` with permission to create merge requests and releases.
@@ -46,14 +50,6 @@ gitlab({
   },
 });
 ```
-
-| Setting       | Default                   | Description                                       |
-| ------------- | ------------------------- | ------------------------------------------------- |
-| `branch`      | `tegami/version-packages` | Source branch for the version MR                  |
-| `base`        | `main`                    | Target branch for the version MR                  |
-| `groups`      | —                         | Publish groups to split into separate version MRs |
-| `forceCreate` | `false`                   | Create the MR outside CI as well                  |
-| `create`      | —                         | Override the MR title and body before it is sent  |
 
 Set `versionMr: false` to disable MR creation. Set `versionMr: { forceCreate: true }` to always create the MR, including locally.
 
@@ -120,9 +116,3 @@ gitlab({
   },
 });
 ```
-
-| Setting         | Default | Description                                                       |
-| --------------- | ------- | ----------------------------------------------------------------- |
-| `eager`         | `false` | Create releases without waiting for every package in the plan     |
-| `create`        | —       | Override release details for a single package                     |
-| `createGrouped` | —       | Override release details when multiple packages share one git tag |

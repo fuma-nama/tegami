@@ -2,3 +2,16 @@
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
 @import "fumapress/css/preset.css";
+
+@theme {
+  --default-font-family: "Noto Serif", serif;
+  --font-mono: "Jetbrains Mono", monospace;
+}
+
+:root {
+  --color-fd-primary: oklch(0.5676 0.2368 25.41);
+}
+
+.dark {
+  --color-fd-primary: oklch(0.6971 0.2047 25.41);
+}

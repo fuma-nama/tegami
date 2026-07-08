@@ -81,7 +81,6 @@ export function dart({
 
   return {
     name: "dart",
-    enforce: "post",
     async resolve() {
       const packages = await discoverDartPackages(this.cwd);
       for (const pkg of packages) this.graph.add(pkg);
@@ -216,12 +215,11 @@ function depsPolicy(
       const deps = dependentMap.get(pkg.id);
       if (!deps) return;
 
-      const group = graph.getPackageGroup(pkg.id);
       const bumped = plan.bumpVersion(pkg);
       if (!bumped) return;
 
       for (const dep of deps) {
-        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+        if (pkg.group?.options.syncBump && dep.dependent.group === pkg.group) {
           continue;
         }
 
@@ -306,18 +304,19 @@ function satisfiesDartRange(version: string, range: string): boolean {
 }
 
 async function discoverDartPackages(cwd: string): Promise<DartPackage[]> {
+  const out: DartPackage[] = [];
   const root = await readPubspec(cwd);
-  if (!root?.data.workspace?.length) return [];
+  if (!root?.data.workspace?.length) return out;
 
   const files = new Map<string, PubspecFile>();
   files.set(root.path, root);
   await collectWorkspaceFiles(root, files);
+  for (const file of files.values()) {
+    if (!file.data.name) continue;
 
-  return Array.from(files.values())
-    .filter((file): file is PubspecFile & { data: Pubspec & { name: string } } =>
-      Boolean(file.data.name),
-    )
-    .map((file) => new DartPackage(path.dirname(file.path), file));
+    out.push(new DartPackage(path.dirname(file.path), file));
+  }
+  return out;
 }
 
 async function collectWorkspaceFiles(

@@ -80,7 +80,7 @@ function registerCoreCommands(cli: TegamiCliRegistry, tegami: Tegami, options: T
       description: "exit with code 1 if no publishing needed, otherwise 0",
     })
     .action(async () => {
-      const status = await tegami.publishStatus();
+      const { status } = await tegami.getPublishStatus();
       process.exit(status === "pending" ? 0 : 1);
     });
 
@@ -147,12 +147,16 @@ async function versionPackages(
     return false;
   }
 
-  if (!options.noChecks && (await tegami.publishStatus()) === "pending") {
-    note(
-      `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
-    );
-    outro("Cannot apply.");
-    return false;
+  if (!options.noChecks) {
+    const { status, reason } = await tegami.getPublishStatus();
+    if (status === "pending") {
+      note(
+        `Publish lock at ${context.lockPath} is still pending. Publish it before applying a new draft.`,
+        "Failed to apply",
+      );
+      outro(reason ?? "Cannot apply.");
+      return false;
+    }
   }
 
   const lines: string[] = [];

@@ -42,18 +42,16 @@ export async function releaseExistsByTag(
   return true;
 }
 
-export async function createRelease(
-  repo: string,
-  options: {
-    tag: string;
-    title: string;
-    notes: string;
-    prerelease?: boolean;
-    token?: string;
-  },
-): Promise<void> {
-  const { owner, repo: name } = parseGitHubRepo(repo);
-  const response = await githubRequest(`/repos/${owner}/${name}/releases`, options.token, {
+export async function createRelease(options: {
+  repo: string;
+  tag: string;
+  title: string;
+  notes: string;
+  prerelease?: boolean;
+  token?: string;
+}): Promise<void> {
+  const { owner, repo } = parseGitHubRepo(options.repo);
+  const response = await githubRequest(`/repos/${owner}/${repo}/releases`, options.token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

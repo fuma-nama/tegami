@@ -164,27 +164,29 @@ async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
 
   const dir = await fs.mkdtemp(join(tmpdir(), "tegami-npm-placeholder-"));
   try {
-    await fs.writeFile(
-      join(dir, "package.json"),
-      `${JSON.stringify(
-        {
-          name: pkg.name,
-          version: PLACEHOLDER_VERSION,
-          description: "Placeholder published by Tegami for npm trusted publishing setup.",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    await fs.writeFile(
-      join(dir, "README.md"),
-      `# Placeholder package
-
-This empty package was published by [Tegami](https://tegami.fuma-nama.dev) to configure npm trusted publishing.
-
-The real package contents will be published via CI with OIDC.
-`,
-    );
+    await Promise.all([
+      fs.writeFile(
+        join(dir, "package.json"),
+        `${JSON.stringify(
+          {
+            name: pkg.name,
+            version: PLACEHOLDER_VERSION,
+            description: "Placeholder published by Tegami for npm trusted publishing setup.",
+          },
+          null,
+          2,
+        )}\n`,
+      ),
+      fs.writeFile(
+        join(dir, "README.md"),
+        `# Placeholder package
+  
+  This empty package was published by [Tegami](https://tegami.fuma-nama.dev) to configure npm trusted publishing.
+  
+  The real package contents will be published via CI with OIDC.
+  `,
+      ),
+    ]);
 
     const args = [
       "publish",

@@ -58,11 +58,22 @@ export interface Tegami {
   /** Publish packages from the publish lock. */
   publish(options?: PublishOptions): Promise<PublishPlan | "skipped">;
   /**
-   * Check publish status.
-   *
-   * Prefer `publish()` over this if you are publishing packages, it will also check the publish status.
+   * @deprecated use `getPublishStatus()` instead
    */
   publishStatus(options?: PublishOptions): Promise<"pending" | "success" | "idle">;
+  /**
+   * Check publish plan status.
+   *
+   * Prefer `publish()` over this if you are publishing packages, this is check-only and can lead to TOCTOU race.
+   */
+  getPublishStatus(options?: PublishOptions): Promise<{
+    /**
+     * - `pending`: has pending tasks.
+     * - `success`: all tasks finished.
+     * - `none`: there is no existing publish plans. */
+    status: "pending" | "success" | "none";
+    reason?: string;
+  }>;
   /** Remove the publish lock file after publishing has finished successfully. */
   cleanup(options?: PublishOptions): Promise<
     | {
@@ -137,13 +148,17 @@ export function tegami<const Groups extends string = string>(
 
       return createDraft(changelogs, context);
     },
-    async publishStatus(publishOptions = {}) {
+    async getPublishStatus(publishOptions = {}) {
       const context = await getContextResolved();
       const plan = await initPublishPlan(context, publishOptions);
-      if (!plan) return "idle";
+      if (!plan) return { status: "none" };
 
       await runPreflights(context, plan);
       return publishPlanStatus(plan, context);
+    },
+    async publishStatus(publishOptions = {}) {
+      const { status } = await this.getPublishStatus(publishOptions);
+      return status === "none" ? "idle" : status;
     },
     async publish(publishOptions = {}) {
       const context = await getContextResolved();
@@ -152,7 +167,7 @@ export function tegami<const Groups extends string = string>(
 
       await runPreflights(context, plan);
 
-      if ((await publishPlanStatus(plan, context)) === "success") {
+      if ((await publishPlanStatus(plan, context)).status === "success") {
         return "skipped";
       }
 
@@ -175,7 +190,7 @@ export function tegami<const Groups extends string = string>(
       }
 
       await runPreflights(context, plan);
-      const status = await publishPlanStatus(plan, context);
+      const { status } = await publishPlanStatus(plan, context);
       if (status !== "success") {
         return { state: "skipped", reason: "pending" };
       }

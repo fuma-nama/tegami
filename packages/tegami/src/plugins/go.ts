@@ -142,7 +142,6 @@ export function go({
 
   return {
     name: "go",
-    enforce: "post",
     async resolve() {
       await discoverGoPackages(this.cwd, (pkg) => this.graph.add(pkg));
       active = this.graph.getPackages().some((pkg) => pkg instanceof GoPackage);
@@ -189,9 +188,9 @@ export function go({
     initPublishLock({ lock, draft }) {
       if (!active) return;
 
-      for (const [id, packageDraft] of draft.getPackageDrafts()) {
+      for (const id of draft.getPackageDrafts().keys()) {
         const pkg = this.graph.get(id);
-        if (!(pkg instanceof GoPackage) || !packageDraft.type) continue;
+        if (!(pkg instanceof GoPackage)) continue;
 
         lock.write("go:packages", {
           id,
@@ -202,19 +201,20 @@ export function go({
     initPublishPlan({ lock, plan }) {
       if (!active) return;
 
+      const lockVersions = new Map<string, string>();
       let data: unknown;
       while ((data = lock.read("go:packages"))) {
-        const validated = validateGoPackageLock(data);
-        if (!validated.success) continue;
-        const parsed = validated.data;
+        const { success, data: parsed } = validateGoPackageLock(data);
+        if (!success) continue;
 
-        const pkg = this.graph.get(parsed.id);
-        if (pkg instanceof GoPackage) pkg.setVersion(parsed.version);
+        lockVersions.set(parsed.id, parsed.version);
       }
 
       for (const [id, packagePlan] of plan.packages) {
         const pkg = this.graph.get(id);
         if (!(pkg instanceof GoPackage)) continue;
+        const version = packagePlan.updated && lockVersions.get(id);
+        if (version) pkg.setVersion(version);
         packagePlan.git ??= {};
         packagePlan.git.tag = formatGoTag(this.cwd, pkg.path, pkg.version);
       }

@@ -322,20 +322,22 @@ export async function runPreflights(context: TegamiContext, plan: PublishPlan): 
 export async function publishPlanStatus(
   plan: PublishPlan,
   context: TegamiContext,
-): Promise<"success" | "pending"> {
+): Promise<{
+  status: "success" | "pending";
+  reason?: string;
+}> {
   for (const plugin of context.plugins) {
     const status = await handlePluginError(plugin, "resolvePlanStatus", () =>
       plugin.resolvePlanStatus?.call(context, { plan }),
     );
 
-    if (Array.isArray(status) && (await somePromise(status, (v) => v === "pending"))) {
-      return "pending";
-    }
-
-    if (status === "pending") {
-      return "pending";
+    if (
+      (Array.isArray(status) && (await somePromise(status, (v) => v === "pending"))) ||
+      status === "pending"
+    ) {
+      return { status: "pending", reason: `Plugin "${plugin.name}" has pending tasks` };
     }
   }
 
-  return "success";
+  return { status: "success" };
 }

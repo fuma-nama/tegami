@@ -141,9 +141,9 @@ describe("tegami context", () => {
 
     expect(context.plugins.map((plugin) => plugin.name)).toMatchInlineSnapshot(`
       [
-        "npm",
         "pre-a",
         "pre-b",
+        "npm",
         "default-a",
         "default-b",
         "post-a",

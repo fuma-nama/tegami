@@ -7,12 +7,17 @@ import type { TegamiContext } from "../context";
 import type { ChangelogEntry } from "../changelog/parse";
 import type { Draft } from "../plans/draft";
 import { parsePublishLock, PublishLock } from "../plans/lock";
-import { initPublishPlan, runPreflights, type PublishPlan } from "../plans/publish";
+import {
+  initPublishPlan,
+  PackagePublishPlan,
+  runPreflights,
+  type PublishPlan,
+} from "../plans/publish";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
-import { isCI } from "./common";
-import { diffWeight, formatNpmDistTag } from "./semver";
+import { isCI, somePromise } from "./common";
+import { diffWeight, formatNpmDistTag, formatPackageVersion } from "./semver";
 import { getPackageBumps } from "../changelog/shared";
 
 /** a version request (pull/merge request) to upsert on the git provider */
@@ -96,10 +101,11 @@ interface CommitData {
 const validatePublishGroupStore: (input: unknown) => typia.IValidation<PublishGroupStore> =
   typia.createValidate<PublishGroupStore>();
 
-export function onVersionRequest(provider: GitProvider) {
-  const namespace = `${provider.name}:publish-group`;
+export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
+  const NamespacePublishGroup = `${provider.name}:publish-group`;
   /** package id -> version before applying the CLI draft */
   const snapshots = new Map<string, string | undefined>();
+  type ResolvedConfig = NonNullable<ReturnType<typeof resolveConfig>>;
 
   function resolveConfig(graph: PackageGraph) {
     if (provider.options === false) return;
@@ -133,6 +139,17 @@ export function onVersionRequest(provider: GitProvider) {
     return { forceCreate, branch, base, groupMap, ...rest };
   }
 
+  /** commit the working tree changes onto a detached HEAD */
+  async function createVersionCommit(ctx: TegamiContext, config: ResolvedConfig): Promise<void> {
+    const { title = "Version Packages", body } =
+      (await config.commit?.call(ctx, { type: "version-packages" })) ?? {};
+    await run(ctx.cwd, ["checkout", "--detach"], "Failed to detach HEAD for version branches.");
+    await run(ctx.cwd, ["add", "-A"], "Failed to stage version changes.");
+    const args = ["commit", "-m", title];
+    if (body) args.push("-m", body);
+    await run(ctx.cwd, args, "Failed to commit version changes.");
+  }
+
   /**
    * Commit the group's lock state on top of `parent` and force-push its branch.
    *
@@ -141,7 +158,7 @@ export function onVersionRequest(provider: GitProvider) {
   async function syncGroupBranch(
     context: TegamiContext,
     opts: {
-      config: NonNullable<ReturnType<typeof resolveConfig>>;
+      config: ResolvedConfig;
       baseLock: PublishLock;
       branch: string;
       store: PublishGroupStore;
@@ -151,8 +168,8 @@ export function onVersionRequest(provider: GitProvider) {
     },
   ): Promise<boolean> {
     const lock = new PublishLock(opts.baseLock);
-    while (lock.read(namespace)) {}
-    lock.write(namespace, opts.store);
+    while (lock.read(NamespacePublishGroup)) {}
+    lock.write(NamespacePublishGroup, opts.store);
 
     const commit = await createLockCommit(
       context,
@@ -175,18 +192,18 @@ export function onVersionRequest(provider: GitProvider) {
   }
 
   return {
-    /** snapshot package versions, hook into `initCliDraft` */
-    initCliDraft(): void {
+    name: `${provider.name}:version-request`,
+    /** snapshot package versions */
+    initCliDraft() {
       for (const pkg of this.graph.getPackages()) {
         snapshots.set(pkg.id, pkg.version);
       }
     },
-
-    /** commit & push version branches, then upsert their requests, hook into `applyCliDraft` */
-    async applyCliDraft(this, draft): Promise<void> {
+    /** commit & push version branches, then upsert their requests */
+    async applyCliDraft(draft) {
+      if (!provider.canCreate(this)) return;
       const config = resolveConfig(this.graph);
-      if (!config || !provider.canCreate(this)) return;
-      if (!(config.forceCreate || isCI()) || !(await hasGitChanges(this.cwd))) return;
+      if (!config || !(config.forceCreate || isCI()) || !(await hasGitChanges(this.cwd))) return;
 
       const requests: { branch: string; packages: WorkspacePackage[]; publishGroup?: string }[] =
         [];
@@ -227,11 +244,7 @@ export function onVersionRequest(provider: GitProvider) {
       }
 
       if (requests.length === 0) return;
-
-      await createVersionCommit(
-        this.cwd,
-        await config.commit?.call(this, { type: "version-packages" }),
-      );
+      await createVersionCommit(this, config);
 
       let baseLock: PublishLock | undefined;
       let parent: CommitData | undefined;
@@ -282,14 +295,18 @@ export function onVersionRequest(provider: GitProvider) {
           continue;
         }
 
-        await pushBranch(this.cwd, branch);
+        await run(this.cwd, ["checkout", "-B", branch], "Failed to create the version branch.");
+        await run(
+          this.cwd,
+          ["push", "--force", "-u", "origin", branch],
+          "Failed to push the version branch to origin. Ensure `origin` is configured and you have push access.",
+        );
         await provider.upsert(this, resolved, true);
       }
       await Promise.all(tasks);
     },
-
-    /** restore publish groups from the lock into the plan, hook into `initPublishPlan` */
-    initPublishPlan(this, { lock, plan }): void {
+    /** restore publish groups from the lock into the plan */
+    initPublishPlan({ lock, plan }) {
       const config = resolveConfig(this.graph);
       if (!config) return;
 
@@ -297,7 +314,7 @@ export function onVersionRequest(provider: GitProvider) {
 
       const publishGroups = new Map<string, "active" | "pending">();
       plan.$versionRequest = { publishGroups };
-      while ((data = lock.read(namespace))) {
+      while ((data = lock.read(NamespacePublishGroup))) {
         const validated = validatePublishGroupStore(data);
         if (!validated.success) continue;
         const store = validated.data;
@@ -321,7 +338,7 @@ export function onVersionRequest(provider: GitProvider) {
     },
 
     /** report `pending` while publish groups are waiting for their request */
-    resolvePlanStatus({ plan }): "pending" | undefined {
+    resolvePlanStatus({ plan }) {
       const publishGroups = plan.$versionRequest?.publishGroups;
       if (!publishGroups) return;
       for (const s of publishGroups.values()) {
@@ -329,8 +346,8 @@ export function onVersionRequest(provider: GitProvider) {
       }
     },
 
-    /** re-sync the version requests of pending publish groups, hook into `beforePublishAll` */
-    async beforePublishAll(this, { plan }) {
+    /** re-sync the version requests of pending publish groups */
+    async beforePublishAll({ plan }) {
       if (plan.options.dryRun || !provider.canCreate(this)) return;
       const config = resolveConfig(this.graph);
       if (!config) return;
@@ -367,7 +384,7 @@ export function onVersionRequest(provider: GitProvider) {
         });
       }
     },
-  } satisfies Partial<TegamiPlugin>;
+  };
 }
 
 function renderRequestBody(
@@ -556,27 +573,6 @@ async function hasGitChanges(cwd: string): Promise<boolean> {
   return out.length > 0;
 }
 
-/** commit the working tree changes onto a detached HEAD */
-async function createVersionCommit(
-  cwd: string,
-  { title = "Version Packages", body }: { title?: string; body?: string } = {},
-): Promise<void> {
-  await run(cwd, ["checkout", "--detach"], "Failed to detach HEAD for version branches.");
-  await run(cwd, ["add", "-A"], "Failed to stage version changes.");
-  const args = ["commit", "-m", title];
-  if (body) args.push("-m", body);
-  await run(cwd, args, "Failed to commit version changes.");
-}
-
-async function pushBranch(cwd: string, branch: string): Promise<void> {
-  await run(cwd, ["checkout", "-B", branch], "Failed to create the version branch.");
-  await run(
-    cwd,
-    ["push", "--force", "-u", "origin", branch],
-    "Failed to push the version branch to origin. Ensure `origin` is configured and you have push access.",
-  );
-}
-
 async function run(
   cwd: string,
   args: string[],
@@ -691,4 +687,171 @@ export function formatPreview(
   );
 
   return lines.join("\n");
+}
+
+interface BaseRelease {
+  title: string;
+  notes: string;
+}
+
+type ReleaseInput<V extends BaseRelease> = Omit<Partial<V>, "title" | "notes"> & {
+  title: string;
+  notes: string;
+};
+
+interface GitReleaseProvider<V extends BaseRelease> {
+  eager: boolean;
+  releaseExistsByTag(this: TegamiContext, tag: string): Promise<boolean>;
+  create(opts: {
+    input: ReleaseInput<V>;
+    tag: string;
+    packages: WorkspacePackage[];
+  }): Promise<void>;
+  override?(
+    this: TegamiContext,
+    opts: { tag: string; pkg: WorkspacePackage; plan: PublishPlan },
+  ): Awaitable<Partial<V>>;
+  overrideGroup?(
+    this: TegamiContext,
+    opts: { tag: string; packages: WorkspacePackage[]; plan: PublishPlan },
+  ): Awaitable<Partial<V>>;
+  formatChangelog(this: TegamiContext, entry: ChangelogEntry): Awaitable<string>;
+}
+
+export async function resolveFileCommit(
+  ctx: TegamiContext,
+  filename: string,
+): Promise<string | undefined> {
+  const relativePath = relative(ctx.cwd, join(ctx.changelogDir, filename));
+  const result = await x(
+    "git",
+    ["log", "--diff-filter=A", "-1", "--format=%H", "--", relativePath],
+    {
+      nodeOptions: { cwd: ctx.cwd },
+    },
+  );
+
+  if (result.exitCode !== 0) return;
+  return result.stdout.trim() || undefined;
+}
+
+export function createAutoRelease<V extends BaseRelease>({
+  eager,
+  create,
+  override,
+  overrideGroup,
+  releaseExistsByTag,
+  formatChangelog,
+}: GitReleaseProvider<V>) {
+  async function defaultNotes(
+    ctx: TegamiContext,
+    pkg: WorkspacePackage,
+    packagePlan?: PackagePublishPlan,
+  ): Promise<string> {
+    if (packagePlan && packagePlan.changelogs.length > 0) {
+      const notes = await Promise.all(packagePlan.changelogs.map(formatChangelog.bind(ctx)));
+
+      return notes.join("\n\n");
+    }
+
+    return `Published ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}.`;
+  }
+
+  async function defaultGroupedNotes(
+    ctx: TegamiContext,
+    plan: PublishPlan,
+    packages: WorkspacePackage[],
+  ): Promise<string> {
+    const changelogs = new Map<string, ChangelogEntry>();
+
+    for (const pkg of packages) {
+      const packagePlan = plan.packages.get(pkg.id);
+      if (!packagePlan) continue;
+
+      for (const entry of packagePlan.changelogs) changelogs.set(entry.id, entry);
+    }
+
+    const sections = [
+      packages
+        .map((pkg) => {
+          const packagePlan = plan.packages.get(pkg.id);
+
+          return `- ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}`;
+        })
+        .join("\n"),
+    ];
+
+    if (changelogs.size > 0) {
+      const notes = await Promise.all(Array.from(changelogs.values(), formatChangelog.bind(ctx)));
+      sections.push("", notes.join("\n\n"));
+    }
+
+    return sections.join("\n");
+  }
+
+  return {
+    async hasPending(this: TegamiContext, plan: PublishPlan): Promise<boolean> {
+      const requiredTags = new Set<string>();
+      for (const pkg of plan.packages.values()) {
+        if (pkg.preflight!.shouldPublish && pkg.git?.tag) requiredTags.add(pkg.git.tag);
+      }
+
+      return somePromise(
+        Array.from(requiredTags, (tag) => releaseExistsByTag.call(this, tag)),
+        (exists) => !exists,
+      );
+    },
+    async create(this: TegamiContext, plan: PublishPlan) {
+      const groups = new Map<string, WorkspacePackage[]>();
+      for (const [id, { preflight, publishResult, git }] of plan.packages) {
+        if (!eager && publishResult!.type === "failed") return;
+
+        const tag = git?.tag;
+        if (!tag || !preflight!.shouldPublish) continue;
+
+        const pkg = this.graph.get(id)!;
+        const group = groups.get(tag);
+        if (group) group.push(pkg);
+        else groups.set(tag, [pkg]);
+      }
+
+      await Promise.all(
+        Array.from(groups, async ([tag, packages]) => {
+          for (const member of packages) {
+            const result = plan.packages.get(member.id)!.publishResult!;
+            if (result.type === "failed") return;
+          }
+
+          if (await releaseExistsByTag.call(this, tag)) return;
+
+          if (packages.length > 1) {
+            const {
+              title = tag,
+              notes = await defaultGroupedNotes(this, plan, packages),
+              ...rest
+            } = (await overrideGroup?.call(this, { tag, packages, plan })) ?? ({} as Partial<V>);
+            await create({
+              input: { title, notes, ...rest },
+              tag,
+              packages,
+            });
+            return;
+          }
+
+          const pkg = packages[0]!;
+          const packagePlan = plan.packages.get(pkg.id);
+          const {
+            title = formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
+            notes = await defaultNotes(this, pkg, packagePlan),
+            ...rest
+          } = (await override?.call(this, { tag, pkg, plan })) ?? ({} as Partial<V>);
+          await create({
+            input: { title, notes, ...rest },
+            tag,
+            packages,
+          });
+        }),
+      );
+    },
+  };
 }
