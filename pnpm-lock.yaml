@@ -78,6 +78,12 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.2
         version: 4.3.2(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+      '@tegami/dart':
+        specifier: workspace:*
+        version: link:../../packages/tegami-dart
+      '@tegami/pip':
+        specifier: workspace:*
+        version: link:../../packages/tegami-pip
       '@types/mdx':
         specifier: ^2.0.14
         version: 2.0.14

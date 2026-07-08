@@ -24,6 +24,8 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
+    "@tegami/dart": "workspace:*",
+    "@tegami/pip": "workspace:*",
     "@types/mdx": "^2.0.14",
     "@types/node": "^26.1.0",
     "@types/react": "^19.2.17",

@@ -67,10 +67,7 @@ const paper = tegami({
 });
 ```
 
-| Option           | Default | Description                                                       |
-| ---------------- | ------- | ----------------------------------------------------------------- |
-| `updateLockFile` | `true`  | Run `go work sync` or `go mod tidy` after applying a version plan |
-| `bumpDep`        | —       | Decide how to bump dependents when a module is bumped             |
+<auto-type-table type="import('tegami/plugins/go').GoPluginOptions" />
 
 After versioning, Tegami runs `go work sync` when a `go.work` file is present, or `go mod tidy` in each module otherwise.
 

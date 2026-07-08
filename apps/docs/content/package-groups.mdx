@@ -27,11 +27,7 @@ const paper = tegami({
 
 ## Options
 
-| Option       | Description                                                           |
-| ------------ | --------------------------------------------------------------------- |
-| `prerelease` | Prerelease tag shared by all members (e.g. `alpha` → `1.1.0-alpha.0`) |
-| `syncBump`   | When one member is bumped, all members receive the same bump type     |
-| `syncGitTag` | Create one git tag for the group instead of one tag per package       |
+<auto-type-table type="import('tegami').GroupOptions" />
 
 Per-package settings still apply for options like `npm.distTag` or `publish: false`.
 
