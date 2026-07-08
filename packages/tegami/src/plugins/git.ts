@@ -38,7 +38,6 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
 
   return {
     name: "git",
-    enforce: "pre",
     async initCli() {
       if (!isCI()) return;
 
@@ -59,13 +58,11 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
 
       for (const [id, packagePlan] of plan.packages) {
         const pkg = graph.get(id)!;
-        packagePlan.git ??= {};
-
-        if (pkg.group?.options.syncGitTag && pkg.version) {
-          packagePlan.git.tag = `${pkg.group.name}@${pkg.version}`;
-        } else if (pkg.version) {
-          packagePlan.git.tag = `${pkg.name}@${pkg.version}`;
-        }
+        const git = (packagePlan.git ??= {});
+        if (pkg.version)
+          git.tag ??= pkg.group?.options.syncGitTag
+            ? `${pkg.group.name}@${pkg.version}`
+            : `${pkg.name}@${pkg.version}`;
       }
     },
     async resolvePlanStatus({ plan }) {

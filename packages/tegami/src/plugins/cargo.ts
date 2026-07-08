@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
 import path from "node:path";
 import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import * as semver from "semver";
@@ -18,19 +18,65 @@ type DepKind = (typeof DEP_FIELDS)[number];
 class CargoToml<Data extends CargoManifest = CargoManifest> {
   private dependencies: ResolvedDependency[] | undefined;
   workspace?: CargoToml<RequireFields<CargoManifest, "workspace">>;
+  private readonly originalContent: string;
 
   constructor(
     public path: string,
     public content: string,
     public data: Data,
-  ) {}
+  ) {
+    this.originalContent = content;
+  }
 
   listDependencies(graph: CargoGraph): ResolvedDependency[] {
-    return (this.dependencies ??= listDependencies(graph, this));
+    if (this.dependencies) return this.dependencies;
+    const out: ResolvedDependency[] = (this.dependencies = []);
+
+    const scan = (
+      obj: Partial<Record<DepKind, Record<string, CargoDependency>>>,
+      prefix: string[] = [],
+    ) => {
+      for (const field of DEP_FIELDS) {
+        const table = obj[field];
+        if (!table) continue;
+
+        const tablePath = [...prefix, field] as const;
+        for (const [key, spec] of Object.entries(table)) {
+          const { linked, range, setRange } =
+            resolveLinkedDep(this, graph, tablePath, key, spec) ?? {};
+          out.push({
+            path: [...tablePath, key],
+            spec,
+            resolved: linked,
+            range,
+            setRange:
+              setRange &&
+              ((v) => {
+                table[key] = setRange(v);
+              }),
+          });
+        }
+      }
+    };
+
+    scan(this.data);
+    if (this.data.target) {
+      for (const [key, config] of Object.entries(this.data.target)) scan(config, ["target", key]);
+    }
+    if (this.data.workspace) {
+      scan(this.data.workspace);
+    }
+
+    return out;
   }
 
   patch(path: string, value: unknown) {
     this.content = edit(this.content, path, value);
+  }
+
+  async write() {
+    if (this.content === this.originalContent) return;
+    await fs.writeFile(this.path, this.content);
   }
 }
 
@@ -115,7 +161,6 @@ export function cargo({
 }: CargoPluginOptions = {}): TegamiPlugin {
   return {
     name: "cargo",
-    enforce: "pre",
     async init() {
       await initToml();
     },
@@ -208,9 +253,7 @@ export function cargo({
         }
       }
 
-      await Promise.all(
-        Array.from(graph.files.values(), (file) => writeFile(file.path, file.content + "\n")),
-      );
+      await Promise.all(Array.from(graph.files.values(), (file) => file.write()));
     },
     async applyCliDraft() {
       if (!this.cargo || !updateLockFile) return;
@@ -295,7 +338,7 @@ async function isPackagePublished(name: string, version: string) {
 async function buildEntry(dir: string): Promise<CargoToml | undefined> {
   try {
     const filePath = path.join(dir, "Cargo.toml");
-    const content = await readFile(filePath, "utf8");
+    const content = await fs.readFile(filePath, "utf8");
     return new CargoToml(filePath, content, assertCargoManifest(parse(content)));
   } catch {
     return;
@@ -367,46 +410,6 @@ async function expandWorkspaceMembers(
   return results.map((item) => {
     return item.endsWith(path.sep) ? item.slice(0, -1) : item;
   });
-}
-
-function listDependencies(graph: CargoGraph, file: CargoToml): ResolvedDependency[] {
-  const out: ResolvedDependency[] = [];
-  function scan(
-    obj: Partial<Record<DepKind, Record<string, CargoDependency>>>,
-    prefix: string[] = [],
-  ) {
-    for (const field of DEP_FIELDS) {
-      const table = obj[field];
-      if (!table) continue;
-
-      const tablePath = [...prefix, field] as const;
-      for (const [key, spec] of Object.entries(table)) {
-        const { linked, range, setRange } =
-          resolveLinkedDep(file, graph, tablePath, key, spec) ?? {};
-        out.push({
-          path: [...tablePath, key],
-          spec,
-          resolved: linked,
-          range,
-          setRange:
-            setRange &&
-            ((v) => {
-              table[key] = setRange(v);
-            }),
-        });
-      }
-    }
-  }
-
-  scan(file.data);
-  if (file.data.target) {
-    for (const [key, config] of Object.entries(file.data.target)) scan(config, ["target", key]);
-  }
-  if (file.data.workspace) {
-    scan(file.data.workspace);
-  }
-
-  return out;
 }
 
 function resolveLinkedDep(

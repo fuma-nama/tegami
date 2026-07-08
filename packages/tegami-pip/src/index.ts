@@ -96,7 +96,6 @@ export function pip({
 
   return {
     name: "pip",
-    enforce: "post",
     async init() {
       await initToml();
     },
@@ -291,12 +290,11 @@ function depsPolicy(
       const deps = dependentMap.get(pkg.id);
       if (!deps) return;
 
-      const group = graph.getPackageGroup(pkg.id);
       const bumped = plan.bumpVersion(pkg);
       if (!bumped) return;
 
       for (const dep of deps) {
-        if (group?.options.syncBump && graph.getPackageGroup(dep.dependent.id) === group) {
+        if (pkg.group?.options.syncBump && dep.dependent.group === pkg.group) {
           continue;
         }
 

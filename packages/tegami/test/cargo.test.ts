@@ -182,10 +182,14 @@ acme_core = { path = "../core", version = "1.0.0" } # linked crate
       .then((draft) => draft.apply());
 
     const written = await readFile(join(cwd, "crates/binding/Cargo.toml"), "utf8");
-    expect(written).toContain("# keep this comment");
-    expect(written).toContain("# linked crate");
-    expect(written).toContain('version = "1.0.1"');
-    expect(written).toContain('version = "1.1.0"');
+
+    expect(written).toBe(`[package]
+name = "acme_binding"
+version = "1.0.1" # keep this comment
+
+[dependencies]
+acme_core = { path = "../core", version = "1.1.0" } # linked crate
+`);
   });
 
   test("routes npm and cargo publishes through their registry clients", async () => {

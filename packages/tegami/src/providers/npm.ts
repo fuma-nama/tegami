@@ -91,7 +91,6 @@ export function npm({
 }: NpmPluginOptions = {}): TegamiPlugin {
   return {
     name: "npm",
-    enforce: "pre",
     async init() {
       if (defaultClient) {
         this.npm = { client: defaultClient, agent: defaultClient };
