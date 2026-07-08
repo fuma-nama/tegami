@@ -1,3 +1,9 @@
+## @tegami/dart@1.2.4
+
+### No longer add `enforce`
+
+Built-in plugins no longer add `enforce`, this ensures custom plugins always take priority in ordering.
+
 ## @tegami/dart@1.2.1
 
 ### Support custom commit messages

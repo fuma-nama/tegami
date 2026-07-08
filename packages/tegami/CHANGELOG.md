@@ -1,3 +1,13 @@
+## tegami@1.2.4
+
+### No longer add `enforce`
+
+Built-in plugins no longer add `enforce`, this ensures custom plugins always take priority in ordering.
+
+### Support reason field in publish status
+
+Introduce a new `getPublishStatus` method that returns reason for why the task is pending.
+
 ## tegami@1.2.3
 
 ### Sort release preview packages by bump severity
