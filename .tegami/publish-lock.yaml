@@ -1,9 +1,12 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n  npm:@tegami/dart:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n---\n\n## No longer add `enforce`\n\nBuilt-in plugins no longer add `enforce`, this ensures custom plugins always take priority in ordering.\n"
-    filename: 2026-07-08-mrbuiais.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix `ci` command order problem\n\nThe `ci` now correctly prioritize versioning over publishing.\n"
+    filename: 2026-07-09-mrdchud9.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Support reason field in publish status\n\nIntroduce a new `getPublishStatus` method that returns reason for why the task is pending.\n"
-    filename: 2026-07-08-mrbvc6co.md
+  - content: "---\npackages:\n  npm:@tegami/dart:\n    type: patch\n  npm:@tegami/pip:\n    type: patch\n  npm:@tegami/zig:\n    type: patch\n---\n\n## No longer align with core versions\n\nThe package versions of plugins will no longer align with core `tegami` package.\n"
+    filename: 2026-07-09-mrdbtus7.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/zig:\n    type: patch\n---\n\n### Add Zig package support\n\nTegami now includes an opt-in `@tegami/zig` plugin that discovers `build.zig.zon` packages, follows local `.path` dependencies, bumps dependent packages, and preserves manifest comments while updating package versions.\n"
+    filename: 2026-07-09-zig-plugin.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,24 +14,29 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-08-mrbuiais.md
-    id: npm:@tegami/dart
-    updated: true
-  - changelogIds:
-      - 2026-07-08-mrbuiais.md
-      - 2026-07-08-mrbvc6co.md
+      - 2026-07-09-mrdchud9.md
     id: npm:tegami
     updated: true
   - changelogIds:
-      - 2026-07-08-mrbuiais.md
+      - 2026-07-09-mrdbtus7.md
+    id: npm:@tegami/dart
+    updated: true
+  - changelogIds:
+      - 2026-07-09-mrdbtus7.md
     id: npm:@tegami/pip
+    updated: true
+  - changelogIds:
+      - 2026-07-09-mrdbtus7.md
+      - 2026-07-09-zig-plugin.md
+    id: npm:@tegami/zig
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
 npm:packages:
   - id: npm:root
   - id: npm:docs
-  - id: npm:@tegami/dart
   - id: npm:tegami
+  - id: npm:@tegami/dart
   - id: npm:@tegami/pip
+  - id: npm:@tegami/zig
   - id: npm:@repo/typescript-config
