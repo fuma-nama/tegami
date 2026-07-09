@@ -32,6 +32,8 @@ core:packages:
     updated: true
   - id: npm:@repo/typescript-config
     updated: false
+npm:mark-latest:
+  - id: npm:@tegami/zig
 npm:packages:
   - id: npm:root
   - id: npm:docs
