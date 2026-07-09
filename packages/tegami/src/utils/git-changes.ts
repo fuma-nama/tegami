@@ -1,13 +1,27 @@
 import { join, relative } from "node:path";
 import { x } from "tinyexec";
-import type { PackageGraph, WorkspacePackage } from "../graph";
+import type { WorkspacePackage } from "../graph";
 
 export async function getChangedPackages(
-  graph: PackageGraph,
+  packages: WorkspacePackage[],
   cwd: string,
-): Promise<WorkspacePackage[]> {
+): Promise<Set<WorkspacePackage>> {
   const files = await getChangedFilePaths(cwd);
-  return resolveChangedPackages(graph, files, cwd);
+  const sortedPackages = packages.toSorted((a, b) => b.path.length - a.path.length);
+  const matched = new Set<WorkspacePackage>();
+
+  for (const file of files) {
+    const fullPath = join(cwd, file);
+
+    for (const pkg of sortedPackages) {
+      if (!relative(pkg.path, fullPath).startsWith("..")) {
+        matched.add(pkg);
+        break;
+      }
+    }
+  }
+
+  return matched;
 }
 
 export async function getChangedFilePaths(cwd: string): Promise<string[]> {
@@ -29,26 +43,4 @@ export async function getChangedFilePaths(cwd: string): Promise<string[]> {
   );
 
   return Array.from(files);
-}
-
-export function resolveChangedPackages(
-  graph: PackageGraph,
-  files: string[],
-  cwd: string,
-): WorkspacePackage[] {
-  const packages = [...graph.getPackages()].sort((a, b) => b.path.length - a.path.length);
-  const matched = new Map<string, WorkspacePackage>();
-
-  for (const file of files) {
-    const fullPath = join(cwd, file);
-
-    for (const pkg of packages) {
-      if (!relative(pkg.path, fullPath).startsWith("..")) {
-        matched.set(pkg.id, pkg);
-        break;
-      }
-    }
-  }
-
-  return [...matched.values()];
 }

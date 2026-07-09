@@ -70,7 +70,11 @@ function registerCoreCommands(cli: TegamiCliRegistry, tegami: Tegami, options: T
     });
 
   cli.command("ci", { description: "version and publish packages" }).action(async () => {
-    const versioned = await versionPackages(tegami, { cli: options });
+    const versioned = await versionPackages(tegami, {
+      cli: options,
+      // should not check plan status, otherwise it will allow publish during draft phase
+      noChecks: true,
+    });
     if (versioned) return;
     await publishPackages(tegami, { cli: options });
   });

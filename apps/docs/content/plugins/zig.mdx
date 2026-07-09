@@ -1,0 +1,130 @@
+---
+title: Zig
+description: Zig package support for build.zig.zon workspaces.
+---
+
+The Zig plugin discovers packages from `build.zig.zon`, follows local `.path` dependencies, bumps versions, and updates local dependency version constraints.
+
+```npm
+npm install @tegami/zig
+```
+
+```ts
+import { tegami } from "tegami";
+import { zig } from "@tegami/zig";
+
+const paper = tegami({
+  plugins: [zig()],
+});
+```
+
+## Discovery
+
+Tegami starts from the root `build.zig.zon` and recursively follows dependencies declared with a local `.path`:
+
+```zig
+.{
+    .name = .app,
+    .version = "1.0.0",
+    .dependencies = .{
+        .core = .{
+            .path = "packages/core",
+            .version = "^1.0.0",
+        },
+    },
+}
+```
+
+Each discovered package needs a `.name` field. Packages without `.version` are included in the graph but cannot be version-bumped.
+
+Remote dependencies that use `.url` and `.hash` are ignored for workspace discovery.
+
+Use `workspace` globs for packages that are not reachable from the root dependency graph:
+
+```ts
+zig({
+  workspace: ["packages/*", "tools/*"],
+});
+```
+
+## Dependency Bumping
+
+Tegami treats dependencies with a local `.path` pointing at another discovered Zig package as workspace dependencies.
+
+| Dependency situation                         | Default dependent bump |
+| -------------------------------------------- | ---------------------- |
+| Local `.path` without `.version`             | patch                  |
+| Local `.path` with a range that rejects bump | patch                  |
+| Local `.path` with a range that accepts bump | none                   |
+| Remote `.url`/`.hash` dependency             | none                   |
+
+**Dependent version bumps**: when a local Zig package is released, dependents are patch-bumped if their dependency constraint is absent or no longer accepts the linked package's next version.
+
+**Constraint rewrites**: local dependency `.version` values are updated only when they no longer accept the linked package's new version. `^` and `~` prefixes are preserved; exact versions stay exact.
+
+Members of the same [package group](/package-groups) with `syncBump` are not auto-bumped when a sibling is released.
+
+## Configuration
+
+```ts
+zig({
+  workspace: ["packages/*"],
+  bumpDep: ({ version }) => (version?.startsWith("^") ? false : "patch"),
+  publish: "git-tag",
+});
+```
+
+<auto-type-table type="import('@tegami/zig').ZigPluginOptions" />
+
+## Publishing
+
+Zig does not have one standard package registry, so publishing is opt-in. Choose the strategy that matches your project.
+
+### Git Tags
+
+Use `publish: "git-tag"` when a git tag, GitHub release, or GitLab release is the published artifact. Pair it with the git, GitHub, or GitLab plugin:
+
+```ts
+import { tegami } from "tegami";
+import { git } from "tegami/plugins/git";
+import { zig } from "@tegami/zig";
+
+const paper = tegami({
+  plugins: [zig({ publish: "git-tag" }), git()],
+});
+```
+
+When the Zig package publish step runs, Tegami marks the package as published. The git-family plugin then creates the tag or release from the publish plan.
+
+### Custom
+
+Use `type: "custom"` when publishing needs application code:
+
+```ts
+zig({
+  publish: {
+    type: "custom",
+    async publish({ pkg }) {
+      await uploadZigPackage(pkg.path, pkg.version!);
+      return { type: "published" };
+    },
+  },
+});
+```
+
+Custom strategies default to `pending` during status checks so `tegami publish` has a chance to run them. Add `resolveStatus` when your target has an API for checking whether a package version already exists:
+
+```ts
+zig({
+  publish: {
+    type: "custom",
+    async resolveStatus({ pkg }) {
+      return (await registryHasVersion(pkg.name, pkg.version!)) ? "success" : "pending";
+    },
+    async publish({ pkg }) {
+      await uploadZigPackage(pkg.path, pkg.version!);
+      return { type: "published" };
+    },
+  },
+});
+```

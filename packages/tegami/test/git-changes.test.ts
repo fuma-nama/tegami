@@ -1,11 +1,7 @@
 import { x } from "tinyexec";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
-import {
-  getChangedFilePaths,
-  getChangedPackages,
-  resolveChangedPackages,
-} from "../src/utils/git-changes";
+import { getChangedFilePaths, getChangedPackages } from "../src/utils/git-changes";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -16,33 +12,6 @@ const cwd = "/repo";
 
 beforeEach(() => {
   exec.mockReset();
-});
-
-describe("resolveChangedPackages", () => {
-  const graph = new PackageGraph([
-    testPackage("@acme/root", "/repo"),
-    testPackage("@acme/core", "/repo/packages/core"),
-    testPackage("@acme/ui", "/repo/packages/ui"),
-  ]);
-
-  test("maps changed files to the most specific package", () => {
-    const changed = resolveChangedPackages(
-      graph,
-      ["packages/core/src/index.ts", "package.json"],
-      cwd,
-    );
-
-    expect(changed.map((pkg) => pkg.name)).toEqual(["@acme/core", "@acme/root"]);
-  });
-
-  test("returns an empty list when no files match packages", () => {
-    const scopedGraph = new PackageGraph([
-      testPackage("@acme/core", "/repo/packages/core"),
-      testPackage("@acme/ui", "/repo/packages/ui"),
-    ]);
-
-    expect(resolveChangedPackages(scopedGraph, ["README.md"], cwd)).toEqual([]);
-  });
 });
 
 describe("getChangedFilePaths", () => {
@@ -74,7 +43,7 @@ describe("getChangedPackages", () => {
       return commandResult({ exitCode: 1 });
     });
 
-    const changed = await getChangedPackages(graph, cwd);
+    const changed = Array.from(await getChangedPackages(graph.getPackages(), cwd));
 
     expect(changed.map((pkg) => pkg.name)).toEqual(["@acme/core"]);
   });

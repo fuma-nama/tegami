@@ -33,23 +33,6 @@ const paper = tegami({
       workflow: "publish.yml",
     },
   },
-  groups: {
-    tegami: {
-      syncBump: true,
-      syncGitTag: true,
-    },
-  },
-  packages: {
-    tegami: {
-      group: "tegami",
-    },
-    "@tegami/pip": {
-      group: "tegami",
-    },
-    "@tegami/dart": {
-      group: "tegami",
-    },
-  },
 });
 
 await runCli(paper);

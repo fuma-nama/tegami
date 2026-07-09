@@ -1,7 +1,7 @@
 {
-  "name": "@tegami/pip",
+  "name": "@tegami/zig",
   "version": "1.2.5",
-  "description": "Python workspace support and PyPI publishing for Tegami",
+  "description": "Zig package support for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",
   "repository": "github:fuma-nama/tegami",
@@ -22,24 +22,18 @@
     "dev": "tsdown --watch"
   },
   "dependencies": {
-    "@rainbowatcher/toml-edit-js": "^0.6.5",
-    "tinyexec": "^1.2.4",
+    "semver": "^7.8.5",
     "tinyglobby": "^0.2.17"
   },
   "devDependencies": {
-    "@renovatebot/pep440": "^5.0.0",
     "@repo/typescript-config": "workspace:*",
     "@types/node": "^26.1.1",
+    "@types/semver": "^7.7.1",
     "tegami": "workspace:*",
     "tsdown": "^0.22.4",
-    "typescript": "6.0.3",
-    "typia": "^12.1.1"
+    "typescript": "6.0.3"
   },
   "peerDependencies": {
     "tegami": "^1.2.0"
-  },
-  "inlinedDependencies": {
-    "@renovatebot/pep440": "5.0.0",
-    "typia": "12.1.1"
   }
 }

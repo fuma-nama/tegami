@@ -1,3 +1,9 @@
+## tegami@1.2.5
+
+### Fix `ci` command order problem
+
+The `ci` now correctly prioritize versioning over publishing.
+
 ## tegami@1.2.4
 
 ### No longer add `enforce`
