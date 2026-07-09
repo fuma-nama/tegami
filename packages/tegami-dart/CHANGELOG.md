@@ -1,3 +1,9 @@
+## @tegami/dart@1.2.5
+
+### No longer align with core versions
+
+The package versions of plugins will no longer align with core `tegami` package.
+
 ## @tegami/dart@1.2.4
 
 ### No longer add `enforce`
