@@ -15,7 +15,8 @@ import {
   runPublishPlan,
 } from "./plans/publish";
 
-export type { CommitChangelog } from "./changelog/generate";
+export type { CommitChangelog, GenerateFromCommitsOptions } from "./changelog/generate";
+export type { ChangelogEntry, ReplayCondition } from "./changelog/parse";
 export type {
   LogGenerator,
   TegamiOptions,
@@ -48,7 +49,7 @@ export interface GenerateChangelogOptions extends GenerateFromCommitsOptions {
 
 // this is required to fix a bundling problem of tsdown, where it exports abstract classes as type-only
 import { WorkspacePackage as b } from "./graph";
-export const WorkspacePackage = b;
+export { b as WorkspacePackage };
 
 export interface Tegami {
   /** Create pending changelog files from git commit history. */

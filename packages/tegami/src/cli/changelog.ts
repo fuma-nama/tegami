@@ -126,8 +126,9 @@ async function persistChangelogs(
 
 async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise<string[]> {
   const useShortname = new Map<string, boolean>();
+  const versionablePackages = graph.getPackages().filter((pkg) => pkg.version !== undefined);
 
-  for (const pkg of graph.getPackages()) {
+  for (const pkg of versionablePackages) {
     if (useShortname.has(pkg.name)) useShortname.set(pkg.name, false);
     else useShortname.set(pkg.name, true);
   }
@@ -136,8 +137,7 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     return useShortname.get(pkg.name) ? pkg.name : pkg.id;
   };
 
-  const changedPackages = new Set(await getChangedPackages(graph, cwd));
-  const initialValues = new Set<string>();
+  const changedPackages = await getChangedPackages(versionablePackages, cwd);
   const selectOptions: {
     label: string;
     value: string;
@@ -157,15 +157,11 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     });
   }
 
-  const packages = graph
-    .getPackages()
-    .toSorted((a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1));
-  for (const pkg of packages) {
-    const changed = changedPackages.has(pkg);
-
-    if (changed) initialValues.add(pkg.id);
+  for (const pkg of versionablePackages.sort(
+    (a, b) => (changedPackages.has(a) ? 0 : 1) - (changedPackages.has(b) ? 0 : 1),
+  )) {
     selectOptions.push({
-      label: getPackageLabel(pkg) + (changed ? "*" : ""),
+      label: getPackageLabel(pkg) + (changedPackages.has(pkg) ? "*" : ""),
       value: pkg.id,
     });
   }
@@ -174,7 +170,7 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
     message: "Select packages (leave empty to auto-generate from commits)",
     required: false,
     options: selectOptions,
-    initialValues: Array.from(initialValues),
+    initialValues: Array.from(changedPackages, (pkg) => pkg.id),
   });
 
   if (isCancel(selected)) throw new CancelledError();

@@ -40,10 +40,10 @@
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.1.1",
     "@types/semver": "^7.7.1",
     "package-manager-detector": "^1.7.0",
-    "tsdown": "^0.22.3",
+    "tsdown": "^0.22.4",
     "typescript": "6.0.3",
     "typia": "^12.1.1"
   },
