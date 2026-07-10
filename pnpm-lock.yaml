@@ -78,12 +78,30 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.2
         version: 4.3.2(vite@8.1.3(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+      '@tegami/composer':
+        specifier: workspace:*
+        version: link:../../packages/tegami-composer
       '@tegami/dart':
         specifier: workspace:*
         version: link:../../packages/tegami-dart
+      '@tegami/gem':
+        specifier: workspace:*
+        version: link:../../packages/tegami-gem
+      '@tegami/hex':
+        specifier: workspace:*
+        version: link:../../packages/tegami-hex
+      '@tegami/maven':
+        specifier: workspace:*
+        version: link:../../packages/tegami-maven
+      '@tegami/nuget':
+        specifier: workspace:*
+        version: link:../../packages/tegami-nuget
       '@tegami/pip':
         specifier: workspace:*
         version: link:../../packages/tegami-pip
+      '@tegami/swift':
+        specifier: workspace:*
+        version: link:../../packages/tegami-swift
       '@tegami/zig':
         specifier: workspace:*
         version: link:../../packages/tegami-zig
@@ -144,6 +162,40 @@ importers:
         version: 1.7.0
       tsdown:
         specifier: ^0.22.4
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
+  packages/tegami-composer:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.4
         version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))
       typescript:
         specifier: 6.0.3
@@ -189,6 +241,142 @@ importers:
         specifier: ^12.1.1
         version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
 
+  packages/tegami-gem:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.4
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
+  packages/tegami-hex:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.4
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
+  packages/tegami-maven:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.4
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
+  packages/tegami-nuget:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.4
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
   packages/tegami-pip:
     dependencies:
       '@rainbowatcher/toml-edit-js':
@@ -210,6 +398,40 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.4
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      typia:
+        specifier: ^12.1.1
+        version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
+  packages/tegami-swift:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
       tegami:
         specifier: workspace:*
         version: link:../tegami
