@@ -188,7 +188,7 @@ export function maven({
       if (!(pkg instanceof MavenPackage)) return;
 
       const command = resolvePublishCommand(publishCommand, pkg, this.cwd);
-      const result = await x(command[0], command.slice(1), {
+      const result = await x(command[0]!, command.slice(1), {
         nodeOptions: { cwd: this.cwd },
       });
 

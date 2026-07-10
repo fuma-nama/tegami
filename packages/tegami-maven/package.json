@@ -37,8 +37,5 @@
   },
   "peerDependencies": {
     "tegami": "^1.2.0"
-  },
-  "inlinedDependencies": {
-    "typia": "12.1.1"
   }
 }

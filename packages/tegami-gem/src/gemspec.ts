@@ -80,9 +80,9 @@ async function resolveVersion(
 ): Promise<{ version?: VersionRef; versionFile?: TextFile }> {
   const literal = VERSION_LITERAL_RE.exec(gemspecFile.content);
   if (literal) {
-    const start = literal.index + literal[1].length + 1; // skip prefix + opening quote
+    const start = literal.index + literal[1]!.length + 1; // skip prefix + opening quote
     return {
-      version: { file: gemspecFile, start, end: start + literal[3].length, value: literal[3] },
+      version: { file: gemspecFile, start, end: start + literal[3]!.length, value: literal[3]! },
     };
   }
 
@@ -103,9 +103,9 @@ async function resolveVersion(
     if (!match) continue;
 
     const file: TextFile = { path: filePath, content, edits: [] };
-    const start = match.index + match[1].length + 1;
+    const start = match.index + match[1]!.length + 1;
     return {
-      version: { file, start, end: start + match[3].length, value: match[3] },
+      version: { file, start, end: start + match[3]!.length, value: match[3]! },
       versionFile: file,
     };
   }
@@ -121,19 +121,19 @@ function parseDependencies(content: string): RawDependency[] {
   while ((match = DEP_RE.exec(content))) {
     const kind: DependencyKind =
       match[1] === "add_development_dependency" ? "development" : "runtime";
-    const name = match[3];
-    const rest = match[4];
+    const name = match[3]!;
+    const rest = match[4]!;
     const restOffset = match.index + match[0].length - rest.length;
 
     const requirements: RequirementLiteral[] = [];
     REQUIREMENT_LITERAL_RE.lastIndex = 0;
     let requirementMatch: RegExpExecArray | null;
     while ((requirementMatch = REQUIREMENT_LITERAL_RE.exec(rest))) {
-      const parsed = parseRequirement(requirementMatch[2]);
+      const parsed = parseRequirement(requirementMatch[2]!);
       if (!parsed) continue;
 
       const start = restOffset + requirementMatch.index + 1; // skip opening quote
-      requirements.push({ start, end: start + requirementMatch[2].length, parsed });
+      requirements.push({ start, end: start + requirementMatch[2]!.length, parsed });
     }
 
     dependencies.push({ kind, name, requirements });

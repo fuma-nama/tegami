@@ -1,0 +1,62 @@
+---
+title: Ruby
+description: Ruby gem workspace support and RubyGems publishing.
+---
+
+The Ruby plugin discovers gems from `*.gemspec` files, bumps versions in the gemspec or `version.rb`, updates workspace dependency requirements, and publishes with `gem push`.
+
+```npm
+npm install @tegami/gem
+```
+
+```ts
+import { tegami } from "tegami";
+import { gem } from "@tegami/gem";
+
+const paper = tegami({
+  plugins: [gem()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+The [`gem`](https://rubygems.org) CLI must be available in CI. Publishing reads the `GEM_HOST_API_KEY` environment variable for authentication.
+
+</Callout>
+
+## Discovery
+
+Tegami globs `**/*.gemspec` (ignoring `vendor`, `node_modules`, and `tmp`). Each directory containing a gemspec is one gem. Since gemspecs are Ruby code, Tegami parses them with targeted patterns:
+
+- **Name** — `spec.name = "my_gem"` (any receiver variable, single or double quotes).
+- **Version** — a literal `spec.version = "1.2.3"`, or a constant reference such as `MyGem::VERSION`. For the constant form, Tegami locates the `lib/**/version.rb` file and reads its `VERSION = "1.2.3"` literal.
+
+Gems whose name or version is computed dynamically (anything other than the forms above) are skipped, since Tegami cannot statically resolve or rewrite them.
+
+## Dependency Bumping
+
+Tegami treats `add_dependency` / `add_runtime_dependency` / `add_development_dependency` entries that reference another workspace gem as workspace dependencies.
+
+| Dependency kind             | Default dependent bump |
+| --------------------------- | ---------------------- |
+| `add_dependency` (runtime)  | patch                  |
+| `add_development_dependency` | none                  |
+
+**Constraint rewrites**: Ruby requirements use the pessimistic operator (`~>`) plus `>=`, `>`, `<`, `<=`, `=`, and bare versions. `~> 1.0` means `>= 1.0, < 2.0`; `~> 1.2.3` means `>= 1.2.3, < 1.3.0`. When a released version falls outside a dependent's requirement, Tegami rewrites it, preserving the operator style and precision (`~> 1.2` becomes `~> 2.0`, not `~> 2.0.1`).
+
+## Configuration
+
+```ts
+gem({
+  host: "https://rubygems.org",
+  bumpDep: ({ kind }) => (kind === "development" ? false : "patch"),
+});
+```
+
+<auto-type-table type="import('@tegami/gem').GemPluginOptions" />
+
+## Publishing
+
+Tegami builds each gem with `gem build <gemspec>` and pushes it with `gem push <name>-<version>.gem`. Set `host` to publish to a private gem server (passed as `--host`). When a version already exists, RubyGems reports `Repushing of gem versions is not allowed` and Tegami marks the package as skipped.
+
+Publish status is checked against `https://rubygems.org/api/v1/versions/{name}.json` (or the configured `host`).

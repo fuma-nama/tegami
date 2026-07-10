@@ -19,7 +19,7 @@ export function parseRequirement(input: string): Requirement | undefined {
   const match = OPERATOR_RE.exec(trimmed);
   if (!match) return;
 
-  const version = match[2].trim();
+  const version = (match[2] ?? "").trim();
   if (!version || !/\d/.test(version)) return;
 
   return {
@@ -39,10 +39,10 @@ export function pessimisticBounds(version: string): { lower: string; upper: stri
 
   let upperSegments: number[];
   if (segments.length <= 1) {
-    upperSegments = [segments[0] + 1];
+    upperSegments = [(segments[0] ?? 0) + 1];
   } else {
     upperSegments = segments.slice(0, -1);
-    upperSegments[upperSegments.length - 1] += 1;
+    upperSegments[upperSegments.length - 1] = (upperSegments[upperSegments.length - 1] ?? 0) + 1;
   }
 
   return { lower: version, upper: upperSegments.join(".") };
@@ -108,6 +108,6 @@ function truncate(version: string, segments: number): string {
 function incrementLast(version: string): string {
   const segments = version.split(".");
   const last = segments.length - 1;
-  segments[last] = String((parseInt(segments[last], 10) || 0) + 1);
+  segments[last] = String((parseInt(segments[last] ?? "0", 10) || 0) + 1);
   return segments.join(".");
 }

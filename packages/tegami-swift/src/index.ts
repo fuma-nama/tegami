@@ -353,13 +353,13 @@ export function parseManifest(content: string): SwiftManifest | undefined {
 
   const afterPackage = content.slice(packageMatch.index + packageMatch[0].length);
   const nameMatch = /name\s*:\s*"([^"]+)"/.exec(afterPackage);
-  if (!nameMatch) return;
+  if (!nameMatch?.[1]) return;
 
   const dependencyPaths: string[] = [];
   const depPattern = /\.package\s*\(\s*(?:name\s*:\s*"[^"]*"\s*,\s*)?path\s*:\s*"([^"]+)"/g;
   let dep: RegExpExecArray | null;
   while ((dep = depPattern.exec(content))) {
-    dependencyPaths.push(dep[1]);
+    if (dep[1]) dependencyPaths.push(dep[1]);
   }
 
   return { name: nameMatch[1], dependencyPaths };

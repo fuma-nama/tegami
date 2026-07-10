@@ -1,0 +1,63 @@
+---
+title: NuGet
+description: .NET project support and NuGet publishing.
+---
+
+The NuGet plugin discovers .NET projects from `*.csproj` / `*.fsproj` files, bumps versions (including shared `Directory.Build.props`), updates package references, and publishes with `dotnet nuget push`.
+
+```npm
+npm install @tegami/nuget
+```
+
+```ts
+import { tegami } from "tegami";
+import { nuget } from "@tegami/nuget";
+
+const paper = tegami({
+  plugins: [nuget()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+The [.NET SDK](https://dotnet.microsoft.com) (`dotnet`) must be available in CI. Publishing reads the `NUGET_API_KEY` environment variable when set.
+
+</Callout>
+
+## Discovery
+
+Tegami globs `**/*.csproj` and `**/*.fsproj` (ignoring `bin`, `obj`, and `node_modules`). Each project file is one package.
+
+- **PackageId** — the `<PackageId>` element, or the project file name without extension.
+- **Version** — `<Version>` (or `<VersionPrefix>`) on the project. When absent, Tegami walks up the directory tree to the nearest `Directory.Build.props` and uses its version, mirroring MSBuild's implicit import. Tegami tracks where the version lives so bumps edit the right file.
+- **IsPackable** — `<IsPackable>false</IsPackable>` (with the same inheritance walk) marks a project as not publishable.
+
+### Shared version files
+
+When several projects inherit their version from one `Directory.Build.props`, they are effectively version-synced: bumping any of them edits the shared file once. If two synced projects receive different bumps in a single release, the highest resulting version wins.
+
+## Dependency Bumping
+
+| Reference kind      | Default dependent bump |
+| ------------------- | ---------------------- |
+| `<ProjectReference>` | patch                 |
+| `<PackageReference>` | patch                 |
+
+`<ProjectReference>` links are resolved by relative path; `dotnet pack` fills in their versions at pack time, so nothing is rewritten in XML. `<PackageReference Version="...">` entries that point at a workspace `PackageId` are rewritten when the referenced version is lower than the released one. Plain versions (`1.2.3`, meaning "≥ 1.2.3") and exact pins (`[1.2.3]`) are supported; other range syntaxes are left untouched. All XML edits are format-preserving — only the version text span is spliced.
+
+## Configuration
+
+```ts
+nuget({
+  source: "https://api.nuget.org/v3/index.json",
+  bumpDep: ({ kind }) => (kind === "project" ? "patch" : "minor"),
+});
+```
+
+<auto-type-table type="import('@tegami/nuget').NugetPluginOptions" />
+
+## Publishing
+
+Tegami packs each project with `dotnet pack -c Release` and pushes the resulting `.nupkg` with `dotnet nuget push --source <source>`. When a version already exists, the feed returns a conflict and Tegami marks the package as skipped.
+
+Publish status is checked against the flat-container index (`https://api.nuget.org/v3-flatcontainer/{id}/index.json`). For private feeds, set `statusUrl` to the feed's flat-container base URL to enable status checks; otherwise they are skipped.

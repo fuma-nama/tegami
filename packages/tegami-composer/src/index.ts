@@ -475,7 +475,7 @@ async function readComposerFile(dir: string): Promise<ComposerFile | undefined> 
 
 function detectIndent(content: string): string {
   const match = /^([ \t]+)\S/m.exec(content);
-  return match ? match[1] : "    ";
+  return match?.[1] ?? "    ";
 }
 
 async function readLatestVersion(

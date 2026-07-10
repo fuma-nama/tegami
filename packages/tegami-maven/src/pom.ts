@@ -133,7 +133,7 @@ function parseTag(raw: string, start: number, end: number): RawTag | undefined {
   }
 
   const match = /^([^\s/>]+)/.exec(inner);
-  if (!match) return;
+  if (!match?.[1]) return;
 
   return { type, name: match[1], start, end };
 }
@@ -179,8 +179,8 @@ function buildTree(tags: RawTag[]): PomElement | undefined {
 
     // closing tag: unwind to the nearest matching open element
     for (let s = stack.length - 1; s >= 0; s--) {
-      if (stack[s].name === tag.name) {
-        const el = stack[s];
+      const el = stack[s];
+      if (el && el.name === tag.name) {
         el.contentEnd = tag.start;
         el.end = tag.end;
         stack.length = s;

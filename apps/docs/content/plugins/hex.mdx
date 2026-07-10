@@ -1,0 +1,63 @@
+---
+title: Elixir
+description: Elixir Mix project support and Hex publishing.
+---
+
+The Elixir plugin discovers Mix projects from `mix.exs` files (including umbrella apps), bumps versions, updates dependency requirements, and publishes with `mix hex.publish`.
+
+```npm
+npm install @tegami/hex
+```
+
+```ts
+import { tegami } from "tegami";
+import { hex } from "@tegami/hex";
+
+const paper = tegami({
+  plugins: [hex()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+[Elixir](https://elixir-lang.org) (`mix` with Hex installed) must be available in CI. Publishing reads the `HEX_API_KEY` environment variable.
+
+</Callout>
+
+## Discovery
+
+Tegami reads the root `mix.exs`:
+
+- **Umbrella projects** — when the root declares `apps_path: "apps"`, each `apps/*` child with a `mix.exs` is discovered.
+- **Other monorepos** — pass directory globs via the `packages` option.
+- The root is included when it is itself an app (`app: :name` with a resolvable version) rather than just an umbrella shell.
+
+The app name comes from `app: :name`. The version is read from an inline `version: "1.2.3"` or a `version: @version` module attribute (`@version "1.2.3"`). Packages whose version is computed any other way (e.g. `File.read!`) are discovered but cannot be versioned.
+
+## Dependency Bumping
+
+Tegami links `deps` entries — `{:other_app, "~> 1.0"}`, `{:other_app, in_umbrella: true}`, `{:other_app, path: "../other"}` — to workspace packages by app name or resolved path.
+
+| Dependency kind         | Default dependent bump |
+| ----------------------- | ---------------------- |
+| runtime dep             | patch                  |
+| `only:` (dev/test) dep  | none                   |
+
+**Requirement rewrites**: Elixir requirements use the pessimistic operator (`~> 2.0` → `>= 2.0.0 and < 3.0.0`; `~> 2.0.1` → `>= 2.0.1 and < 2.1.0`) plus `>=`, `>`, `<`, `<=`, `==`, and `and`/`or` combinations. When a released version falls outside a dependent's requirement, Tegami rewrites the requirement string, preserving the `~>` operator and its precision.
+
+## Configuration
+
+```ts
+hex({
+  apiUrl: "https://hex.pm/api",
+  bumpDep: ({ dev }) => (dev ? false : "patch"),
+});
+```
+
+<auto-type-table type="import('@tegami/hex').HexPluginOptions" />
+
+## Publishing
+
+Tegami publishes each package with `mix hex.publish --yes`. A package is considered publishable when its `mix.exs` declares a `package:` key or `package/0` function; override this with the `publish` option. When the exact version already exists, Hex reports it and Tegami marks the package as skipped.
+
+Publish status is checked against `https://hex.pm/api/packages/{name}` (configurable with `apiUrl` for self-hosted Hex).

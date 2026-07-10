@@ -67,7 +67,7 @@ function convertAtom(atom: string): string | undefined {
   if (!m) return undefined;
 
   const op = m[1] ?? "==";
-  const operand = m[2].trim();
+  const operand = (m[2] ?? "").trim();
 
   if (op === "~>") {
     const bounds = pessimisticBounds(operand);
@@ -143,7 +143,7 @@ function rewriteAtom(atom: string, version: string): string {
   if (!m || !m[1]) return version; // bare version: exact requirement
 
   const op = m[1];
-  const operand = m[2].trim();
+  const operand = (m[2] ?? "").trim();
 
   switch (op) {
     case "~>": {

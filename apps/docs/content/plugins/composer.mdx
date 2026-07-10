@@ -1,0 +1,78 @@
+---
+title: Composer
+description: PHP Composer workspace support and Packagist tagging.
+---
+
+The Composer plugin discovers PHP packages from `composer.json`, bumps versions, updates workspace constraints, and publishes through git tags that Packagist reads.
+
+```npm
+npm install @tegami/composer
+```
+
+```ts
+import { tegami } from "tegami";
+import { git } from "tegami/plugins/git";
+import { composer } from "@tegami/composer";
+
+const paper = tegami({
+  plugins: [git(), composer()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+Composer packages publish through git tags, so the Composer plugin requires the [git](/plugins/git), [GitHub](/plugins/github), or [GitLab](/plugins/gitlab) plugin to create tags.
+
+</Callout>
+
+## Discovery
+
+Tegami reads the root `composer.json` and collects members from:
+
+- `repositories` entries of `"type": "path"` — their `url` globs are expanded relative to the root.
+- the `packages` option — additional directory globs for layouts that do not use path repositories.
+
+The root itself is included when it declares a `name`. A package is any directory whose `composer.json` has a `name` in `vendor/package` form.
+
+## How Composer versioning works
+
+Composer packages usually have no `version` field — Packagist derives versions from git tags. Tegami mirrors this model:
+
+- **Current version** is read from existing git tags (`v1.0.0` for the root, `packages/api/v1.0.0` for a subdirectory package). An explicit `version` in `composer.json` is used as a fallback and kept in sync when present.
+- **Next version** is stored in the publish lock during `tegami version`.
+- **Publishing** creates git tags, delegated to the git plugin.
+
+## Dependency Bumping
+
+| Dependency field | Default dependent bump |
+| ---------------- | ---------------------- |
+| `require`        | patch                  |
+| `require-dev`    | none                   |
+
+Composer constraints (`^1.2`, `~1.2`, `1.2.*`, `>=1.0 <2.0`) are evaluated as semver ranges. When a released version no longer satisfies a dependent's constraint, Tegami rewrites it, preserving the operator style (`^`, `~`, or wildcard). `composer.json` formatting — indentation, trailing newline, and key order — is preserved.
+
+## Configuration
+
+```ts
+composer({
+  tagPrefix: "v",
+  updateLockFile: false,
+  bumpDep: ({ field }) => (field === "require" ? "patch" : false),
+});
+```
+
+<auto-type-table type="import('@tegami/composer').ComposerPluginOptions" />
+
+Set `updateLockFile: true` to run `composer update --lock` after versioning (requires PHP and Composer).
+
+## Publishing
+
+Publishing creates a git tag per package (`{tagPrefix}{version}` at the repo root, `{relativeDir}/{tagPrefix}{version}` for subdirectory packages).
+
+<Callout type='info' title="Monorepos & Packagist">
+
+Public Packagist indexes **one package per repository**, so a monorepo package will not appear on packagist.org from a shared repo. Use repository splitting (e.g. `git subtree split` per tag) or a private registry such as [Private Packagist](https://packagist.com) or [Satis](https://github.com/composer/satis). Tegami still manages versions, constraints, and tags in all cases.
+
+</Callout>
+
+Registry status verification is opt-in (`verifyRegistry: true`) because a monorepo package may never appear under the public registry; by default, publish status relies on the git plugin's tag-existence check.
