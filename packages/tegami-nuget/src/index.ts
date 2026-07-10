@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as semver from "semver";
@@ -7,24 +7,29 @@ import { x } from "tinyexec";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure } from "tegami/utils";
+import { parseDocument, type XmlDocument, type XmlElement } from "@tegami/xml-util";
 import { assertFlatContainerIndex } from "./schema";
-import {
-  addPatch,
-  findDescendants,
-  findProperty,
-  getAttr,
-  getElementText,
-  parseXml,
-  writeXmlFile,
-  type Range,
-  type XmlFile,
-} from "./xml";
 
 const DEFAULT_PACKAGES = ["**/*.csproj", "**/*.fsproj"];
 const IGNORE = ["**/bin/**", "**/obj/**", "**/node_modules/**"];
 const DEFAULT_SOURCE = "https://api.nuget.org/v3/index.json";
 const NUGET_FLAT_CONTAINER = "https://api.nuget.org/v3-flatcontainer";
 const PROPS_FILE = "Directory.Build.props";
+
+/** A parsed MSBuild project or props file. */
+interface XmlFile {
+  path: string;
+  doc: XmlDocument;
+}
+
+/** First `<PropertyGroup>` descendant child with the given local name (MSBuild property lookup). */
+function findProperty(root: XmlElement, name: string): XmlElement | undefined {
+  for (const group of root.findAll("propertygroup")) {
+    const el = group.get(name);
+    if (el) return el;
+  }
+  return undefined;
+}
 
 /** Where a package's version lives (own project file or an inherited `Directory.Build.props`). */
 class VersionSource {
@@ -33,7 +38,7 @@ class VersionSource {
   constructor(
     readonly file: XmlFile,
     readonly kind: "Version" | "VersionPrefix",
-    readonly range: Range,
+    readonly element: XmlElement,
     value: string,
   ) {
     this.value = value;
@@ -41,13 +46,18 @@ class VersionSource {
 
   /** Stable identity for a version location, so packages sharing a props file are treated as one. */
   get key(): string {
-    return `${this.file.path}#${this.range.start}`;
+    return `${this.file.path}#${this.element.start}`;
   }
 
   set(version: string): void {
     this.value = version;
-    addPatch(this.file, this.range, version);
+    this.file.doc.setText(this.element, version);
   }
+}
+
+async function writeXmlFile(file: XmlFile): Promise<void> {
+  if (!file.doc.dirty) return;
+  await writeFile(file.path, file.doc.toString());
 }
 
 export class NugetPackage extends WorkspacePackage {
@@ -294,13 +304,13 @@ function depsPolicy(
 }
 
 function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependencyRef[] {
-  const root = pkg.projectFile.root;
+  const root = pkg.projectFile.doc.root;
   if (!root) return [];
 
   const out: NugetDependencyRef[] = [];
 
-  for (const el of findDescendants(root, "projectreference")) {
-    const include = getAttr(el, "include");
+  for (const el of root.findAll("projectreference")) {
+    const include = el.attr("include");
     if (!include) continue;
 
     const target = path.resolve(pkg.path, include.value.replace(/\\/g, "/"));
@@ -315,8 +325,8 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
     out.push({ dependent: pkg, kind: "project", name: include.value, linked });
   }
 
-  for (const el of findDescendants(root, "packagereference")) {
-    const include = getAttr(el, "include");
+  for (const el of root.findAll("packagereference")) {
+    const include = el.attr("include");
     if (!include) continue;
 
     const idLower = include.value.toLowerCase();
@@ -328,7 +338,7 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
       );
     if (!linked || linked === pkg) continue;
 
-    const versionAttr = getAttr(el, "version");
+    const versionAttr = el.attr("version");
     const ref: NugetDependencyRef = {
       dependent: pkg,
       kind: "package",
@@ -337,7 +347,7 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
     };
     if (versionAttr) {
       ref.version = versionAttr.value;
-      ref.setVersion = (version) => addPatch(pkg.projectFile, versionAttr.valueRange, version);
+      ref.setVersion = (version) => pkg.projectFile.doc.setAttr(el, "version", version);
     }
     out.push(ref);
   }
@@ -390,7 +400,7 @@ async function discoverNugetPackages(
 
   for (const projectPath of projectPaths.sort()) {
     const file = await readXmlFile(projectPath);
-    if (!file?.root) continue;
+    if (!file?.doc.root) continue;
     projectFiles.push(file);
 
     const dir = path.dirname(projectPath);
@@ -454,7 +464,7 @@ function resolveVersionSource(
     const found = findVersion(file);
     if (!found) continue;
 
-    const source = new VersionSource(file, found.kind, found.range, found.value);
+    const source = new VersionSource(file, found.kind, found.element, found.value);
     const existing = registry.get(source.key);
     if (existing) return existing;
     registry.set(source.key, source);
@@ -465,30 +475,31 @@ function resolveVersionSource(
 
 function findVersion(
   file: XmlFile,
-): { kind: "Version" | "VersionPrefix"; range: Range; value: string } | undefined {
-  if (!file.root) return;
+): { kind: "Version" | "VersionPrefix"; element: XmlElement; value: string } | undefined {
+  const root = file.doc.root;
+  if (!root) return;
   for (const kind of ["Version", "VersionPrefix"] as const) {
-    const el = findProperty(file.root, kind.toLowerCase());
-    const text = el && getElementText(el);
-    if (text) return { kind, range: text.range, value: text.value };
+    const el = findProperty(root, kind.toLowerCase());
+    const text = el?.text;
+    if (el && text) return { kind, element: el, value: text };
   }
   return undefined;
 }
 
 function resolvePackable(projectFile: XmlFile, chain: XmlFile[]): boolean {
   for (const file of [projectFile, ...chain]) {
-    if (!file.root) continue;
-    const el = findProperty(file.root, "ispackable");
-    const text = el && getElementText(el);
-    if (text) return text.value.toLowerCase() !== "false";
+    const root = file.doc.root;
+    if (!root) continue;
+    const text = findProperty(root, "ispackable")?.text;
+    if (text) return text.toLowerCase() !== "false";
   }
   return true;
 }
 
 function findPropertyText(file: XmlFile, nameLower: string): string | undefined {
-  if (!file.root) return;
-  const el = findProperty(file.root, nameLower);
-  return el && getElementText(el)?.value;
+  const root = file.doc.root;
+  if (!root) return;
+  return findProperty(root, nameLower)?.text || undefined;
 }
 
 async function readXmlFile(filePath: string): Promise<XmlFile | undefined> {
@@ -500,14 +511,7 @@ async function readXmlFile(filePath: string): Promise<XmlFile | undefined> {
     throw error;
   }
 
-  let root: XmlFile["root"];
-  try {
-    root = parseXml(content);
-  } catch {
-    root = undefined;
-  }
-
-  return { path: filePath, content, root, patches: [] };
+  return { path: filePath, doc: parseDocument(content, { caseInsensitive: true }) };
 }
 
 function isMissingFileError(error: unknown): boolean {

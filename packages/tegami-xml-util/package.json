@@ -1,7 +1,7 @@
 {
-  "name": "@tegami/nuget",
+  "name": "@tegami/xml-util",
   "version": "0.0.0",
-  "description": ".NET project support and NuGet publishing for Tegami",
+  "description": "Format-preserving XML document parsing and editing, with a yaml-like API",
   "license": "MIT",
   "author": "Fuma Nama",
   "repository": "github:fuma-nama/tegami",
@@ -22,24 +22,12 @@
     "dev": "tsdown --watch"
   },
   "dependencies": {
-    "@tegami/xml-util": "workspace:*",
-    "semver": "^7.8.5",
-    "tinyexec": "^1.2.4",
-    "tinyglobby": "^0.2.17"
+    "magic-string": "^0.30.21"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@types/node": "^26.1.1",
-    "@types/semver": "^7.7.1",
-    "tegami": "workspace:*",
     "tsdown": "^0.22.4",
-    "typescript": "6.0.3",
-    "typia": "^12.1.1"
-  },
-  "peerDependencies": {
-    "tegami": "^1.2.0"
-  },
-  "inlinedDependencies": {
-    "typia": "12.1.1"
+    "typescript": "6.0.3"
   }
 }
