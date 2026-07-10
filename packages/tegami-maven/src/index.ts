@@ -3,14 +3,7 @@ import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type {
-  BumpType,
-  DraftPolicy,
-  PackageGraph,
-  PublishPlan,
-  TegamiContext,
-  TegamiPlugin,
-} from "tegami";
+import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure } from "tegami/utils";
 import {

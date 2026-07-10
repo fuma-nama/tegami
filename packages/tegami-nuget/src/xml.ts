@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import MagicString from "magic-string";
 
 /**
  * Minimal, format-preserving XML reader for MSBuild project files.
@@ -274,12 +275,12 @@ export function addPatch(file: XmlFile, range: Range, value: string): void {
 }
 
 export function applyPatches(content: string, patches: Patch[]): string {
-  const ordered = [...patches].sort((a, b) => b.start - a.start);
-  let out = content;
-  for (const patch of ordered) {
-    out = `${out.slice(0, patch.start)}${patch.value}${out.slice(patch.end)}`;
+  const s = new MagicString(content);
+  for (const patch of patches) {
+    if (patch.start === patch.end) s.appendLeft(patch.start, patch.value);
+    else s.update(patch.start, patch.end, patch.value);
   }
-  return out;
+  return s.toString();
 }
 
 export async function writeXmlFile(file: XmlFile): Promise<void> {

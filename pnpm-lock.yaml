@@ -162,7 +162,7 @@ importers:
         version: 1.7.0
       tsdown:
         specifier: ^0.22.4
-        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -196,7 +196,7 @@ importers:
         version: link:../tegami
       tsdown:
         specifier: ^0.22.4
-        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))
+        version: 0.22.4(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2))
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -243,6 +243,9 @@ importers:
 
   packages/tegami-gem:
     dependencies:
+      magic-string:
+        specifier: ^0.30.21
+        version: 0.30.21
       semver:
         specifier: ^7.8.5
         version: 7.8.5
@@ -277,6 +280,9 @@ importers:
 
   packages/tegami-hex:
     dependencies:
+      magic-string:
+        specifier: ^0.30.21
+        version: 0.30.21
       semver:
         specifier: ^7.8.5
         version: 7.8.5
@@ -311,6 +317,9 @@ importers:
 
   packages/tegami-maven:
     dependencies:
+      magic-string:
+        specifier: ^0.30.21
+        version: 0.30.21
       semver:
         specifier: ^7.8.5
         version: 7.8.5
@@ -345,6 +354,9 @@ importers:
 
   packages/tegami-nuget:
     dependencies:
+      magic-string:
+        specifier: ^0.30.21
+        version: 0.30.21
       semver:
         specifier: ^7.8.5
         version: 7.8.5

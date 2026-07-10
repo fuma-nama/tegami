@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import MagicString from "magic-string";
 import { glob } from "tinyglobby";
 import { parseRequirement, type Requirement } from "./requirement";
 
@@ -144,10 +145,7 @@ function parseDependencies(content: string): RawDependency[] {
 
 /** Apply queued edits and return the rewritten file content. Edits must not overlap. */
 export function applyEdits(file: TextFile): string {
-  const ordered = [...file.edits].sort((a, b) => b.start - a.start);
-  let content = file.content;
-  for (const edit of ordered) {
-    content = content.slice(0, edit.start) + edit.value + content.slice(edit.end);
-  }
-  return content;
+  const s = new MagicString(file.content);
+  for (const edit of file.edits) s.update(edit.start, edit.end, edit.value);
+  return s.toString();
 }

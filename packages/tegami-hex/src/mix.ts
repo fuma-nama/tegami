@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import MagicString from "magic-string";
 
 /** A byte-span replacement in the original file content. */
 export interface Edit {
@@ -188,12 +189,12 @@ export async function readMix(dir: string): Promise<MixFile | undefined> {
 
 /** Apply a set of non-overlapping edits to `content`, preserving all other bytes. */
 export function applyEdits(content: string, edits: Edit[]): string {
-  const sorted = [...edits].sort((a, b) => b.start - a.start);
-  let out = content;
-  for (const edit of sorted) {
-    out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end);
+  const s = new MagicString(content);
+  for (const edit of edits) {
+    if (edit.start === edit.end) s.appendLeft(edit.start, edit.replacement);
+    else s.update(edit.start, edit.end, edit.replacement);
   }
-  return out;
+  return s.toString();
 }
 
 export async function writeMix(file: MixFile, edits: Edit[]): Promise<void> {

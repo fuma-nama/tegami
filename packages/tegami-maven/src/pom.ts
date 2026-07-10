@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import MagicString from "magic-string";
 
 /**
  * A minimal, path-aware, format-preserving XML editor for `pom.xml`.
@@ -241,15 +242,15 @@ export function setElementText(doc: PomDocument, el: PomElement, value: string):
 export function applyPatches(doc: PomDocument): string {
   if (doc.patches.length === 0) return doc.content;
 
-  const patches = [...doc.patches].sort((a, b) => b.start - a.start);
-  let content = doc.content;
-  for (const patch of patches) {
-    content = `${content.slice(0, patch.start)}${patch.value}${content.slice(patch.end)}`;
+  const s = new MagicString(doc.content);
+  for (const patch of doc.patches) {
+    if (patch.start === patch.end) s.appendLeft(patch.start, patch.value);
+    else s.update(patch.start, patch.end, patch.value);
   }
 
-  doc.content = content;
+  doc.content = s.toString();
   doc.patches.length = 0;
-  return content;
+  return doc.content;
 }
 
 /** Apply queued patches (if any) and write the document to `path`. */
