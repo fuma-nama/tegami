@@ -4,13 +4,7 @@ import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type {
-  BumpType,
-  DraftPolicy,
-  PackageGraph,
-  TegamiContext,
-  TegamiPlugin,
-} from "tegami";
+import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure } from "tegami/utils";
 import { assertFlatContainerIndex } from "./schema";
@@ -228,10 +222,7 @@ export function nuget({
         if (!bumped) continue;
 
         const current = updates.get(pkg.versionSource);
-        updates.set(
-          pkg.versionSource,
-          current && semver.gte(current, bumped) ? current : bumped,
-        );
+        updates.set(pkg.versionSource, current && semver.gte(current, bumped) ? current : bumped);
       }
       for (const [downSource, version] of updates) downSource.set(version);
 
@@ -317,8 +308,7 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
       .getPackages()
       .find(
         (candidate): candidate is NugetPackage =>
-          candidate instanceof NugetPackage &&
-          path.resolve(candidate.projectFile.path) === target,
+          candidate instanceof NugetPackage && path.resolve(candidate.projectFile.path) === target,
       );
     if (!linked || linked === pkg) continue;
 
@@ -339,7 +329,12 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
     if (!linked || linked === pkg) continue;
 
     const versionAttr = getAttr(el, "version");
-    const ref: NugetDependencyRef = { dependent: pkg, kind: "package", name: include.value, linked };
+    const ref: NugetDependencyRef = {
+      dependent: pkg,
+      kind: "package",
+      name: include.value,
+      linked,
+    };
     if (versionAttr) {
       ref.version = versionAttr.value;
       ref.setVersion = (version) => addPatch(pkg.projectFile, versionAttr.valueRange, version);
@@ -404,8 +399,7 @@ async function discoverNugetPackages(
     const versionSource = resolveVersionSource(file, chain, sourceRegistry);
     const packable = resolvePackable(file, chain);
     const packageId =
-      findPropertyText(file, "packageid") ??
-      path.basename(projectPath, path.extname(projectPath));
+      findPropertyText(file, "packageid") ?? path.basename(projectPath, path.extname(projectPath));
 
     packages.push(new NugetPackage(dir, file, packageId, versionSource, packable));
   }
@@ -547,7 +541,10 @@ export async function isPackagePublished(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw await fetchFailure(`Unable to validate ${packageId}@${version} on ${statusBase}`, response);
+    throw await fetchFailure(
+      `Unable to validate ${packageId}@${version} on ${statusBase}`,
+      response,
+    );
   }
 
   const body = assertFlatContainerIndex(await response.json());

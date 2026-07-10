@@ -38,10 +38,10 @@ When several projects inherit their version from one `Directory.Build.props`, th
 
 ## Dependency Bumping
 
-| Reference kind      | Default dependent bump |
-| ------------------- | ---------------------- |
-| `<ProjectReference>` | patch                 |
-| `<PackageReference>` | patch                 |
+| Reference kind       | Default dependent bump |
+| -------------------- | ---------------------- |
+| `<ProjectReference>` | patch                  |
+| `<PackageReference>` | patch                  |
 
 `<ProjectReference>` links are resolved by relative path; `dotnet pack` fills in their versions at pack time, so nothing is rewritten in XML. `<PackageReference Version="...">` entries that point at a workspace `PackageId` are rewritten when the referenced version is lower than the released one. Plain versions (`1.2.3`, meaning "≥ 1.2.3") and exact pins (`[1.2.3]`) are supported; other range syntaxes are left untouched. All XML edits are format-preserving — only the version text span is spliced.
 

@@ -174,10 +174,7 @@ export function hex({
   };
 }
 
-function resolvePublishable(
-  pkg: HexPackage,
-  override: HexPluginOptions["publish"],
-): boolean {
+function resolvePublishable(pkg: HexPackage, override: HexPluginOptions["publish"]): boolean {
   if (override) return override(pkg);
   const content = pkg.file.content;
   return /\bpackage:\s*/.test(content) || /\bdef(?:p)?\s+package\b/.test(content);

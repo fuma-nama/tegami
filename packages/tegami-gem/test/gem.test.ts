@@ -139,8 +139,8 @@ describe("gem plugin resolvePlanStatus", () => {
     fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
     await expect(isGemVersionPublished("core", "1.0.0")).resolves.toBe(false);
 
-    fetchMock.mockImplementation(async () =>
-      new Response(JSON.stringify([{ number: "1.0.0" }]), { status: 200 }),
+    fetchMock.mockImplementation(
+      async () => new Response(JSON.stringify([{ number: "1.0.0" }]), { status: 200 }),
     );
     await expect(isGemVersionPublished("core", "1.0.0")).resolves.toBe(true);
     await expect(isGemVersionPublished("core", "1.0.1")).resolves.toBe(false);
@@ -197,8 +197,12 @@ describe("ruby requirement semantics", () => {
     expect(formatRequirement(rewriteRequirement(parseRequirement("= 1.2.3")!, "2.0.0"))).toBe(
       "= 2.0.0",
     );
-    expect(formatRequirement(rewriteRequirement(parseRequirement("1.2.3")!, "2.0.0"))).toBe("2.0.0");
-    expect(formatRequirement(rewriteRequirement(parseRequirement("< 2.0")!, "2.0.0"))).toBe("< 2.1");
+    expect(formatRequirement(rewriteRequirement(parseRequirement("1.2.3")!, "2.0.0"))).toBe(
+      "2.0.0",
+    );
+    expect(formatRequirement(rewriteRequirement(parseRequirement("< 2.0")!, "2.0.0"))).toBe(
+      "< 2.1",
+    );
   });
 });
 

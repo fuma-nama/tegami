@@ -37,10 +37,10 @@ Gems whose name or version is computed dynamically (anything other than the form
 
 Tegami treats `add_dependency` / `add_runtime_dependency` / `add_development_dependency` entries that reference another workspace gem as workspace dependencies.
 
-| Dependency kind             | Default dependent bump |
-| --------------------------- | ---------------------- |
-| `add_dependency` (runtime)  | patch                  |
-| `add_development_dependency` | none                  |
+| Dependency kind              | Default dependent bump |
+| ---------------------------- | ---------------------- |
+| `add_dependency` (runtime)   | patch                  |
+| `add_development_dependency` | none                   |
 
 **Constraint rewrites**: Ruby requirements use the pessimistic operator (`~>`) plus `>=`, `>`, `<`, `<=`, `=`, and bare versions. `~> 1.0` means `>= 1.0, < 2.0`; `~> 1.2.3` means `>= 1.2.3, < 1.3.0`. When a released version falls outside a dependent's requirement, Tegami rewrites it, preserving the operator style and precision (`~> 1.2` becomes `~> 2.0`, not `~> 2.0.1`).
 

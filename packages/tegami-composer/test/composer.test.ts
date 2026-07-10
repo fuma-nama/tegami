@@ -102,9 +102,9 @@ describe("composer plugin", () => {
     const cwd = await createWorkspace();
     tempDirs.push(cwd);
 
-    await expect(
-      tegami({ cwd, plugins: [composer()] })._internal.context(),
-    ).rejects.toThrow(/requires the git plugin/);
+    await expect(tegami({ cwd, plugins: [composer()] })._internal.context()).rejects.toThrow(
+      /requires the git plugin/,
+    );
   });
 
   test("isPackagePublished checks the registry", async () => {

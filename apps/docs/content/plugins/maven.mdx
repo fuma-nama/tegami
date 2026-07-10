@@ -44,10 +44,10 @@ When modules share a version location — a parent's `<version>` or a single `${
 
 ## Dependency Bumping
 
-| Dependency scope       | Default dependent bump |
-| ---------------------- | ---------------------- |
-| `compile` / `runtime`  | patch                  |
-| `test` / `provided`    | none                   |
+| Dependency scope      | Default dependent bump |
+| --------------------- | ---------------------- |
+| `compile` / `runtime` | patch                  |
+| `test` / `provided`   | none                   |
 
 Inter-module `<dependency>` entries with a literal `<version>` are rewritten to the released version when it changes. `${project.version}` and other property references are left untouched.
 

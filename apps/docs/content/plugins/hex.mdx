@@ -38,10 +38,10 @@ The app name comes from `app: :name`. The version is read from an inline `versio
 
 Tegami links `deps` entries — `{:other_app, "~> 1.0"}`, `{:other_app, in_umbrella: true}`, `{:other_app, path: "../other"}` — to workspace packages by app name or resolved path.
 
-| Dependency kind         | Default dependent bump |
-| ----------------------- | ---------------------- |
-| runtime dep             | patch                  |
-| `only:` (dev/test) dep  | none                   |
+| Dependency kind        | Default dependent bump |
+| ---------------------- | ---------------------- |
+| runtime dep            | patch                  |
+| `only:` (dev/test) dep | none                   |
 
 **Requirement rewrites**: Elixir requirements use the pessimistic operator (`~> 2.0` → `>= 2.0.0 and < 3.0.0`; `~> 2.0.1` → `>= 2.0.1 and < 2.1.0`) plus `>=`, `>`, `<`, `<=`, `==`, and `and`/`or` combinations. When a released version falls outside a dependent's requirement, Tegami rewrites the requirement string, preserving the `~>` operator and its precision.
 

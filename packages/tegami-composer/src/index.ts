@@ -3,13 +3,7 @@ import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type {
-  BumpType,
-  DraftPolicy,
-  PackageGraph,
-  TegamiContext,
-  TegamiPlugin,
-} from "tegami";
+import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure, joinPath } from "tegami/utils";
 import {
@@ -193,7 +187,11 @@ export function composer({
         for (const ref of dependencyRefs(this.graph, pkg)) {
           if (satisfiesConstraint(ref.linked.version, ref.constraint)) continue;
 
-          pkg.setConstraint(ref.field, ref.name, updateConstraint(ref.constraint, ref.linked.version));
+          pkg.setConstraint(
+            ref.field,
+            ref.name,
+            updateConstraint(ref.constraint, ref.linked.version),
+          );
         }
 
         writes.push(pkg.write());
@@ -439,9 +437,7 @@ async function discoverComposerPackages(
   );
 }
 
-function pathRepositoryGlobs(
-  repositories: ComposerManifest["repositories"],
-): string[] {
+function pathRepositoryGlobs(repositories: ComposerManifest["repositories"]): string[] {
   if (!repositories) return [];
 
   const entries: ComposerRepository[] = Array.isArray(repositories)

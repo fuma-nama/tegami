@@ -96,7 +96,11 @@ export interface GemPluginOptions {
   bumpDep?: (opts: GemDependencyRef) => BumpType | false;
 }
 
-export function gem({ packages, host, bumpDep: getBumpDepType }: GemPluginOptions = {}): TegamiPlugin {
+export function gem({
+  packages,
+  host,
+  bumpDep: getBumpDepType,
+}: GemPluginOptions = {}): TegamiPlugin {
   let active = false;
 
   return {
@@ -182,7 +186,13 @@ export function gem({ packages, host, bumpDep: getBumpDepType }: GemPluginOption
 
           const requirements = ref.dependency.requirements;
           if (requirements.length === 0) continue;
-          if (satisfiesRequirements(version, requirements.map((item) => item.parsed))) continue;
+          if (
+            satisfiesRequirements(
+              version,
+              requirements.map((item) => item.parsed),
+            )
+          )
+            continue;
 
           for (const literal of requirements) {
             if (satisfiesRequirement(version, literal.parsed)) continue;

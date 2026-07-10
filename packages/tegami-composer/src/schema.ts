@@ -29,5 +29,6 @@ export interface ComposerRegistryResponse {
 export const assertComposerManifest: (input: unknown) => ComposerManifest =
   typia.createAssert<ComposerManifest>();
 
-export const validateRegistryResponse: (input: unknown) => typia.IValidation<ComposerRegistryResponse> =
-  typia.createValidate<ComposerRegistryResponse>();
+export const validateRegistryResponse: (
+  input: unknown,
+) => typia.IValidation<ComposerRegistryResponse> = typia.createValidate<ComposerRegistryResponse>();

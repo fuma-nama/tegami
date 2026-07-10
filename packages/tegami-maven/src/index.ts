@@ -326,9 +326,7 @@ function dependencyRefs(graph: PackageGraph, pkg: MavenPackage): MavenDependency
     if (!dep.artifactId) continue;
 
     const groupId =
-      dep.groupId === "${project.groupId}" || dep.groupId === undefined
-        ? pkg.groupId
-        : dep.groupId;
+      dep.groupId === "${project.groupId}" || dep.groupId === undefined ? pkg.groupId : dep.groupId;
 
     const linked = findPackage(graph, `${groupId}:${dep.artifactId}`);
     if (!linked || linked === pkg) continue;

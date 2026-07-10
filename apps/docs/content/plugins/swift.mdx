@@ -41,9 +41,9 @@ Tegami globs `**/Package.swift` (ignoring `.build`, `node_modules`, and `Pods`).
 
 Tegami links `.package(path: "../foo")` entries to workspace packages. These local dependents are patch-bumped by default when a dependency is released. `.package(url: ...)` entries are external and ignored — there is no version constraint to rewrite for path dependencies.
 
-| Dependency kind          | Default dependent bump |
-| ------------------------ | ---------------------- |
-| `.package(path:)` (local) | patch                 |
+| Dependency kind           | Default dependent bump |
+| ------------------------- | ---------------------- |
+| `.package(path:)` (local) | patch                  |
 
 ## Configuration
 
