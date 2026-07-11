@@ -348,26 +348,53 @@ function dependencyRefs(graph: PackageGraph, pkg: ComposerPackage): DependentRef
   return refs;
 }
 
+/** Lazily built per-graph name index, so dependency resolution is O(1) instead of a scan per entry. */
+const nameIndexes = new WeakMap<PackageGraph, Map<string, ComposerPackage>>();
+
 function resolveLinkedPackage(graph: PackageGraph, name: string): ComposerPackage | undefined {
-  return graph
-    .getPackages()
-    .find(
-      (candidate): candidate is ComposerPackage =>
-        candidate instanceof ComposerPackage && candidate.name === name,
-    );
+  let index = nameIndexes.get(graph);
+  if (!index) {
+    index = new Map();
+    for (const pkg of graph.getPackages()) {
+      if (pkg instanceof ComposerPackage) index.set(pkg.name, pkg);
+    }
+    nameIndexes.set(graph, index);
+  }
+  return index.get(name);
 }
 
 /**
  * Translate a Composer version constraint into a semver range.
  *
  * Composer separates `AND` parts with commas or spaces and wildcards versions
- * with `*` (e.g. `1.2.*`). semver uses spaces and `x`.
+ * with `*` (e.g. `1.2.*`). semver uses spaces and `x`. Composer's `~` is wider
+ * than npm's for two-segment operands (`~1.2` means `>=1.2.0 <2.0.0`, npm reads
+ * `<1.3.0`), so tilde terms are expanded into explicit bounds.
  */
 export function toSemverRange(constraint: string): string {
   return constraint
     .trim()
     .replace(/,/g, " ")
-    .replace(/(\d+)\.\*/g, "$1.x");
+    .replace(/(\d+)\.\*/g, "$1.x")
+    .replace(
+      /~\s*([0-9A-Za-z.+-]+)/g,
+      (_, version: string) => `>=${version} <${composerTildeUpper(version)}`,
+    );
+}
+
+/**
+ * Exclusive upper bound of Composer's `~` operator: drop the last segment and
+ * increment the new last one (`~1.2` → `<2.0.0`, `~1.2.3` → `<1.3.0`).
+ */
+function composerTildeUpper(version: string): string {
+  const numeric = version
+    .split("-")[0]!
+    .split(".")
+    .map((segment) => parseInt(segment, 10) || 0);
+  if (numeric.length > 1) numeric.pop();
+  numeric[numeric.length - 1]!++;
+  while (numeric.length < 3) numeric.push(0);
+  return numeric.join(".");
 }
 
 export function satisfiesConstraint(version: string, constraint: string): boolean {
@@ -381,13 +408,19 @@ export function satisfiesConstraint(version: string, constraint: string): boolea
 
 /** Rewrite a constraint to accept `version`, preserving the operator style. */
 export function updateConstraint(constraint: string, version: string): string {
-  const trimmed = constraint.trim();
+  // glue operators to their operands so `>= 1.0` is not mistaken for two terms
+  const trimmed = constraint.trim().replace(/(>=|<=|>|<|=|\^|~)\s+/g, "$1");
+
+  // Compound ranges (`>=1.0 <2.0`, `1.2 || 2.0`): rewriting a single bound can
+  // produce a contradictory range, so replace the whole constraint instead.
+  if (/[\s,]|\|\|/.test(trimmed)) return `^${version}`;
 
   if (trimmed.startsWith("^")) return `^${version}`;
-  if (trimmed.startsWith("~")) return `~${version}`;
+  if (trimmed.startsWith("~")) return `~${truncateLike(trimmed.slice(1), version)}`;
 
-  const lowerBound = /^(>=|>)\s*([0-9A-Za-z.+-]+)/.exec(trimmed);
-  if (lowerBound) return trimmed.replace(lowerBound[0], `${lowerBound[1]}${version}`);
+  // a rewritten `>` bound must become inclusive, or it would exclude the new version itself
+  const lowerBound = /^(>=|>)([0-9A-Za-z.+-]+)$/.exec(trimmed);
+  if (lowerBound) return `>=${version}`;
 
   const wildcard = /^(\d+)(?:\.(\d+))?\.\*$/.exec(trimmed);
   if (wildcard) {
@@ -396,6 +429,17 @@ export function updateConstraint(constraint: string, version: string): string {
   }
 
   return version;
+}
+
+/**
+ * Truncate `version` to the segment count of `reference` so a rewrite keeps the
+ * original breadth (`~1.2` becomes `~2.5`, not `~2.5.0`). Prerelease versions
+ * are kept whole — truncating would drop or mangle the prerelease identifier.
+ */
+function truncateLike(reference: string, version: string): string {
+  if (version.includes("-")) return version;
+  const precision = reference.split("-")[0]!.split(".").length;
+  return version.split(".").slice(0, precision).join(".");
 }
 
 async function discoverComposerPackages(
@@ -428,13 +472,12 @@ async function discoverComposerPackages(
     }),
   );
 
-  return Promise.all(
-    Array.from(files.values(), async (file) => {
-      const dir = path.dirname(file.path);
-      const version = await readLatestVersion(cwd, dir, tagPrefix, file.data.version);
-      return new ComposerPackage(dir, file, version);
-    }),
-  );
+  const tags = await listTags(cwd);
+  return Array.from(files.values(), (file) => {
+    const dir = path.dirname(file.path);
+    const version = latestVersion(tags, cwd, dir, tagPrefix, file.data.version);
+    return new ComposerPackage(dir, file, version);
+  });
 }
 
 function pathRepositoryGlobs(repositories: ComposerManifest["repositories"]): string[] {
@@ -474,32 +517,50 @@ function detectIndent(content: string): string {
   return match?.[1] ?? "    ";
 }
 
-async function readLatestVersion(
+/** List every tag in the repository once, newest version first. */
+async function listTags(cwd: string): Promise<string[]> {
+  const result = await x("git", ["tag", "--list", "--sort=-v:refname"], {
+    nodeOptions: { cwd },
+  });
+  if (result.exitCode !== 0) return [];
+
+  return result.stdout
+    .split("\n")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+}
+
+function latestVersion(
+  tags: string[],
   cwd: string,
   pkgPath: string,
   tagPrefix: string,
   fallback: string | undefined,
-): Promise<string> {
-  const pattern = formatTag(cwd, pkgPath, "*", tagPrefix);
-  const result = await x("git", ["tag", "--list", pattern, "--sort=-v:refname"], {
-    nodeOptions: { cwd },
-  });
-
-  if (result.exitCode === 0) {
-    for (const tag of result.stdout.split("\n")) {
-      const version = parseTagVersion(tag.trim(), tagPrefix);
-      if (version) return version;
-    }
+): string {
+  for (const tag of tags) {
+    const version = parseTagVersion(tag, cwd, pkgPath, tagPrefix);
+    if (version) return version;
   }
 
   if (fallback && semver.valid(fallback)) return fallback;
   return "0.0.0";
 }
 
-function parseTagVersion(tag: string, tagPrefix: string): string | undefined {
-  let version = tag.slice(tag.lastIndexOf("/") + 1);
-  if (tagPrefix && version.startsWith(tagPrefix)) version = version.slice(tagPrefix.length);
-  if (semver.valid(version)) return version;
+function parseTagVersion(
+  tag: string,
+  cwd: string,
+  pkgPath: string,
+  tagPrefix: string,
+): string | undefined {
+  const dir = path.relative(cwd, pkgPath).replaceAll("\\", "/");
+  const expectedPrefix = dir === "" ? tagPrefix : `${dir}/${tagPrefix}`;
+  if (!tag.startsWith(expectedPrefix)) return;
+
+  const rest = tag.slice(expectedPrefix.length);
+  // a root package's tags must not contain a path segment, or the root would
+  // adopt a subdirectory package's tag (e.g. `vendor-lib/v1.2.3` matching `v`).
+  if (rest.includes("/")) return;
+  if (semver.valid(rest)) return rest;
 }
 
 function formatTag(cwd: string, pkgPath: string, version: string, tagPrefix: string): string {

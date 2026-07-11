@@ -241,15 +241,15 @@ export class XmlElement {
   }
 }
 
-/** Parse XML source into a format-preserving {@link XmlDocument}. */
+/**
+ * Parse XML source into a format-preserving {@link XmlDocument}.
+ *
+ * Throws on malformed markup — swallowing parse errors would silently drop the
+ * document from whatever workflow reads it. Element-free input (e.g. an empty
+ * file) produces a document whose {@link XmlDocument.root} is `undefined`.
+ */
 export function parseDocument(source: string, options: ParseOptions = {}): XmlDocument {
-  let root: RawElement | undefined;
-  try {
-    root = parseRaw(source);
-  } catch {
-    root = undefined;
-  }
-  return new XmlDocument(source, root, options.caseInsensitive ?? false);
+  return new XmlDocument(source, parseRaw(source), options.caseInsensitive ?? false);
 }
 
 function localName(name: string): string {

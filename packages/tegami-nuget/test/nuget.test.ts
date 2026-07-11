@@ -57,6 +57,46 @@ describe("nuget plugin", () => {
     expect(api).toContain("<!-- api project -->");
   });
 
+  test("does not release dependents whose references need no manifest change", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+    // Tool references Core only via a floating PackageReference (`1.*`), which
+    // still accepts a minor bump — nothing in Tool's manifest changes.
+    await mkdir(join(cwd, "src/Tool"), { recursive: true });
+    await writeFile(
+      join(cwd, "src/Tool/Acme.Tool.csproj"),
+      `<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>5.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Acme.Core" Version="1.*" />
+  </ItemGroup>
+</Project>
+`,
+    );
+    await writeChangelog(cwd, "nuget:Acme.Core", "minor");
+
+    await tegami({ cwd, plugins: [nuget()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const tool = await readFile(join(cwd, "src/Tool/Acme.Tool.csproj"), "utf8");
+    expect(tool).toContain("<Version>5.0.0</Version>"); // untouched
+    expect(tool).toContain('Version="1.*"');
+  });
+
+  test("surfaces malformed project files instead of dropping them", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "src/Broken"), { recursive: true });
+    await writeFile(join(cwd, "src/Broken/Acme.Broken.csproj"), `<Project><PropertyGroup`);
+
+    await expect(tegami({ cwd, plugins: [nuget()] })._internal.context()).rejects.toThrow(
+      /Failed to parse .*Acme\.Broken\.csproj/,
+    );
+  });
+
   test("marks IsPackable=false projects as not publishable", async () => {
     const cwd = await createWorkspace();
     tempDirs.push(cwd);

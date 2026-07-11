@@ -46,11 +46,9 @@ export interface RawDependency {
 export interface ParsedGemspec {
   /** gem name, or `undefined` when it is computed dynamically and cannot be resolved. */
   name?: string;
-  /** located version literal, or `undefined` when the version cannot be resolved. */
+  /** located version literal (its `file` may be a separate `version.rb`), or `undefined` when unresolvable. */
   version?: VersionRef;
   gemspecFile: TextFile;
-  /** the separate `version.rb` file, present when the version is defined via a constant. */
-  versionFile?: TextFile;
   dependencies: RawDependency[];
 }
 
@@ -69,26 +67,24 @@ export async function parseGemspec(gemspecPath: string): Promise<ParsedGemspec> 
   const dir = path.dirname(gemspecPath);
 
   const name = NAME_RE.exec(content)?.[2];
-  const { version, versionFile } = await resolveVersion(gemspecFile, dir);
+  const version = await resolveVersion(gemspecFile, dir);
   const dependencies = parseDependencies(content);
 
-  return { name, version, gemspecFile, versionFile, dependencies };
+  return { name, version, gemspecFile, dependencies };
 }
 
 async function resolveVersion(
   gemspecFile: TextFile,
   dir: string,
-): Promise<{ version?: VersionRef; versionFile?: TextFile }> {
+): Promise<VersionRef | undefined> {
   const literal = VERSION_LITERAL_RE.exec(gemspecFile.content);
   if (literal) {
     const start = literal.index + literal[1]!.length + 1; // skip prefix + opening quote
-    return {
-      version: { file: gemspecFile, start, end: start + literal[3]!.length, value: literal[3]! },
-    };
+    return { file: gemspecFile, start, end: start + literal[3]!.length, value: literal[3]! };
   }
 
   // no literal — the version is likely defined through a constant such as `Foo::VERSION`.
-  if (!VERSION_CONSTANT_RE.test(gemspecFile.content)) return {};
+  if (!VERSION_CONSTANT_RE.test(gemspecFile.content)) return;
 
   const versionFiles = await glob(["lib/**/version.rb"], {
     cwd: dir,
@@ -105,13 +101,10 @@ async function resolveVersion(
 
     const file: TextFile = { path: filePath, content, edits: [] };
     const start = match.index + match[1]!.length + 1;
-    return {
-      version: { file, start, end: start + match[3]!.length, value: match[3]! },
-      versionFile: file,
-    };
+    return { file, start, end: start + match[3]!.length, value: match[3]! };
   }
 
-  return {};
+  return;
 }
 
 function parseDependencies(content: string): RawDependency[] {
@@ -146,6 +139,9 @@ function parseDependencies(content: string): RawDependency[] {
 /** Apply queued edits and return the rewritten file content. Edits must not overlap. */
 export function applyEdits(file: TextFile): string {
   const s = new MagicString(file.content);
-  for (const edit of file.edits) s.update(edit.start, edit.end, edit.value);
+  for (const edit of file.edits) {
+    if (edit.start === edit.end) s.appendLeft(edit.start, edit.value);
+    else s.update(edit.start, edit.end, edit.value);
+  }
   return s.toString();
 }

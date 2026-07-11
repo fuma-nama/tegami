@@ -33,7 +33,6 @@ export class GemPackage extends WorkspacePackage {
     /** the gemspec file name, e.g. `foo.gemspec`. */
     readonly gemspecFilename: string,
     readonly gemspecFile: TextFile,
-    readonly versionFile: TextFile | undefined,
     readonly versionRef: VersionRef | undefined,
     readonly dependencies: RawDependency[],
   ) {
@@ -54,7 +53,8 @@ export class GemPackage extends WorkspacePackage {
 
   async write(): Promise<void> {
     const files = new Set<TextFile>([this.gemspecFile]);
-    if (this.versionFile) files.add(this.versionFile);
+    // the version literal may live in a separate `version.rb` file
+    if (this.versionRef) files.add(this.versionRef.file);
 
     await Promise.all(
       Array.from(files, async (file) => {
@@ -308,7 +308,6 @@ async function discoverGemPackages(cwd: string, packages?: string[]): Promise<Ge
           parsed.name,
           path.basename(gemspecPath),
           parsed.gemspecFile,
-          parsed.versionFile,
           parsed.version,
           parsed.dependencies,
         ),

@@ -50,8 +50,10 @@ export function pessimisticBounds(version: string): { lower: string; upper: stri
 
 /** Whether `version` satisfies a single requirement. */
 export function satisfiesRequirement(version: string, requirement: Requirement): boolean {
-  const current = semver.coerce(version, { loose: true });
-  const target = semver.coerce(requirement.version, { loose: true });
+  // keep prerelease identifiers — `coerce` drops them by default, which would
+  // make `1.1.0-alpha.0` compare as `1.1.0`.
+  const current = semver.coerce(version, { loose: true, includePrerelease: true });
+  const target = semver.coerce(requirement.version, { loose: true, includePrerelease: true });
   if (!current || !target) return false;
 
   switch (requirement.operator) {
@@ -69,7 +71,7 @@ export function satisfiesRequirement(version: string, requirement: Requirement):
       return semver.lte(current, target);
     case "~>": {
       const { lower, upper } = pessimisticBounds(requirement.version);
-      const low = semver.coerce(lower, { loose: true });
+      const low = semver.coerce(lower, { loose: true, includePrerelease: true });
       const high = semver.coerce(upper, { loose: true });
       if (!low || !high) return false;
       return semver.gte(current, low) && semver.lt(current, high);
@@ -102,11 +104,15 @@ export function formatRequirement(requirement: Requirement): string {
 }
 
 function truncate(version: string, segments: number): string {
+  // prerelease identifiers contain dots (`1.1.0-alpha.0`); truncating would
+  // drop or mangle them, so prerelease versions are always kept whole.
+  if (version.includes("-")) return version;
   return version.split(".").slice(0, segments).join(".");
 }
 
 function incrementLast(version: string): string {
-  const segments = version.split(".");
+  // an exclusive bound only needs the numeric core (`< 1.1.1` accepts `1.1.0-alpha.0`)
+  const segments = version.split("-")[0]!.split(".");
   const last = segments.length - 1;
   segments[last] = String((parseInt(segments[last] ?? "0", 10) || 0) + 1);
   return segments.join(".");

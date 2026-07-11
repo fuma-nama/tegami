@@ -37,7 +37,6 @@ class VersionSource {
 
   constructor(
     readonly file: XmlFile,
-    readonly kind: "Version" | "VersionPrefix",
     readonly element: XmlElement,
     value: string,
   ) {
@@ -291,6 +290,16 @@ function depsPolicy(
           continue;
         }
 
+        // a `<PackageReference>` whose constraint still accepts the new version
+        // needs no manifest change, so the dependent has nothing to release.
+        if (
+          dep.kind === "package" &&
+          dep.version &&
+          rewriteConstraint(dep.version, bumped) === undefined
+        ) {
+          continue;
+        }
+
         const bumpType = getBumpDepType(dep);
         if (bumpType === false) continue;
 
@@ -303,10 +312,31 @@ function depsPolicy(
   };
 }
 
+/** Lazily built per-graph project-path and package-id indexes, so dependency resolution is O(1). */
+const nugetIndexes = new WeakMap<
+  PackageGraph,
+  { byProjectPath: Map<string, NugetPackage>; byIdLower: Map<string, NugetPackage> }
+>();
+
+function graphIndex(graph: PackageGraph) {
+  let index = nugetIndexes.get(graph);
+  if (!index) {
+    index = { byProjectPath: new Map(), byIdLower: new Map() };
+    for (const pkg of graph.getPackages()) {
+      if (!(pkg instanceof NugetPackage)) continue;
+      index.byProjectPath.set(path.resolve(pkg.projectFile.path), pkg);
+      index.byIdLower.set(pkg.name.toLowerCase(), pkg);
+    }
+    nugetIndexes.set(graph, index);
+  }
+  return index;
+}
+
 function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependencyRef[] {
   const root = pkg.projectFile.doc.root;
   if (!root) return [];
 
+  const { byProjectPath, byIdLower } = graphIndex(graph);
   const out: NugetDependencyRef[] = [];
 
   for (const el of root.findAll("projectreference")) {
@@ -314,12 +344,7 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
     if (!include) continue;
 
     const target = path.resolve(pkg.path, include.value.replace(/\\/g, "/"));
-    const linked = graph
-      .getPackages()
-      .find(
-        (candidate): candidate is NugetPackage =>
-          candidate instanceof NugetPackage && path.resolve(candidate.projectFile.path) === target,
-      );
+    const linked = byProjectPath.get(target);
     if (!linked || linked === pkg) continue;
 
     out.push({ dependent: pkg, kind: "project", name: include.value, linked });
@@ -329,13 +354,7 @@ function dependencyRefs(graph: PackageGraph, pkg: NugetPackage): NugetDependency
     const include = el.attr("include");
     if (!include) continue;
 
-    const idLower = include.value.toLowerCase();
-    const linked = graph
-      .getPackages()
-      .find(
-        (candidate): candidate is NugetPackage =>
-          candidate instanceof NugetPackage && candidate.name.toLowerCase() === idLower,
-      );
+    const linked = byIdLower.get(include.value.toLowerCase());
     if (!linked || linked === pkg) continue;
 
     const versionAttr = el.attr("version");
@@ -400,7 +419,7 @@ async function discoverNugetPackages(
 
   for (const projectPath of projectPaths.sort()) {
     const file = await readXmlFile(projectPath);
-    if (!file?.doc.root) continue;
+    if (!file) continue;
     projectFiles.push(file);
 
     const dir = path.dirname(projectPath);
@@ -464,7 +483,7 @@ function resolveVersionSource(
     const found = findVersion(file);
     if (!found) continue;
 
-    const source = new VersionSource(file, found.kind, found.element, found.value);
+    const source = new VersionSource(file, found.element, found.value);
     const existing = registry.get(source.key);
     if (existing) return existing;
     registry.set(source.key, source);
@@ -473,15 +492,13 @@ function resolveVersionSource(
   return undefined;
 }
 
-function findVersion(
-  file: XmlFile,
-): { kind: "Version" | "VersionPrefix"; element: XmlElement; value: string } | undefined {
+function findVersion(file: XmlFile): { element: XmlElement; value: string } | undefined {
   const root = file.doc.root;
   if (!root) return;
-  for (const kind of ["Version", "VersionPrefix"] as const) {
-    const el = findProperty(root, kind.toLowerCase());
+  for (const name of ["version", "versionprefix"]) {
+    const el = findProperty(root, name);
     const text = el?.text;
-    if (el && text) return { kind, element: el, value: text };
+    if (el && text) return { element: el, value: text };
   }
   return undefined;
 }
@@ -511,7 +528,17 @@ async function readXmlFile(filePath: string): Promise<XmlFile | undefined> {
     throw error;
   }
 
-  return { path: filePath, doc: parseDocument(content, { caseInsensitive: true }) };
+  let doc: XmlDocument;
+  try {
+    doc = parseDocument(content, { caseInsensitive: true });
+  } catch (error) {
+    throw new Error(`Failed to parse "${filePath}": ${(error as Error).message}`);
+  }
+  // a silent skip here would drop the project from versioning and publishing
+  // with no diagnostic — surface the broken file instead.
+  if (!doc.root) throw new Error(`Failed to parse "${filePath}": no root element.`);
+
+  return { path: filePath, doc };
 }
 
 function isMissingFileError(error: unknown): boolean {

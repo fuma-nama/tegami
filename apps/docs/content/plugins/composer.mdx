@@ -49,7 +49,7 @@ Composer packages usually have no `version` field — Packagist derives versions
 | `require`        | patch                  |
 | `require-dev`    | none                   |
 
-Composer constraints (`^1.2`, `~1.2`, `1.2.*`, `>=1.0 <2.0`) are evaluated as semver ranges. When a released version no longer satisfies a dependent's constraint, Tegami rewrites it, preserving the operator style (`^`, `~`, or wildcard). `composer.json` formatting — indentation, trailing newline, and key order — is preserved.
+Composer constraints (`^1.2`, `~1.2`, `1.2.*`, `>=1.0 <2.0`) are evaluated with Composer's semantics (`~1.2` means `>=1.2.0 <2.0.0`, wider than npm's tilde). When a released version no longer satisfies a dependent's constraint, Tegami rewrites it, preserving the operator style and precision (`~1.2` becomes `~2.0`, not `~2.0.0`). Compound constraints such as `>=1.0 <2.0` are replaced with a caret range (`^2.5.0`) instead of rewriting a single bound, which could produce a contradictory range. `composer.json` formatting — indentation, trailing newline, and key order — is preserved.
 
 ## Configuration
 

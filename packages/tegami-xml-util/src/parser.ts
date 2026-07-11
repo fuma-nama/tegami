@@ -51,12 +51,14 @@ export interface RawElement {
 
 export type RawNode = RawElement | RawText;
 
-/** Parse XML source into a raw node tree. Throws on a malformed document. */
-export function parseRaw(input: string): RawElement {
-  const parser = new Parser(input);
-  const root = parser.parseDocument();
-  if (!root) throw new Error("Expected an XML root element.");
-  return root;
+/**
+ * Parse XML source into a raw node tree.
+ *
+ * Returns `undefined` when the input contains no element at all (e.g. an empty
+ * file); throws on malformed markup.
+ */
+export function parseRaw(input: string): RawElement | undefined {
+  return new Parser(input).parseDocument();
 }
 
 class Parser {

@@ -72,6 +72,8 @@ Publish status is checked by requesting the deployed `.pom` from `https://repo1.
 
 Publishing to Maven Central through the [Central Publisher Portal](https://central.sonatype.org) requires the `central-publishing-maven-plugin` configured in your pom. Central has a sync delay, so a freshly deployed version may report as pending for a few minutes.
 
+When the [git](/plugins/git), [GitHub](/plugins/github), or [GitLab](/plugins/gitlab) plugin is configured, releases are tagged as `groupId/artifactId@version` (the default `name@version` tag would contain a colon, which git forbids in tag names).
+
 </Callout>
 
 ## Limitations

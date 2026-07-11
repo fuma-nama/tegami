@@ -66,7 +66,7 @@ export class MavenPackage extends WorkspacePackage {
     readonly file: PomFile,
     readonly groupId: string,
     readonly artifactId: string,
-    private readonly resolvedVersion: string | undefined,
+    private resolvedVersion: string | undefined,
     /** the file + element that literally holds this package's version */
     readonly versionLocation: VersionLocation | undefined,
     readonly packaging: string,
@@ -85,6 +85,15 @@ export class MavenPackage extends WorkspacePackage {
 
   get version(): string | undefined {
     return this.resolvedVersion;
+  }
+
+  /**
+   * Update the in-memory version. The pom edit is queued separately through the
+   * version location — this keeps `version` (used by the publish lock, tags,
+   * and status checks) in sync with what was written.
+   */
+  setVersion(version: string): void {
+    this.resolvedVersion = version;
   }
 }
 
@@ -149,6 +158,19 @@ export function maven({
     initDraft(draft) {
       if (!active) return;
       draft.addPolicy(depsPolicy(this, getBumpDepType));
+    },
+    initPublishPlan({ plan }) {
+      if (!active) return;
+
+      for (const [id, packagePlan] of plan.packages) {
+        const pkg = this.graph.get(id);
+        if (!(pkg instanceof MavenPackage) || !pkg.version) continue;
+
+        // `pkg.name` is `groupId:artifactId` — a colon is invalid in git ref
+        // names, so the git plugin's default `name@version` tag must not apply.
+        packagePlan.git ??= {};
+        packagePlan.git.tag = `${pkg.groupId}/${pkg.artifactId}@${pkg.version}`;
+      }
     },
     publishPreflight({ pkg }) {
       if (!(pkg instanceof MavenPackage)) return;
@@ -226,9 +248,15 @@ export function maven({
         return locations.get(locationKey(pkg.versionLocation))?.version ?? pkg.version;
       };
 
-      // 2. Write each version location once.
+      // 2. Write each version location once, and sync every affected package's
+      //    in-memory version — the publish lock, git tags, and status checks
+      //    all read `pkg.version` after apply.
       for (const { location, version } of locations.values()) {
         setElementText(location.file.doc, location.element, version);
+      }
+      for (const pkg of mavenPackages) {
+        const next = newVersionOf(pkg);
+        if (next && next !== pkg.version) pkg.setVersion(next);
       }
 
       // 3. Update literal `<parent><version>` references to bumped parents.
@@ -480,18 +508,23 @@ async function collectModule(dir: string, parsed: Map<string, ParsedPom>): Promi
     return;
   }
 
-  const pom = parsePomFile(pomPath, dir, content);
-  if (!pom) return;
-  parsed.set(pomPath, pom);
+  parsed.set(pomPath, parsePomFile(pomPath, dir, content));
 
-  for (const module of pom.modules) {
+  for (const module of parsed.get(pomPath)!.modules) {
     await collectModule(path.resolve(dir, module), parsed);
   }
 }
 
-function parsePomFile(pomPath: string, dir: string, content: string): ParsedPom | undefined {
-  const doc = parsePom(content);
-  if (!doc.root) return;
+function parsePomFile(pomPath: string, dir: string, content: string): ParsedPom {
+  let doc: PomDocument;
+  try {
+    doc = parsePom(content);
+  } catch (error) {
+    throw new Error(`Failed to parse "${pomPath}": ${(error as Error).message}`);
+  }
+  // a silent skip here would drop the module from versioning and publishing
+  // with no diagnostic — surface the broken manifest instead.
+  if (!doc.root) throw new Error(`Failed to parse "${pomPath}": no root element.`);
 
   const file: PomFile = { path: pomPath, dir, doc, root: doc.root };
   const root = doc.root;

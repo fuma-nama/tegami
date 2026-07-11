@@ -204,6 +204,23 @@ describe("ruby requirement semantics", () => {
       "< 2.1",
     );
   });
+
+  test("never truncates prerelease versions", () => {
+    // prerelease identifiers contain dots — truncation would mangle them
+    expect(formatRequirement(rewriteRequirement(parseRequirement("~> 1.0")!, "1.1.0-alpha.0"))).toBe(
+      "~> 1.1.0-alpha.0",
+    );
+    expect(formatRequirement(rewriteRequirement(parseRequirement("= 1.0.0")!, "2.0.0-rc.1"))).toBe(
+      "= 2.0.0-rc.1",
+    );
+    // exclusive bounds only need the numeric core
+    expect(formatRequirement(rewriteRequirement(parseRequirement("< 1.1")!, "1.1.0-alpha.0"))).toBe(
+      "< 1.1.1",
+    );
+    // prerelease comparisons are not silently coerced to their release version
+    expect(satisfiesRequirement("1.1.0-alpha.0", parseRequirement("~> 1.1.0")!)).toBe(false);
+    expect(satisfiesRequirement("1.1.0-alpha.0", parseRequirement(">= 1.1.0-alpha.0")!)).toBe(true);
+  });
 });
 
 async function createWorkspace(): Promise<string> {

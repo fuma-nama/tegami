@@ -93,9 +93,59 @@ describe("composer plugin", () => {
     expect(satisfiesConstraint("2.0.0", "^1.0")).toBe(false);
     expect(satisfiesConstraint("1.2.9", "1.2.*")).toBe(true);
     expect(updateConstraint("^1.0", "2.0.0")).toBe("^2.0.0");
-    expect(updateConstraint("~1.0", "2.0.0")).toBe("~2.0.0");
     expect(updateConstraint("1.2.*", "2.3.4")).toBe("2.3.*");
     expect(updateConstraint(">=1.0", "2.0.0")).toBe(">=2.0.0");
+  });
+
+  test("tilde constraints use Composer semantics, not npm's", () => {
+    // Composer `~1.2` means `>=1.2.0 <2.0.0` (npm reads `<1.3.0`)
+    expect(satisfiesConstraint("1.9.0", "~1.2")).toBe(true);
+    expect(satisfiesConstraint("2.0.0", "~1.2")).toBe(false);
+    // three-segment tilde stays minor-scoped in both dialects
+    expect(satisfiesConstraint("1.2.9", "~1.2.3")).toBe(true);
+    expect(satisfiesConstraint("1.3.0", "~1.2.3")).toBe(false);
+    // rewrite preserves the original precision (`~1.0` stays two segments)
+    expect(updateConstraint("~1.0", "2.0.0")).toBe("~2.0");
+    expect(updateConstraint("~1.2.3", "2.5.0")).toBe("~2.5.0");
+    // prerelease versions are never truncated
+    expect(updateConstraint("~1.0", "2.0.0-beta.1")).toBe("~2.0.0-beta.1");
+  });
+
+  test("compound constraints are replaced whole, never made contradictory", () => {
+    expect(satisfiesConstraint("2.5.0", ">=1.0 <2.0")).toBe(false);
+    // rewriting only the lower bound would produce the unsatisfiable `>=2.5.0 <2.0`
+    expect(updateConstraint(">=1.0 <2.0", "2.5.0")).toBe("^2.5.0");
+    expect(updateConstraint(">=1.0, <2.0", "2.5.0")).toBe("^2.5.0");
+    expect(updateConstraint("1.2 || 2.0", "3.0.0")).toBe("^3.0.0");
+    // a single spaced comparator is still one term
+    expect(updateConstraint(">= 1.0", "2.0.0")).toBe(">=2.0.0");
+    // rewritten exclusive bounds must include the new version
+    expect(updateConstraint(">1.0", "2.0.0")).toBe(">=2.0.0");
+  });
+
+  test("root package ignores subdirectory tags that happen to match its prefix", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+
+    // a real repo where the only tags are a subdirectory package's — the root
+    // pattern `v*` also fnmatch-es `vendor-lib/v2.5.0`, which must be rejected
+    const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+    const run = async (...args: string[]) => {
+      const { x } = await import("tinyexec");
+      const result = await x("git", args, { nodeOptions: { cwd, env } });
+      if (result.exitCode !== 0) throw new Error(result.stderr);
+    };
+    await run("init", "-q");
+    await run("add", ".");
+    await run("commit", "-q", "-m", "init");
+    await run("tag", "vendor-lib/v2.5.0");
+    await run("tag", "packages/core/v3.0.0");
+
+    const graph = (await tegami({ cwd, plugins: [git(), composer()] })._internal.context()).graph;
+    // root falls back to its composer.json version, not the subdirectory tag
+    expect(graph.get("composer:acme/monorepo")?.version).toBe("0.0.0");
+    // the subdirectory package resolves its own tag
+    expect(graph.get("composer:acme/core")?.version).toBe("3.0.0");
   });
 
   test("throws without the git plugin", async () => {

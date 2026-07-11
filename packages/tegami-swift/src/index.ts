@@ -285,19 +285,24 @@ function dependencyRefs(graph: PackageGraph, pkg: SwiftPackage): DependentRef[] 
   return refs;
 }
 
+/** Lazily built per-graph path index, so dependency resolution is O(1) instead of a scan per entry. */
+const pathIndexes = new WeakMap<PackageGraph, Map<string, SwiftPackage>>();
+
 function resolveLinkedPackage(
   graph: PackageGraph,
   pkg: SwiftPackage,
   depPath: string,
 ): SwiftPackage | undefined {
-  const absolute = resolve(pkg.path, depPath);
+  let index = pathIndexes.get(graph);
+  if (!index) {
+    index = new Map();
+    for (const candidate of graph.getPackages()) {
+      if (candidate instanceof SwiftPackage) index.set(candidate.path, candidate);
+    }
+    pathIndexes.set(graph, index);
+  }
 
-  return graph
-    .getPackages()
-    .find(
-      (candidate): candidate is SwiftPackage =>
-        candidate instanceof SwiftPackage && candidate.path === absolute,
-    );
+  return index.get(resolve(pkg.path, depPath));
 }
 
 async function discoverSwiftPackages(
@@ -312,13 +317,14 @@ async function discoverSwiftPackages(
     onlyFiles: true,
   });
 
+  const tags = await listTags(cwd);
   const packages = await Promise.all(
     files.map(async (file) => {
       const manifest = await readManifest(file);
       if (!manifest) return;
 
       const path = resolve(dirname(file));
-      const version = await readLatestVersion(cwd, path, tagPrefix);
+      const version = latestVersion(tags, cwd, path, tagPrefix);
       return new SwiftPackage(path, manifest, version);
     }),
   );
@@ -365,17 +371,22 @@ export function parseManifest(content: string): SwiftManifest | undefined {
   return { name: nameMatch[1], dependencyPaths };
 }
 
-async function readLatestVersion(cwd: string, path: string, tagPrefix: string): Promise<string> {
-  const result = await x(
-    "git",
-    ["tag", "--list", tagPattern(cwd, path, tagPrefix), "--sort=-v:refname"],
-    { nodeOptions: { cwd } },
-  );
+/** List every tag in the repository once, newest version first. */
+async function listTags(cwd: string): Promise<string[]> {
+  const result = await x("git", ["tag", "--list", "--sort=-v:refname"], {
+    nodeOptions: { cwd },
+  });
+  if (result.exitCode !== 0) return [];
 
-  if (result.exitCode !== 0) return "0.0.0";
+  return result.stdout
+    .split("\n")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+}
 
-  for (const line of result.stdout.split("\n")) {
-    const version = parseTagVersion(line.trim(), cwd, path, tagPrefix);
+function latestVersion(tags: string[], cwd: string, path: string, tagPrefix: string): string {
+  for (const tag of tags) {
+    const version = parseTagVersion(tag, cwd, path, tagPrefix);
     if (version) return version;
   }
 
@@ -384,12 +395,6 @@ async function readLatestVersion(cwd: string, path: string, tagPrefix: string): 
 
 function relativeDir(cwd: string, path: string): string {
   return relative(cwd, path).replaceAll("\\", "/");
-}
-
-function tagPattern(cwd: string, path: string, tagPrefix: string): string {
-  const dir = relativeDir(cwd, path);
-  const prefix = dir === "" ? tagPrefix : `${dir}/${tagPrefix}`;
-  return `${prefix}*`;
 }
 
 function formatSwiftTag(cwd: string, path: string, tagPrefix: string, version: string): string {
@@ -414,11 +419,20 @@ function parseTagVersion(
   if (semver.valid(rest)) return rest;
 }
 
-async function isTagCreated(cwd: string, tag: string): Promise<boolean> {
-  const result = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
+export async function isTagCreated(cwd: string, tag: string): Promise<boolean> {
+  const local = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
     nodeOptions: { cwd },
   });
-  return result.exitCode === 0;
+  if (local.exitCode === 0) return true;
+
+  // the tag may exist only on the remote (e.g. a shallow checkout without
+  // tags fetched) — mirror the git plugin's ls-remote fallback.
+  const origin = await x(
+    "git",
+    ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`],
+    { nodeOptions: { cwd } },
+  );
+  return origin.exitCode === 0;
 }
 
 function isMissingFileError(error: unknown): boolean {

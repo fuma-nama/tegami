@@ -133,4 +133,9 @@ describe("parseDocument", () => {
     expect(doc.root).toBeUndefined();
     expect(doc.toString()).toBe("   \n  ");
   });
+
+  test("throws on malformed markup instead of swallowing it", () => {
+    expect(() => parseDocument("<project><groupId")).toThrow(/Unterminated tag/);
+    expect(() => parseDocument("<")).toThrow(/Malformed tag/);
+  });
 });

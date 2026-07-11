@@ -5,7 +5,7 @@ import { x } from "tinyexec";
 import { afterEach, describe, expect, test } from "vitest";
 import { tegami } from "tegami";
 import { git } from "tegami/plugins/git";
-import { swift } from "../src/index";
+import { isTagCreated, swift } from "../src/index";
 
 const tempDirs: string[] = [];
 
@@ -198,6 +198,24 @@ let package = Package(products: [])
     const graph = (await tegami({ cwd, plugins: [git(), swift()] })._internal.context()).graph;
     expect(graph.getPackages().filter((pkg) => pkg.manager === "swift")).toHaveLength(0);
   });
+});
+
+test("isTagCreated falls back to the remote when the tag is not local", async () => {
+  // upstream repo owning the tag
+  const upstream = await mkdtemp(join(tmpdir(), "tegami-swift-upstream-"));
+  tempDirs.push(upstream);
+  await writeFile(join(upstream, "Package.swift"), `let package = Package(name: "Foo")\n`);
+  await initGitRepo(upstream);
+  await run(upstream, "git", ["tag", "1.2.3"]);
+
+  // fresh clone without tags — simulates a shallow CI checkout
+  const clone = await mkdtemp(join(tmpdir(), "tegami-swift-clone-"));
+  tempDirs.push(clone);
+  await run(clone, "git", ["clone", "-q", "--no-tags", upstream, "."]);
+
+  expect(await gitTags(clone)).toEqual([]);
+  expect(await isTagCreated(clone, "1.2.3")).toBe(true);
+  expect(await isTagCreated(clone, "9.9.9")).toBe(false);
 });
 
 async function createWorkspace(): Promise<string> {
