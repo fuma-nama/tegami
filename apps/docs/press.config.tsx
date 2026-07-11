@@ -10,6 +10,8 @@ import { Image } from "fumapress/image";
 import { imagePlugin } from "fumapress/plugins/image/vercel";
 import { Mermaid } from "./src/mermaid";
 import { generateOGImage, loadFonts } from "./src/og";
+import { SponsorsMarquee } from "./src/sponsors-marquee";
+import { createDocsLayoutPage } from "fumapress/layouts/docs";
 
 export default defineConfig({
   content: docs.toFumadocsSource(),
@@ -46,6 +48,17 @@ export default defineConfig({
             Tegami
           </>
         ),
+      },
+    }),
+    page: createDocsLayoutPage({
+      render() {
+        return {
+          pageProps: {
+            tableOfContent: {
+              footer: <SponsorsMarquee />,
+            },
+          },
+        };
       },
     }),
   })
