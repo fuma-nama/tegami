@@ -1,5 +1,5 @@
 import MagicString from "magic-string";
-import { parseRaw, type RawElement, type RawNode, type XmlAttribute, type Range } from "./parser";
+import { parseRaw, type RawElement, type RawNode, type XmlAttribute } from "./parser";
 
 export type { Range, XmlAttribute } from "./parser";
 
@@ -173,6 +173,7 @@ export class XmlElement {
 
   /** Resolve a path of direct-child names, returning the first match at each step. */
   getIn(path: string[]): XmlElement | undefined {
+    // oxlint-disable-next-line typescript/no-this-alias
     let current: XmlElement | undefined = this;
     for (const name of path) {
       current = current?.get(name);

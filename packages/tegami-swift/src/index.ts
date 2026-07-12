@@ -9,7 +9,6 @@ import type {
   DraftPolicy,
   PackageGraph,
   PackagePublishResult,
-  PublishPlan,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
