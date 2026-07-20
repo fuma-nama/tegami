@@ -10,7 +10,7 @@ import { execFailure, fetchFailure } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
 import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
-import { joinPath } from "../utils/common";
+import { isCI, joinPath } from "../utils/common";
 import {
   type DependencySpec,
   type DepField,
@@ -181,7 +181,7 @@ export function npm({
             "--registry",
             pkg.getRegistry(),
           ],
-          { nodeOptions: { cwd: pkg.path } },
+          registryWriteOptions(pkg.path),
         );
 
         if (tagResult.exitCode !== 0) {
@@ -404,7 +404,7 @@ async function publish(
     const publishArgs = ["publish", tarballPath];
     if (distTag) publishArgs.push("--tag", distTag);
 
-    const publishResult = await x("npm", publishArgs, { nodeOptions: { cwd: pkg.path } });
+    const publishResult = await x("npm", publishArgs, registryWriteOptions(pkg.path));
     if (publishResult.exitCode !== 0) {
       return {
         type: "failed",
@@ -436,7 +436,7 @@ async function publish(
       break;
   }
 
-  const result = await x(command, args, { nodeOptions: { cwd: pkg.path } });
+  const result = await x(command, args, registryWriteOptions(pkg.path));
   if (result.exitCode !== 0) {
     return {
       type: "failed",
@@ -448,6 +448,15 @@ async function publish(
   }
 
   return { type: "published" };
+}
+
+function registryWriteOptions(cwd: string) {
+  return {
+    nodeOptions: {
+      cwd,
+      ...(!isCI() && process.stdin.isTTY ? { stdio: "inherit" as const } : {}),
+    },
+  };
 }
 
 async function isPackagePublished(
