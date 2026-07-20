@@ -1,3 +1,9 @@
+## tegami@1.2.6
+
+### Preserve interactive registry authentication
+
+Registry publishing now retains terminal access during local interactive runs, allowing browser and two-factor authentication to complete before publishing continues.
+
 ## tegami@1.2.5
 
 ### Fix `ci` command order problem
