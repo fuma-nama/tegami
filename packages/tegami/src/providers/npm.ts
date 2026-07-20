@@ -404,7 +404,12 @@ async function publish(
     const publishArgs = ["publish", tarballPath];
     if (distTag) publishArgs.push("--tag", distTag);
 
-    const publishResult = await x("npm", publishArgs, registryWriteOptions(pkg.path));
+    const publishResult = await x("npm", publishArgs, {
+      nodeOptions: {
+        cwd: pkg.path,
+        ...(!isCI() && process.stdin.isTTY ? { stdio: "inherit" as const } : {}),
+      },
+    });
     if (publishResult.exitCode !== 0) {
       return {
         type: "failed",
@@ -436,7 +441,12 @@ async function publish(
       break;
   }
 
-  const result = await x(command, args, registryWriteOptions(pkg.path));
+  const result = await x(command, args, {
+    nodeOptions: {
+      cwd: pkg.path,
+      ...(!isCI() && process.stdin.isTTY ? { stdio: "inherit" as const } : {}),
+    },
+  });
   if (result.exitCode !== 0) {
     return {
       type: "failed",
@@ -448,15 +458,6 @@ async function publish(
   }
 
   return { type: "published" };
-}
-
-function registryWriteOptions(cwd: string) {
-  return {
-    nodeOptions: {
-      cwd,
-      ...(!isCI() && process.stdin.isTTY ? { stdio: "inherit" as const } : {}),
-    },
-  };
 }
 
 async function isPackagePublished(
