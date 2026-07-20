@@ -181,7 +181,7 @@ export function npm({
             "--registry",
             pkg.getRegistry(),
           ],
-          registryWriteOptions(pkg.path),
+          { nodeOptions: { cwd: pkg.path } },
         );
 
         if (tagResult.exitCode !== 0) {

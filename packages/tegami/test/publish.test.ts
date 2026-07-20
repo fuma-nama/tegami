@@ -173,13 +173,11 @@ Some description.
     expect(exec.mock.calls[0]?.[2]?.nodeOptions?.stdio).toBeUndefined();
   });
 
-  test("inherits terminal stdio for interactive registry writes", async () => {
-    const { cwd, packagePath, lockPath } = await createPublishFixture({ markLatest: true });
+  test("inherits terminal stdio for interactive publishing", async () => {
+    const { cwd, packagePath, lockPath } = await createPublishFixture();
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "publish" || args.at(0) === "dist-tag") {
-        return commandResult();
-      }
+      if (args.at(0) === "publish") return commandResult();
 
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
@@ -191,15 +189,10 @@ Some description.
       expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
     });
 
-    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec).toHaveBeenCalledTimes(1);
     expect(exec.mock.calls[0]).toEqual([
       "pnpm",
       ["publish", "--tag", "latest", "--no-git-checks"],
-      { nodeOptions: { cwd: packagePath, stdio: "inherit" } },
-    ]);
-    expect(exec.mock.calls[1]).toEqual([
-      "npm",
-      ["dist-tag", "add", "@acme/core@1.0.1", "latest", "--registry", "https://registry.npmjs.org"],
       { nodeOptions: { cwd: packagePath, stdio: "inherit" } },
     ]);
   });
@@ -509,9 +502,7 @@ describe("cleanup publish plan", () => {
   });
 });
 
-async function createPublishFixture(
-  options: { markLatest?: boolean; registry?: string } = {},
-): Promise<{
+async function createPublishFixture(options: { registry?: string } = {}): Promise<{
   cwd: string;
   packagePath: string;
   lockPath: string;
@@ -543,7 +534,6 @@ async function createPublishFixture(
     path: lockPath,
     packages: [{ id: "npm:@acme/core", updated: true }],
     npm: [{ id: "npm:@acme/core", distTag: "latest" }],
-    npmMarkLatest: options.markLatest ? ["npm:@acme/core"] : undefined,
   });
 
   return {
