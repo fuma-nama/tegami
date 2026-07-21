@@ -40,9 +40,7 @@ Tegami treats dependencies whose names match another Dart workspace package as w
 | `dependency_overrides` | patch                  |
 | `dev_dependencies`     | none                   |
 
-**Dependent version bumps**: when a workspace package is released, workspace dependents in `dependencies` and `dependency_overrides` are patch-bumped even if the old constraint still accepts the new version.
-
-**Constraint rewrites**: workspace dependency constraints are updated when they no longer accept the linked package's new version.
+Workspace dependents in `dependencies` and `dependency_overrides` are patch-bumped when a linked package is released. Constraints are rewritten when they no longer accept the new version.
 
 ## Configuration
 

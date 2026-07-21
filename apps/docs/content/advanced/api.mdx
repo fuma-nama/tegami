@@ -23,7 +23,7 @@ Create pending changelog files from git commit history since the latest tag:
 const created = await paper.generateChangelog();
 ```
 
-You can also author changelog files manually — see [Changelogs](/changelog).
+You can also author changelog files manually, see [Changelogs](/changelog).
 
 ### `draft()`
 
@@ -79,7 +79,7 @@ const result = await paper.cleanup();
 // { state: "removed" } or { state: "skipped", reason: "missing" | "pending" }
 ```
 
-Only succeeds when every package in the lock has already published. Pending locks are left in place. This is housekeeping only — Tegami does not use a finished lock for publishing or versioning.
+Only succeeds when every package in the lock has already published. Pending locks are left in place. This is housekeeping only, Tegami does not use a finished lock for publishing or versioning.
 
 ## Configurations
 
