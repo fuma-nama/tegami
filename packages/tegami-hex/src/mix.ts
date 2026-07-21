@@ -20,7 +20,7 @@ export interface MixDep {
   relativePath?: string;
   /** `in_umbrella: true` */
   inUmbrella: boolean;
-  /** has an `only:` option → treated as a dev/test dependency */
+  /** restricted by `only:` to environments that exclude `:prod` */
   dev: boolean;
 }
 
@@ -101,6 +101,20 @@ function findDepsListSpan(content: string): { start: number; end: number } | und
 }
 
 const TUPLE_RE = /\{\s*:([A-Za-z_][A-Za-z0-9_]*)\s*([^{}]*)\}/g;
+const ONLY_RE = /\bonly:\s*(\[[^\]]*\]|:[A-Za-z_][A-Za-z0-9_]*)/;
+
+/**
+ * Whether a dep's `only:` option keeps it out of a production build.
+ *
+ * `only:` restricts environments rather than marking a dep as "dev" — so
+ * `only: :dev` and `only: [:dev, :test]` are dev-only, but `only: :prod` and
+ * `only: [:prod, :dev]` still ship in a release and stay runtime dependencies.
+ */
+function isDevOnly(body: string): boolean {
+  const match = ONLY_RE.exec(body);
+  if (!match) return false;
+  return !/:prod\b/.test(match[1]!);
+}
 
 function parseDeps(content: string): MixDep[] {
   const span = findDepsListSpan(content);
@@ -118,7 +132,7 @@ function parseDeps(content: string): MixDep[] {
     const dep: MixDep = {
       name,
       inUmbrella: /\bin_umbrella:\s*true\b/.test(body),
-      dev: /\bonly:\s*/.test(body),
+      dev: isDevOnly(body),
     };
 
     // requirement: first positional quoted string right after the atom
@@ -187,17 +201,11 @@ export async function readMix(dir: string): Promise<MixFile | undefined> {
   return parseMix(content, filePath);
 }
 
-/** Apply a set of non-overlapping edits to `content`, preserving all other bytes. */
-export function applyEdits(content: string, edits: Edit[]): string {
-  const s = new MagicString(content);
-  for (const edit of edits) {
-    if (edit.start === edit.end) s.appendLeft(edit.start, edit.replacement);
-    else s.update(edit.start, edit.end, edit.replacement);
-  }
-  return s.toString();
-}
-
+/** Apply the queued non-overlapping edits, preserving all other bytes. */
 export async function writeMix(file: MixFile, edits: Edit[]): Promise<void> {
   if (edits.length === 0) return;
-  await writeFile(file.path, applyEdits(file.content, edits));
+
+  const s = new MagicString(file.content);
+  for (const edit of edits) s.update(edit.start, edit.end, edit.replacement);
+  await writeFile(file.path, s.toString());
 }

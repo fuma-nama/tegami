@@ -16,7 +16,6 @@ import { WorkspacePackage } from "tegami";
 
 const DEFAULT_GLOBS = ["**/Package.swift"];
 const IGNORED_GLOBS = ["**/.build/**", "**/node_modules/**", "**/Pods/**"];
-const REQUIRED_PLUGINS = ["git", "github", "gitlab"];
 
 interface SwiftManifest {
   /** The package name declared in the `Package(...)` initializer. */
@@ -85,15 +84,37 @@ export interface SwiftPluginOptions {
   bumpDep?: (opts: DependentRef) => BumpType | false;
 
   /**
-   * Whether a package should be published (i.e. have a git tag created).
+   * Default for whether a package should be published (i.e. have a git tag
+   * created). Provide a boolean, or a function to decide per package.
    *
-   * Provide a boolean, or a function to decide per package. Since Tegami's core
-   * `PackageOptions` cannot be extended by external plugins, this replaces Go's
-   * `packages.go.publish` option.
+   * Per-package `packages["Foo"].swift.publish` and group `swift.publish`
+   * options take precedence over this.
    *
    * @default true
    */
   publish?: boolean | ((pkg: SwiftPackage) => boolean);
+}
+
+/** Swift-specific `packages` / `groups` options, mirroring Go's `go` key. */
+export interface SharedSwiftOptions {
+  /**
+   * Whether to publish this package (create git tags).
+   *
+   * @default true
+   */
+  publish?: boolean;
+}
+
+declare module "tegami" {
+  interface PackageOptions<Group extends string = string> {
+    /** swift-specific options. */
+    swift?: SharedSwiftOptions;
+  }
+
+  interface GroupOptions {
+    /** swift-specific options. */
+    swift?: SharedSwiftOptions;
+  }
 }
 
 interface SwiftPackageLock {
@@ -122,8 +143,11 @@ export function swift({
 }: SwiftPluginOptions = {}): TegamiPlugin {
   let active = false;
 
+  // most specific wins: per-package option, then group option, then the plugin default
   const shouldPublish = (pkg: SwiftPackage): boolean =>
-    typeof publishOption === "function" ? publishOption(pkg) : publishOption;
+    pkg.options.swift?.publish ??
+    pkg.group?.options?.swift?.publish ??
+    (typeof publishOption === "function" ? publishOption(pkg) : publishOption);
 
   return {
     name: "swift",
@@ -132,7 +156,9 @@ export function swift({
       for (const pkg of packages) this.graph.add(pkg);
       active = this.graph.getPackages().some((pkg) => pkg instanceof SwiftPackage);
 
-      if (active && !this.plugins.some((plugin) => REQUIRED_PLUGINS.includes(plugin.name))) {
+      // Swift releases are git tags, and only the git plugin creates them.
+      // github()/gitlab() bundle git() themselves, so they satisfy this too.
+      if (active && !this.plugins.some((plugin) => plugin.name === "git")) {
         throw new Error(
           'The swift plugin requires the git plugin. Add git() from "tegami/plugins/git" to your plugins array.',
         );
@@ -205,7 +231,7 @@ export function swift({
       if (!active) return;
 
       return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight?.shouldPublish) return;
+        if (!packagePlan.preflight!.shouldPublish) return;
 
         const pkg = this.graph.get(id);
         if (!(pkg instanceof SwiftPackage)) return;

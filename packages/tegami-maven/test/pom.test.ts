@@ -1,13 +1,5 @@
 import { describe, expect, test } from "vitest";
-import {
-  applyPatches,
-  child,
-  children,
-  elementText,
-  parsePom,
-  resolvePath,
-  setElementText,
-} from "../src/pom";
+import { parseDocument } from "@tegami/xml-util";
 
 const SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
 <!-- top comment -->
@@ -42,67 +34,56 @@ const SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
 </project>
 `;
 
-describe("pom editor", () => {
-  test("resolves elements by path from the document root", () => {
-    const doc = parsePom(SAMPLE);
-    const root = doc.root!;
+/**
+ * A pom exercises the trickiest part of the shared XML reader: several sibling
+ * `<version>` elements at different depths, where editing the wrong one silently
+ * corrupts a release. These assert the Maven-shaped behaviour the plugin relies
+ * on; generic reader behaviour is covered by `@tegami/xml-util`'s own tests.
+ */
+describe("pom editing", () => {
+  test("distinguishes the project version from parent/dependency/plugin versions", () => {
+    const root = parseDocument(SAMPLE).root!;
 
     expect(root.name).toBe("project");
-    expect(elementText(doc, resolvePath(root, "version")!)).toBe("2.3.4");
-    expect(elementText(doc, resolvePath(root, "parent", "version")!)).toBe("1.0.0");
-    expect(elementText(doc, resolvePath(root, "properties", "revision")!)).toBe("9.9.9");
-    expect(elementText(doc, resolvePath(root, "artifactId")!)).toBe("child");
+    expect(root.get("version")?.text).toBe("2.3.4");
+    expect(root.getIn(["parent", "version"])?.text).toBe("1.0.0");
+    expect(root.getIn(["properties", "revision"])?.text).toBe("9.9.9");
+    expect(root.getIn(["dependencies", "dependency", "version"])?.text).toBe("1.0.0");
+    expect(root.getIn(["build", "plugins", "plugin", "version"])?.text).toBe("3.1.2");
   });
 
-  test("distinguishes the project version from parent/dependency/plugin versions", () => {
-    const doc = parsePom(SAMPLE);
-    const root = doc.root!;
-
-    const dependency = child(child(root, "dependencies")!, "dependency")!;
-    const plugin = resolvePath(root, "build", "plugins", "plugin")!;
-
-    expect(elementText(doc, child(root, "version")!)).toBe("2.3.4");
-    expect(elementText(doc, child(dependency, "version")!)).toBe("1.0.0");
-    expect(elementText(doc, child(plugin, "version")!)).toBe("3.1.2");
-  });
-
-  test("splices only the targeted element, preserving everything else", () => {
-    const doc = parsePom(SAMPLE);
-    const root = doc.root!;
-
-    setElementText(doc, child(root, "version")!, "3.0.0");
-    const result = applyPatches(doc);
+  test("bumping the project version leaves every other version untouched", () => {
+    const doc = parseDocument(SAMPLE);
+    doc.setText(doc.root!.get("version")!, "3.0.0");
+    const result = doc.toString();
 
     expect(result).toContain("<version>3.0.0</version>");
-    // parent, dependency, and plugin versions are untouched
     expect(result).toContain("<version>1.0.0</version>");
     expect(result).toContain("<version>3.1.2</version>");
-    // structure, comments, and namespaces are preserved
+    // structure, comments, and namespaces survive the edit
     expect(result).toContain("<!-- top comment -->");
     expect(result).toContain('xmlns="http://maven.apache.org/POM/4.0.0"');
     expect(result.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
   });
 
-  test("applies multiple non-overlapping patches in one pass", () => {
-    const doc = parsePom(SAMPLE);
+  test("a release can bump project, parent, and dependency versions in one pass", () => {
+    const doc = parseDocument(SAMPLE);
     const root = doc.root!;
-    const dependency = child(child(root, "dependencies")!, "dependency")!;
 
-    setElementText(doc, child(root, "version")!, "3.0.0");
-    setElementText(doc, resolvePath(root, "parent", "version")!, "1.1.0");
-    setElementText(doc, child(dependency, "version")!, "1.2.0");
-    const result = applyPatches(doc);
+    doc.setText(root.get("version")!, "3.0.0");
+    doc.setText(root.getIn(["parent", "version"])!, "1.1.0");
+    doc.setText(root.getIn(["dependencies", "dependency", "version"])!, "1.2.0");
 
-    const parent = child(parsePom(result).root!, "parent")!;
-    expect(elementText(parsePom(result), child(parsePom(result).root!, "version")!)).toBe("3.0.0");
-    expect(elementText(parsePom(result), child(parent, "version")!)).toBe("1.1.0");
-    expect(result).toContain("<version>1.2.0</version>");
-    // plugin version stays put
-    expect(result).toContain("<version>3.1.2</version>");
+    const reparsed = parseDocument(doc.toString()).root!;
+    expect(reparsed.get("version")?.text).toBe("3.0.0");
+    expect(reparsed.getIn(["parent", "version"])?.text).toBe("1.1.0");
+    expect(reparsed.getIn(["dependencies", "dependency", "version"])?.text).toBe("1.2.0");
+    // the plugin version is not a module version and stays put
+    expect(reparsed.getIn(["build", "plugins", "plugin", "version"])?.text).toBe("3.1.2");
   });
 
-  test("returns all matching children and skips comments/self-closing tags", () => {
-    const doc = parsePom(`<project>
+  test("reads every <module> and skips comments and self-closing tags", () => {
+    const doc = parseDocument(`<project>
   <modules>
     <module>a</module>
     <!-- skip me -->
@@ -111,14 +92,9 @@ describe("pom editor", () => {
   </modules>
   <empty/>
 </project>`);
-    const modules = children(child(doc.root!, "modules")!, "module");
 
-    expect(modules.map((m) => elementText(doc, m))).toEqual(["a", "b", "c"]);
-    expect(child(doc.root!, "empty")?.selfClosing).toBe(true);
-  });
-
-  test("ignores '>' inside attribute values", () => {
-    const doc = parsePom(`<project><name attr="a>b">value</name></project>`);
-    expect(elementText(doc, child(doc.root!, "name")!)).toBe("value");
+    const modules = doc.root!.get("modules")!.getAll("module");
+    expect(modules.map((module) => module.text)).toEqual(["a", "b", "c"]);
+    expect(doc.root!.get("empty")?.selfClosing).toBe(true);
   });
 });

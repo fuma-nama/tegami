@@ -8,7 +8,7 @@ import { readMix, writeMix, type Edit, type MixFile } from "./mix";
 import { satisfiesRequirement, updateRequirement } from "./requirement";
 import { assertHexRegistryPackage } from "./schema";
 
-const DEFAULT_API_URL = "https://hex.pm/api";
+const DEFAULT_REGISTRY = "https://hex.pm/api";
 
 export class HexPackage extends WorkspacePackage {
   readonly manager = "hex";
@@ -68,7 +68,7 @@ export interface HexPluginOptions {
    *
    * @default "https://hex.pm/api"
    */
-  apiUrl?: string;
+  registry?: string;
 
   /**
    * Decide how to bump packages that depend on a bumped local Hex package.
@@ -80,13 +80,34 @@ export interface HexPluginOptions {
   /**
    * Override whether a package should be published. By default a package is
    * publishable when its `mix.exs` declares a `package:` key or `package/0`.
+   *
+   * Per-package `packages["my_app"].hex.publish` and group `hex.publish`
+   * options take precedence over this.
    */
   publish?: (pkg: HexPackage) => boolean;
 }
 
+/** Hex-specific `packages` / `groups` options. */
+export interface SharedHexOptions {
+  /** Whether to publish this package to Hex. */
+  publish?: boolean;
+}
+
+declare module "tegami" {
+  interface PackageOptions<Group extends string = string> {
+    /** hex-specific options. */
+    hex?: SharedHexOptions;
+  }
+
+  interface GroupOptions {
+    /** hex-specific options. */
+    hex?: SharedHexOptions;
+  }
+}
+
 export function hex({
   packages: packageGlobs = [],
-  apiUrl = DEFAULT_API_URL,
+  registry = DEFAULT_REGISTRY,
   bumpDep: getBumpDepType,
   publish: isPublishable,
 }: HexPluginOptions = {}): TegamiPlugin {
@@ -117,10 +138,10 @@ export function hex({
     },
     resolvePlanStatus({ plan }) {
       return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight?.shouldPublish) return;
+        if (!preflight!.shouldPublish) return;
         const pkg = this.graph.get(id);
         if (!(pkg instanceof HexPackage) || !pkg.version) return;
-        if (!(await isPackagePublished(pkg.name, pkg.version, apiUrl))) return "pending";
+        if (!(await isPackagePublished(pkg.name, pkg.version, registry))) return "pending";
       });
     },
     async publish({ pkg }) {
@@ -174,7 +195,12 @@ export function hex({
   };
 }
 
+// most specific wins: per-package option, then group option, then the plugin
+// override, then the `package:`/`package/0` declaration in mix.exs
 function resolvePublishable(pkg: HexPackage, override: HexPluginOptions["publish"]): boolean {
+  const configured = pkg.options.hex?.publish ?? pkg.group?.options?.hex?.publish;
+  if (configured !== undefined) return configured;
+
   if (override) return override(pkg);
   const content = pkg.file.content;
   return /\bpackage:\s*/.test(content) || /\bdef(?:p)?\s+package\b/.test(content);
@@ -256,27 +282,40 @@ function dependencyRefs(graph: PackageGraph, pkg: HexPackage): HexDependencyRef[
   return refs;
 }
 
+/** Lazily built per-graph name and path indexes, so dependency resolution is O(1). */
+const hexIndexes = new WeakMap<
+  PackageGraph,
+  { byName: Map<string, HexPackage>; byPath: Map<string, HexPackage> }
+>();
+
+function graphIndex(graph: PackageGraph) {
+  let index = hexIndexes.get(graph);
+  if (!index) {
+    index = { byName: new Map(), byPath: new Map() };
+    for (const pkg of graph.getPackages()) {
+      if (!(pkg instanceof HexPackage)) continue;
+      index.byName.set(pkg.name, pkg);
+      index.byPath.set(normalizeDirPath(pkg.path), pkg);
+    }
+    hexIndexes.set(graph, index);
+  }
+  return index;
+}
+
 function resolveLinkedPackage(
   graph: PackageGraph,
   pkg: HexPackage,
   name: string,
   relativePath: string | undefined,
 ): HexPackage | undefined {
-  const packages = graph.getPackages();
+  const { byName, byPath } = graphIndex(graph);
 
-  const byName = packages.find(
-    (candidate): candidate is HexPackage =>
-      candidate instanceof HexPackage && candidate.name === name,
-  );
-  if (byName && byName !== pkg) return byName;
+  const named = byName.get(name);
+  if (named && named !== pkg) return named;
 
   if (relativePath) {
-    const absolute = normalizeDirPath(path.resolve(pkg.path, relativePath));
-    const byPath = packages.find(
-      (candidate): candidate is HexPackage =>
-        candidate instanceof HexPackage && normalizeDirPath(candidate.path) === absolute,
-    );
-    if (byPath && byPath !== pkg) return byPath;
+    const linked = byPath.get(normalizeDirPath(path.resolve(pkg.path, relativePath)));
+    if (linked && linked !== pkg) return linked;
   }
 
   return undefined;
@@ -336,9 +375,9 @@ async function discoverHexPackages(cwd: string, packageGlobs: string[]): Promise
 export async function isPackagePublished(
   name: string,
   version: string,
-  apiUrl: string,
+  registry: string,
 ): Promise<boolean> {
-  const url = joinPath(apiUrl, "packages", encodeURIComponent(name));
+  const url = joinPath(registry, "packages", encodeURIComponent(name));
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -348,7 +387,7 @@ export async function isPackagePublished(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw await fetchFailure(`Unable to validate ${name}@${version} on ${apiUrl}`, response);
+    throw await fetchFailure(`Unable to validate ${name}@${version} on ${registry}`, response);
   }
 
   const body = assertHexRegistryPackage(await response.json());

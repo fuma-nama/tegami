@@ -12,7 +12,7 @@ import { assertFlatContainerIndex } from "./schema";
 
 const DEFAULT_PACKAGES = ["**/*.csproj", "**/*.fsproj"];
 const IGNORE = ["**/bin/**", "**/obj/**", "**/node_modules/**"];
-const DEFAULT_SOURCE = "https://api.nuget.org/v3/index.json";
+const DEFAULT_REGISTRY = "https://api.nuget.org/v3/index.json";
 const NUGET_FLAT_CONTAINER = "https://api.nuget.org/v3-flatcontainer";
 const PROPS_FILE = "Directory.Build.props";
 
@@ -113,14 +113,16 @@ export interface NugetPluginOptions {
   /**
    * The NuGet feed to push packages to.
    *
+   * Passed to `dotnet nuget push` as `--source`.
+   *
    * @default "https://api.nuget.org/v3/index.json"
    */
-  source?: string;
+  registry?: string;
 
   /**
    * Base URL of the flat-container (package base address) resource used to check publish status.
    *
-   * Defaults to nuget.org when {@link source} is nuget.org. For private feeds, set this to the
+   * Defaults to nuget.org when {@link registry} is nuget.org. For private feeds, set this to the
    * feed's flat-container base URL to enable status checks; otherwise status checks are skipped.
    */
   statusUrl?: string;
@@ -135,13 +137,13 @@ export interface NugetPluginOptions {
 
 export function nuget({
   packages: patterns = DEFAULT_PACKAGES,
-  source = DEFAULT_SOURCE,
+  registry = DEFAULT_REGISTRY,
   statusUrl,
   bumpDep: getBumpDepType,
 }: NugetPluginOptions = {}): TegamiPlugin {
   let active = false;
   let files: XmlFile[] = [];
-  const statusBase = resolveStatusBase(source, statusUrl);
+  const statusBase = resolveStatusBase(registry, statusUrl);
 
   return {
     name: "nuget",
@@ -168,7 +170,7 @@ export function nuget({
       if (!statusBase) return;
 
       return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight?.shouldPublish) return;
+        if (!packagePlan.preflight!.shouldPublish) return;
         const pkg = this.graph.get(id);
         if (!(pkg instanceof NugetPackage) || !pkg.version) return;
 
@@ -200,7 +202,7 @@ export function nuget({
           return { type: "failed", error: `No .nupkg produced for ${pkg.packageId}.` };
         }
 
-        const args = ["nuget", "push", nupkg, "--source", source];
+        const args = ["nuget", "push", nupkg, "--source", registry];
         const apiKey = process.env.NUGET_API_KEY;
         if (apiKey) args.push("--api-key", apiKey);
 
@@ -253,9 +255,9 @@ export function nuget({
   };
 }
 
-function resolveStatusBase(source: string, statusUrl?: string): string | undefined {
+function resolveStatusBase(registry: string, statusUrl?: string): string | undefined {
   if (statusUrl) return statusUrl.replace(/\/+$/, "");
-  if (source === DEFAULT_SOURCE) return NUGET_FLAT_CONTAINER;
+  if (registry === DEFAULT_REGISTRY) return NUGET_FLAT_CONTAINER;
   return undefined;
 }
 

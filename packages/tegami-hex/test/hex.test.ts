@@ -81,6 +81,33 @@ describe("hex plugin", () => {
     expect(plugin.name).toBe("hex");
   });
 
+  test("only: classifies by environment, not by presence", () => {
+    const deps = parseMix(
+      `defmodule App.MixProject do
+        defp deps do
+          [
+            {:plain, "~> 1.0"},
+            {:dev_only, "~> 1.0", only: :dev},
+            {:dev_test, "~> 1.0", only: [:dev, :test]},
+            {:prod_only, "~> 1.0", only: :prod},
+            {:prod_and_dev, "~> 1.0", only: [:prod, :dev]}
+          ]
+        end
+      end`,
+      "/tmp/mix.exs",
+    ).deps;
+
+    const dev = Object.fromEntries(deps.map((dep) => [dep.name, dep.dev]));
+    expect(dev).toEqual({
+      plain: false,
+      dev_only: true,
+      dev_test: true,
+      // `only: :prod` still ships in a release — it is a runtime dependency
+      prod_only: false,
+      prod_and_dev: false,
+    });
+  });
+
   test("requirement checker handles pessimistic operator", () => {
     expect(satisfiesRequirement("1.5.0", "~> 1.0")).toBe(true);
     expect(satisfiesRequirement("2.0.0", "~> 1.0")).toBe(false);

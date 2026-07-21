@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import MagicString from "magic-string";
 
 export type ZonValue = ZonString | ZonMultilineString | ZonChar | ZonEnum | ZonObject | ZonLiteral;
 
@@ -438,11 +439,12 @@ export function replaceNode(file: ZonFile, node: Range, value: string): void {
 export async function writeZonFile(file: ZonFile): Promise<void> {
   if (file.patches.length === 0) return;
 
-  const patches = [...file.patches].sort((a, b) => b.start - a.start);
-  let content = file.content;
-  for (const patch of patches) {
-    content = `${content.slice(0, patch.start)}${patch.value}${content.slice(patch.end)}`;
-  }
+  // patch offsets refer to the original content, so they are spliced in one
+  // pass rather than applied in sequence; overlapping patches throw here
+  // instead of silently producing a mangled manifest.
+  const s = new MagicString(file.content);
+  for (const patch of file.patches) s.update(patch.start, patch.end, patch.value);
+  const content = s.toString();
 
   file.content = content;
   file.patches.length = 0;

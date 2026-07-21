@@ -5,6 +5,7 @@ import { x } from "tinyexec";
 import { afterEach, describe, expect, test } from "vitest";
 import { tegami } from "tegami";
 import { git } from "tegami/plugins/git";
+import { github } from "tegami/plugins/github";
 import { isTagCreated, swift } from "../src/index";
 
 const tempDirs: string[] = [];
@@ -33,13 +34,27 @@ describe("swift plugin", () => {
     );
   });
 
-  test("requires a git/github/gitlab plugin when swift packages are present", async () => {
+  test("requires the git plugin when swift packages are present", async () => {
     const cwd = await createWorkspace();
     tempDirs.push(cwd);
 
     await expect(tegami({ cwd, plugins: [swift()] })._internal.context()).rejects.toThrow(
       /requires the git plugin/,
     );
+  });
+
+  // github()/gitlab() return an array that includes git(), so they satisfy the
+  // requirement transitively — the guard must not reject them.
+  test("accepts the github plugin, which bundles git", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+
+    const context = await tegami({
+      cwd,
+      plugins: [github({ repo: "acme/repo" }), swift()],
+    })._internal.context();
+
+    expect(context.plugins.map((plugin) => plugin.name)).toContain("git");
   });
 
   test("patch-bumps local path dependents on draft", async () => {
@@ -180,6 +195,31 @@ describe("swift plugin", () => {
     const tags = new Set((await gitTags(cwd)).map((tag) => tag.trim()));
     expect(tags).toContain("packages/foo/1.1.0");
     expect(tags).not.toContain("1.2.1");
+  });
+
+  test("packages[name].swift.publish overrides the plugin-level publish option", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+    await writeChangelog(cwd, "Foo", "minor");
+
+    await tegami({ cwd, plugins: [git(), swift()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    const result = await tegami({
+      cwd,
+      // the plugin default says publish everything; the per-package option wins
+      plugins: [git({ pushTags: false }), swift({ publish: true })],
+      packages: {
+        Foo: { swift: { publish: false } },
+      },
+    }).publish();
+
+    expect(result).not.toBe("skipped");
+    if (result === "skipped") return;
+
+    expect(result.packages.get("swift:Foo")?.preflight?.shouldPublish).toBe(false);
+    expect(result.packages.get("swift:Root")?.preflight?.shouldPublish).toBe(true);
   });
 
   test("skips manifests that lack a package name", async () => {

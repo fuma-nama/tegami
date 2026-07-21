@@ -1,12 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import MagicString from "magic-string";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure, joinPath } from "tegami/utils";
 import {
-  applyEdits,
   parseGemspec,
   type DependencyKind,
   type RawDependency,
@@ -22,7 +22,7 @@ import {
 import { assertGemVersions } from "./schema";
 
 const DEFAULT_IGNORE = ["**/vendor/**", "**/node_modules/**", "**/tmp/**"];
-const DEFAULT_HOST = "https://rubygems.org";
+const DEFAULT_REGISTRY = "https://rubygems.org";
 
 export class GemPackage extends WorkspacePackage {
   readonly manager = "gem";
@@ -59,7 +59,11 @@ export class GemPackage extends WorkspacePackage {
     await Promise.all(
       Array.from(files, async (file) => {
         if (file.edits.length === 0) return;
-        await writeFile(file.path, applyEdits(file));
+
+        // splice the located spans, so comments and formatting survive untouched
+        const s = new MagicString(file.content);
+        for (const edit of file.edits) s.update(edit.start, edit.end, edit.value);
+        await writeFile(file.path, s.toString());
       }),
     );
   }
@@ -82,11 +86,13 @@ export interface GemPluginOptions {
   packages?: string[];
 
   /**
-   * RubyGems host used for publishing and status checks.
+   * RubyGems-compatible registry used for publishing and status checks.
+   *
+   * Passed to `gem push` as `--host`.
    *
    * @default "https://rubygems.org"
    */
-  host?: string;
+  registry?: string;
 
   /**
    * Decide how to bump the dependents of a bumped package.
@@ -98,7 +104,7 @@ export interface GemPluginOptions {
 
 export function gem({
   packages,
-  host,
+  registry,
   bumpDep: getBumpDepType,
 }: GemPluginOptions = {}): TegamiPlugin {
   let active = false;
@@ -128,10 +134,10 @@ export function gem({
     },
     resolvePlanStatus({ plan }) {
       return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight?.shouldPublish) return;
+        if (!preflight!.shouldPublish) return;
         const pkg = this.graph.get(id);
         if (!(pkg instanceof GemPackage) || !pkg.version) return;
-        if (!(await isGemVersionPublished(pkg.name, pkg.version, host))) return "pending";
+        if (!(await isGemVersionPublished(pkg.name, pkg.version, registry))) return "pending";
       });
     },
     async publish({ pkg }) {
@@ -149,7 +155,7 @@ export function gem({
       }
 
       const gemFile = `${pkg.name}-${pkg.version}.gem`;
-      const push = await x("gem", ["push", gemFile, ...(host ? ["--host", host] : [])], {
+      const push = await x("gem", ["push", gemFile, ...(registry ? ["--host", registry] : [])], {
         nodeOptions: { cwd: pkg.path },
       });
       if (push.exitCode !== 0) {
@@ -277,13 +283,19 @@ function dependencyRefs(graph: PackageGraph, pkg: GemPackage): GemDependencyRef[
   return refs;
 }
 
+/** Lazily built per-graph name index, so dependency resolution is O(1) instead of a scan per entry. */
+const nameIndexes = new WeakMap<PackageGraph, Map<string, GemPackage>>();
+
 function resolveLinkedPackage(graph: PackageGraph, name: string): GemPackage | undefined {
-  return graph
-    .getPackages()
-    .find(
-      (candidate): candidate is GemPackage =>
-        candidate instanceof GemPackage && candidate.name === name,
-    );
+  let index = nameIndexes.get(graph);
+  if (!index) {
+    index = new Map();
+    for (const pkg of graph.getPackages()) {
+      if (pkg instanceof GemPackage) index.set(pkg.name, pkg);
+    }
+    nameIndexes.set(graph, index);
+  }
+  return index.get(name);
 }
 
 async function discoverGemPackages(cwd: string, packages?: string[]): Promise<GemPackage[]> {
@@ -340,9 +352,9 @@ async function findGemspecPaths(cwd: string, packages?: string[]): Promise<strin
 export async function isGemVersionPublished(
   name: string,
   version: string,
-  host = DEFAULT_HOST,
+  registry = DEFAULT_REGISTRY,
 ): Promise<boolean> {
-  const url = joinPath(host, "api/v1/versions", `${encodeURIComponent(name)}.json`);
+  const url = joinPath(registry, "api/v1/versions", `${encodeURIComponent(name)}.json`);
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -352,7 +364,7 @@ export async function isGemVersionPublished(
 
   if (response.status === 404) return false;
   if (!response.ok) {
-    throw await fetchFailure(`Unable to validate ${name}@${version} on ${host}`, response);
+    throw await fetchFailure(`Unable to validate ${name}@${version} on ${registry}`, response);
   }
 
   const versions = assertGemVersions(await response.json());

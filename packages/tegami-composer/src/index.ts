@@ -3,6 +3,7 @@ import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
+import typia from "typia";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure, joinPath } from "tegami/utils";
@@ -104,19 +105,20 @@ export interface ComposerPluginOptions {
    * Packagist-compatible registry base URL, or `false` to skip all registry
    * requests and rely purely on git tags.
    *
-   * Used to detect already-published versions at publish time.
+   * Only consulted when {@link verifyRegistry} is enabled.
    *
    * @default "https://repo.packagist.org"
    */
   registry?: string | false;
 
   /**
-   * Verify publication against the registry in `resolvePlanStatus`.
+   * Verify publication against the registry, both when skipping an
+   * already-published version and when resolving publish status.
    *
    * Disabled by default: Packagist indexes a single package per repository, so a
    * monorepo package may never appear under `registry` and would otherwise block
-   * the publish flow forever. When disabled, publish status relies on the git
-   * plugin's tag-existence check.
+   * the publish flow forever. When disabled, Tegami makes no registry requests
+   * at all and publish status relies on the git plugin's tag-existence check.
    *
    * @default false
    */
@@ -143,6 +145,9 @@ interface ComposerPackageLock {
   version: string;
 }
 
+const validateComposerPackageLock: (input: unknown) => typia.IValidation<ComposerPackageLock> =
+  typia.createValidate<ComposerPackageLock>();
+
 export function composer({
   packages: packageGlobs = [],
   tagPrefix = "v",
@@ -152,6 +157,9 @@ export function composer({
   bumpDep: getBumpDepType,
 }: ComposerPluginOptions = {}): TegamiPlugin {
   let active = false;
+
+  /** Publishing is a git tag, so the registry is consulted only when asked for. */
+  const registryUrl = verifyRegistry && registry !== false ? registry : undefined;
 
   return {
     name: "composer",
@@ -218,10 +226,10 @@ export function composer({
       const lockVersions = new Map<string, string>();
       let data: unknown;
       while ((data = lock.read("composer:packages"))) {
-        const entry = data as Partial<ComposerPackageLock>;
-        if (typeof entry.id === "string" && typeof entry.version === "string") {
-          lockVersions.set(entry.id, entry.version);
-        }
+        const { success, data: parsed } = validateComposerPackageLock(data);
+        if (!success) continue;
+
+        lockVersions.set(parsed.id, parsed.version);
       }
 
       for (const [id, packagePlan] of plan.packages) {
@@ -249,21 +257,27 @@ export function composer({
       };
     },
     resolvePlanStatus({ plan }) {
-      if (!active || registry === false || !verifyRegistry) return;
+      if (!active || !registryUrl) return;
 
       return Array.from(plan.packages, async ([id, { preflight }]) => {
         if (!preflight!.shouldPublish) return;
 
         const pkg = this.graph.get(id);
         if (!(pkg instanceof ComposerPackage)) return;
-        if (!(await isPackagePublished(registry, pkg.name, pkg.version))) return "pending";
+        if (!(await isPackagePublished(registryUrl, pkg.name, pkg.version))) return "pending";
       });
     },
     async publish({ pkg }) {
       if (!(pkg instanceof ComposerPackage)) return;
 
-      if (registry !== false && (await isPackagePublished(registry, pkg.name, pkg.version))) {
-        return { type: "skipped" };
+      // Releasing is `git tag`, which needs no network — an unreachable or
+      // rate-limited registry must not block it, so a lookup failure just means
+      // "not known to be published" and the tag is created as usual.
+      if (registryUrl) {
+        const published = await isPackagePublished(registryUrl, pkg.name, pkg.version).catch(
+          () => false,
+        );
+        if (published) return { type: "skipped" };
       }
 
       // The git plugin creates the tag in `afterPublishAll`.

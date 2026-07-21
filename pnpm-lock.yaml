@@ -478,6 +478,9 @@ importers:
 
   packages/tegami-zig:
     dependencies:
+      magic-string:
+        specifier: ^1.0.0
+        version: 1.0.0
       semver:
         specifier: ^7.8.5
         version: 7.8.5

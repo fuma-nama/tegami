@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
@@ -6,18 +6,7 @@ import { x } from "tinyexec";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure } from "tegami/utils";
-import {
-  applyPatches,
-  child,
-  children,
-  elementText,
-  parsePom,
-  resolvePath,
-  setElementText,
-  writePom,
-  type PomDocument,
-  type PomElement,
-} from "./pom";
+import { parseDocument, type XmlDocument, type XmlElement } from "@tegami/xml-util";
 
 const DEFAULT_REGISTRY = "https://repo1.maven.org/maven2";
 
@@ -27,14 +16,20 @@ interface PomFile {
   path: string;
   /** absolute directory containing the `pom.xml` */
   dir: string;
-  doc: PomDocument;
-  root: PomElement;
+  doc: XmlDocument;
+  root: XmlElement;
+}
+
+/** Write a pom back to disk, but only when it has queued edits. */
+async function writePom(file: PomFile): Promise<void> {
+  if (!file.doc.dirty) return;
+  await writeFile(file.path, file.doc.toString());
 }
 
 /** Where a resolved version literally lives, so bumps edit the right place. */
 interface VersionLocation {
   file: PomFile;
-  element: PomElement;
+  element: XmlElement;
 }
 
 /** A `<dependency>` inside `project > dependencies`. */
@@ -42,7 +37,7 @@ interface RawDependency {
   groupId?: string;
   artifactId?: string;
   scope: string;
-  versionElement?: PomElement;
+  versionElement?: XmlElement;
   versionRaw?: string;
 }
 
@@ -53,7 +48,7 @@ export interface MavenDependencyRef {
   /** Maven dependency scope (`compile` when unspecified). */
   scope: string;
   /** The `<version>` element inside the `<dependency>`, if one is declared literally. */
-  versionElement?: PomElement;
+  versionElement?: XmlElement;
   /** Literal `<version>` text, which may be a `${property}` reference. */
   versionRaw?: string;
 }
@@ -73,7 +68,7 @@ export class MavenPackage extends WorkspacePackage {
     /** coordinates of the `<parent>` module, if declared */
     readonly parentCoords: { groupId: string; artifactId: string } | undefined,
     /** the `<parent><version>` element and its literal text, if declared */
-    readonly parentVersionRef: { element: PomElement; raw: string } | undefined,
+    readonly parentVersionRef: { element: XmlElement; raw: string } | undefined,
     readonly dependencies: RawDependency[],
   ) {
     super();
@@ -118,13 +113,23 @@ export interface MavenPluginOptions {
    * Override whether a package should be published.
    *
    * By default a package is published when it has a non-`SNAPSHOT` version.
+   *
+   * Per-package `packages["com.acme:app"].maven.publish` and group
+   * `maven.publish` options take precedence over this.
    */
   publish?: (pkg: MavenPackage) => boolean;
 
   /**
    * The command used to publish a package, executed at the workspace root.
    *
-   * @default ["mvn", "-B", "-ntp", "-DskipTests", "deploy", "-pl", "<module>", "-am"]
+   * The default deploys a single module. `-am` (also make) is deliberately not
+   * used: it would run `deploy` for the module's workspace dependencies too,
+   * re-deploying versions Tegami already published (which most repositories
+   * reject, failing the build) and deploying modules excluded by {@link publish}.
+   * Tegami publishes in dependency order, so upstream modules are already
+   * deployed by the time a dependent runs.
+   *
+   * @default ["mvn", "-B", "-ntp", "-DskipTests", "deploy", "-pl", "<module>"]
    */
   publishCommand?: string[] | ((pkg: MavenPackage) => string[]);
 
@@ -137,6 +142,24 @@ export interface MavenPluginOptions {
    * @default "https://repo1.maven.org/maven2"
    */
   registry?: string | false;
+}
+
+/** Maven-specific `packages` / `groups` options. */
+export interface SharedMavenOptions {
+  /** Whether to deploy this module. */
+  publish?: boolean;
+}
+
+declare module "tegami" {
+  interface PackageOptions<Group extends string = string> {
+    /** maven-specific options. */
+    maven?: SharedMavenOptions;
+  }
+
+  interface GroupOptions {
+    /** maven-specific options. */
+    maven?: SharedMavenOptions;
+  }
 }
 
 export function maven({
@@ -179,9 +202,14 @@ export function maven({
       const parent = resolveParentPackage(this.graph, pkg);
       if (parent) wait.push(parent.id);
 
-      const shouldPublish = shouldPublishOverride
-        ? shouldPublishOverride(pkg)
-        : pkg.version !== undefined && !isSnapshot(pkg.version);
+      // most specific wins: per-package option, then group option, then the
+      // plugin override, then the built-in non-SNAPSHOT rule
+      const configured = pkg.options.maven?.publish ?? pkg.group?.options?.maven?.publish;
+      const shouldPublish =
+        configured ??
+        (shouldPublishOverride
+          ? shouldPublishOverride(pkg)
+          : pkg.version !== undefined && !isSnapshot(pkg.version));
 
       return { shouldPublish, wait };
     },
@@ -189,7 +217,7 @@ export function maven({
       if (registry === false) return;
 
       return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight?.shouldPublish) return;
+        if (!packagePlan.preflight!.shouldPublish) return;
 
         const pkg = this.graph.get(id);
         if (!(pkg instanceof MavenPackage) || !pkg.version) return;
@@ -209,7 +237,12 @@ export function maven({
 
       const output = `${result.stdout}\n${result.stderr}`;
       if (result.exitCode !== 0) {
-        if (isAlreadyDeployed(output)) return { type: "skipped" };
+        // A reactor build can fail on *another* module that is already deployed,
+        // so the marker alone does not prove this package was the one rejected —
+        // confirm against the registry before reporting it as skipped.
+        if (isAlreadyDeployed(output) && (await isThisVersionDeployed(registry, pkg))) {
+          return { type: "skipped" };
+        }
 
         return {
           type: "failed",
@@ -252,7 +285,7 @@ export function maven({
       //    in-memory version — the publish lock, git tags, and status checks
       //    all read `pkg.version` after apply.
       for (const { location, version } of locations.values()) {
-        setElementText(location.file.doc, location.element, version);
+        location.file.doc.setText(location.element, version);
       }
       for (const pkg of mavenPackages) {
         const next = newVersionOf(pkg);
@@ -269,7 +302,7 @@ export function maven({
 
         const parentVersion = newVersionOf(parent);
         if (parentVersion && parentVersion !== ref.raw) {
-          setElementText(pkg.file.doc, ref.element, parentVersion);
+          pkg.file.doc.setText(ref.element, parentVersion);
         }
       }
 
@@ -282,7 +315,7 @@ export function maven({
           const linkedVersion = newVersionOf(ref.linked);
           if (!linkedVersion || linkedVersion === ref.versionRaw) continue;
 
-          setElementText(pkg.file.doc, ref.versionElement, linkedVersion);
+          pkg.file.doc.setText(ref.versionElement, linkedVersion);
         }
       }
 
@@ -293,7 +326,7 @@ export function maven({
         if (pkg.versionLocation) files.set(pkg.versionLocation.file.path, pkg.versionLocation.file);
       }
 
-      await Promise.all(Array.from(files.values(), (file) => writePom(file.doc, file.path)));
+      await Promise.all(Array.from(files.values(), (file) => writePom(file)));
     },
   };
 }
@@ -389,7 +422,7 @@ function resolvePublishCommand(
   if (publishCommand) return publishCommand;
 
   const module = path.relative(cwd, pkg.path) || ".";
-  return ["mvn", "-B", "-ntp", "-DskipTests", "deploy", "-pl", module, "-am"];
+  return ["mvn", "-B", "-ntp", "-DskipTests", "deploy", "-pl", module];
 }
 
 function isSnapshot(version: string): boolean {
@@ -398,6 +431,26 @@ function isSnapshot(version: string): boolean {
 
 function isAlreadyDeployed(output: string): boolean {
   return /already exists|does not allow updating|\b409\b/i.test(output);
+}
+
+/**
+ * Whether this specific package's version is already on the registry.
+ *
+ * With `registry: false` there is nothing to ask, so the deploy output is
+ * trusted — the same fallback {@link MavenPluginOptions.registry} documents.
+ */
+async function isThisVersionDeployed(
+  registry: string | false,
+  pkg: MavenPackage,
+): Promise<boolean> {
+  if (registry === false || !pkg.version) return true;
+
+  try {
+    return await isVersionPublished(registry, pkg.groupId, pkg.artifactId, pkg.version);
+  } catch {
+    // an unreachable registry must not turn a real failure into a silent skip
+    return false;
+  }
 }
 
 /** Maven version ranges use `[`/`(` bounds; soft requirements are bare versions. */
@@ -441,12 +494,12 @@ interface ParsedPom {
   groupIdRaw?: string;
   artifactId?: string;
   versionRaw?: string;
-  versionElement?: PomElement;
+  versionElement?: XmlElement;
   packaging: string;
   modules: string[];
-  properties: Map<string, PomElement>;
+  properties: Map<string, XmlElement>;
   parentCoords?: { groupId: string; artifactId: string };
-  parentVersionRef?: { element: PomElement; raw: string };
+  parentVersionRef?: { element: XmlElement; raw: string };
   parentRelativePath?: string;
   parentFile?: ParsedPom;
 }
@@ -516,9 +569,9 @@ async function collectModule(dir: string, parsed: Map<string, ParsedPom>): Promi
 }
 
 function parsePomFile(pomPath: string, dir: string, content: string): ParsedPom {
-  let doc: PomDocument;
+  let doc: XmlDocument;
   try {
-    doc = parsePom(content);
+    doc = parseDocument(content);
   } catch (error) {
     throw new Error(`Failed to parse "${pomPath}": ${(error as Error).message}`);
   }
@@ -529,21 +582,22 @@ function parsePomFile(pomPath: string, dir: string, content: string): ParsedPom 
   const file: PomFile = { path: pomPath, dir, doc, root: doc.root };
   const root = doc.root;
 
-  const versionElement = child(root, "version");
-  const parentElement = child(root, "parent");
+  const versionElement = root.get("version");
+  const parentElement = root.get("parent");
 
-  const properties = new Map<string, PomElement>();
-  const propsElement = child(root, "properties");
+  const properties = new Map<string, XmlElement>();
+  const propsElement = root.get("properties");
   if (propsElement) {
     for (const prop of propsElement.children) {
       properties.set(localOf(prop.name), prop);
     }
   }
 
-  const modulesElement = child(root, "modules");
+  const modulesElement = root.get("modules");
   const modules = modulesElement
-    ? children(modulesElement, "module")
-        .map((el) => elementText(doc, el))
+    ? modulesElement
+        .getAll("module")
+        .map((el) => el.text)
         .filter((value) => value.length > 0)
     : [];
 
@@ -551,25 +605,25 @@ function parsePomFile(pomPath: string, dir: string, content: string): ParsedPom 
   let parentVersionRef: ParsedPom["parentVersionRef"];
   let parentRelativePath: string | undefined;
   if (parentElement) {
-    const groupId = textOf(doc, child(parentElement, "groupId"));
-    const artifactId = textOf(doc, child(parentElement, "artifactId"));
+    const groupId = textOf(parentElement.get("groupId"));
+    const artifactId = textOf(parentElement.get("artifactId"));
     if (groupId && artifactId) parentCoords = { groupId, artifactId };
 
-    const versionEl = child(parentElement, "version");
+    const versionEl = parentElement.get("version");
     if (versionEl) {
-      parentVersionRef = { element: versionEl, raw: elementText(doc, versionEl) };
+      parentVersionRef = { element: versionEl, raw: versionEl.text };
     }
 
-    parentRelativePath = textOf(doc, child(parentElement, "relativePath"));
+    parentRelativePath = textOf(parentElement.get("relativePath"));
   }
 
   return {
     file,
-    groupIdRaw: textOf(doc, child(root, "groupId")),
-    artifactId: textOf(doc, child(root, "artifactId")),
-    versionRaw: versionElement ? elementText(doc, versionElement) : undefined,
+    groupIdRaw: textOf(root.get("groupId")),
+    artifactId: textOf(root.get("artifactId")),
+    versionRaw: versionElement ? versionElement.text : undefined,
     versionElement,
-    packaging: textOf(doc, child(root, "packaging")) ?? "jar",
+    packaging: textOf(root.get("packaging")) ?? "jar",
     modules,
     properties,
     parentCoords,
@@ -618,7 +672,7 @@ function resolveVersion(
       const property = findProperty(pom, propName);
       if (property) {
         return {
-          version: elementText(property.file.doc, property.element),
+          version: property.element.text,
           location: { file: property.file, element: property.element },
         };
       }
@@ -649,7 +703,7 @@ function findProperty(
   pom: ParsedPom,
   name: string,
   seen = new Set<ParsedPom>(),
-): { file: PomFile; element: PomElement } | undefined {
+): { file: PomFile; element: XmlElement } | undefined {
   if (seen.has(pom)) return;
   seen.add(pom);
 
@@ -660,27 +714,27 @@ function findProperty(
 }
 
 function resolveDependencies(pom: ParsedPom): RawDependency[] {
-  const dependenciesElement = child(pom.file.root, "dependencies");
+  const dependenciesElement = pom.file.root.get("dependencies");
   if (!dependenciesElement) return [];
 
   const out: RawDependency[] = [];
-  for (const dependency of children(dependenciesElement, "dependency")) {
-    const versionElement = child(dependency, "version");
+  for (const dependency of dependenciesElement.getAll("dependency")) {
+    const versionElement = dependency.get("version");
     out.push({
-      groupId: textOf(pom.file.doc, child(dependency, "groupId")),
-      artifactId: textOf(pom.file.doc, child(dependency, "artifactId")),
-      scope: textOf(pom.file.doc, child(dependency, "scope")) ?? "compile",
+      groupId: textOf(dependency.get("groupId")),
+      artifactId: textOf(dependency.get("artifactId")),
+      scope: textOf(dependency.get("scope")) ?? "compile",
       versionElement,
-      versionRaw: versionElement ? elementText(pom.file.doc, versionElement) : undefined,
+      versionRaw: versionElement ? versionElement.text : undefined,
     });
   }
 
   return out;
 }
 
-function textOf(doc: PomDocument, element: PomElement | undefined): string | undefined {
+function textOf(element: XmlElement | undefined): string | undefined {
   if (!element) return undefined;
-  const text = elementText(doc, element);
+  const text = element.text;
   return text.length > 0 ? text : undefined;
 }
 
@@ -688,5 +742,3 @@ function localOf(name: string): string {
   const colon = name.indexOf(":");
   return colon < 0 ? name : name.slice(colon + 1);
 }
-
-export { applyPatches, parsePom, resolvePath };
