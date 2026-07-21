@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/composer:
-    type: minor
----
+## @tegami/composer@0.1.0
 
 ### Add Composer support
 

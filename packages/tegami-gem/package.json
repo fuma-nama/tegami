@@ -1,6 +1,6 @@
 {
   "name": "@tegami/gem",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Ruby gem workspace support and RubyGems publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",

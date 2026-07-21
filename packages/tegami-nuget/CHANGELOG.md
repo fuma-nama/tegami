@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/nuget:
-    type: minor
----
+## @tegami/nuget@0.1.0
 
 ### Add NuGet support
 

@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/hex:
-    type: minor
----
+## @tegami/hex@0.1.0
 
 ### Add Elixir Mix support
 

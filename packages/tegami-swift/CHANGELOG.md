@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/swift:
-    type: minor
----
+## @tegami/swift@0.1.0
 
 ### Add Swift package support
 

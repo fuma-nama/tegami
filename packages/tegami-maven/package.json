@@ -1,6 +1,6 @@
 {
   "name": "@tegami/maven",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Maven module support and Maven Central publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",

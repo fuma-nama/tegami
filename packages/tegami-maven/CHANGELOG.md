@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/maven:
-    type: minor
----
+## @tegami/maven@0.1.0
 
 ### Add Maven support
 

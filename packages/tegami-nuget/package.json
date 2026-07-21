@@ -1,6 +1,6 @@
 {
   "name": "@tegami/nuget",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": ".NET project support and NuGet publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",
