@@ -1,6 +1,6 @@
 {
   "name": "@tegami/swift",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Swift package support and git tag publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",

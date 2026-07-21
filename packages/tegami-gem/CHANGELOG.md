@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/gem:
-    type: minor
----
+## @tegami/gem@0.1.0
 
 ### Add Ruby gem support
 

@@ -1,29 +1,80 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Preserve interactive registry authentication\n\nRegistry publishing now retains terminal access during local interactive runs, allowing browser and two-factor authentication to complete before publishing continues.\n"
-    filename: 2026-07-20-7c4a91f2.md
+  - content: "---\npackages:\n  npm:@tegami/composer:\n    type: minor\n---\n\n### Add Composer support\n\nTegami now includes an opt-in `@tegami/composer` plugin that discovers PHP packages from `composer.json` path repositories, rewrites workspace constraints, and publishes through git tags for Packagist.\n"
+    filename: 2026-07-11-composer-plugin.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/gem:\n    type: minor\n---\n\n### Add Ruby gem support\n\nTegami now includes an opt-in `@tegami/gem` plugin that discovers `*.gemspec` packages, resolves versions from the gemspec or `lib/**/version.rb`, rewrites pessimistic (`~>`) dependency requirements, and publishes with `gem push`.\n"
+    filename: 2026-07-11-gem-plugin.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/hex:\n    type: minor\n---\n\n### Add Elixir Mix support\n\nTegami now includes an opt-in `@tegami/hex` plugin that discovers Mix projects and umbrella apps, rewrites Elixir version requirements, and publishes with `mix hex.publish`.\n"
+    filename: 2026-07-11-hex-plugin.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/maven:\n    type: minor\n---\n\n### Add Maven support\n\nTegami now includes an opt-in `@tegami/maven` plugin that discovers `pom.xml` modules with parent and `${revision}` inheritance, rewrites inter-module versions, and publishes with a configurable `mvn deploy`.\n"
+    filename: 2026-07-11-maven-plugin.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/nuget:\n    type: minor\n---\n\n### Add NuGet support\n\nTegami now includes an opt-in `@tegami/nuget` plugin that discovers `.csproj`/`.fsproj` projects, resolves versions through `Directory.Build.props` inheritance, rewrites package references, and publishes with `dotnet nuget push`.\n"
+    filename: 2026-07-11-nuget-plugin.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/swift:\n    type: minor\n---\n\n### Add Swift package support\n\nTegami now includes an opt-in `@tegami/swift` plugin that discovers `Package.swift` manifests, follows local `.package(path:)` dependencies, and publishes through git tags like the Go plugin.\n"
+    filename: 2026-07-11-swift-plugin.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:@tegami/xml-util:\n    type: minor\n---\n\n### Add @tegami/xml-util\n\nA new format-preserving XML document package with a `yaml`-style API (`parseDocument`, `get`/`getIn`, `setIn`/`setText`/`setAttr`, `toString`, `toJS`). The `@tegami/maven` and `@tegami/nuget` plugins now share it instead of each carrying their own XML editor.\n"
+    filename: 2026-07-11-xml-util.md
     v: 0.0.0
 core:packages:
   - id: npm:root
     updated: false
   - id: npm:docs
     updated: false
+  - id: npm:tegami
+    updated: false
   - changelogIds:
-      - 2026-07-20-7c4a91f2.md
-    id: npm:tegami
+      - 2026-07-11-composer-plugin.md
+    id: npm:@tegami/composer
+    updated: true
+  - id: npm:@tegami/dart
+    updated: false
+  - changelogIds:
+      - 2026-07-11-gem-plugin.md
+    id: npm:@tegami/gem
+    updated: true
+  - changelogIds:
+      - 2026-07-11-hex-plugin.md
+    id: npm:@tegami/hex
+    updated: true
+  - changelogIds:
+      - 2026-07-11-maven-plugin.md
+    id: npm:@tegami/maven
+    updated: true
+  - changelogIds:
+      - 2026-07-11-nuget-plugin.md
+    id: npm:@tegami/nuget
     updated: true
   - id: npm:@tegami/pip
     updated: false
+  - changelogIds:
+      - 2026-07-11-swift-plugin.md
+    id: npm:@tegami/swift
+    updated: true
   - id: npm:@tegami/zig
-    updated: false
-  - id: npm:@tegami/dart
     updated: false
   - id: npm:@repo/typescript-config
     updated: false
+  - changelogIds:
+      - 2026-07-11-xml-util.md
+    id: npm:@tegami/xml-util
+    updated: true
 npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
-  - id: npm:@tegami/pip
-  - id: npm:@tegami/zig
+  - id: npm:@tegami/composer
   - id: npm:@tegami/dart
+  - id: npm:@tegami/gem
+  - id: npm:@tegami/hex
+  - id: npm:@tegami/maven
+  - id: npm:@tegami/nuget
+  - id: npm:@tegami/pip
+  - id: npm:@tegami/swift
+  - id: npm:@tegami/zig
   - id: npm:@repo/typescript-config
+  - id: npm:@tegami/xml-util

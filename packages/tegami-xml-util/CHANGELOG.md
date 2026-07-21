@@ -1,8 +1,4 @@
----
-packages:
-  npm:@tegami/xml-util:
-    type: minor
----
+## @tegami/xml-util@0.1.0
 
 ### Add @tegami/xml-util
 

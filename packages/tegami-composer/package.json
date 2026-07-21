@@ -1,6 +1,6 @@
 {
   "name": "@tegami/composer",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "PHP Composer workspace support and Packagist publishing for Tegami",
   "license": "MIT",
   "author": "Fuma Nama",
