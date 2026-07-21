@@ -170,6 +170,80 @@ Some description.
     expect(normalizeDirPath(String(exec.mock.calls[0]?.[2]?.nodeOptions?.cwd))).toBe(
       normalizeDirPath(packagePath),
     );
+    expect(exec.mock.calls[0]?.[2]?.nodeOptions?.stdio).toBeUndefined();
+  });
+
+  test("inherits terminal stdio for interactive publishing", async () => {
+    const { cwd, packagePath, lockPath } = await createPublishFixture();
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") return commandResult();
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    await withTerminal({ isTTY: true }, async () => {
+      const context = await createResolvedContext({ cwd, lockPath: lockPath });
+      const plan = await publishFixture(context, { dryRun: false });
+
+      expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    });
+
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0]).toEqual([
+      "pnpm",
+      ["publish", "--tag", "latest", "--no-git-checks"],
+      { nodeOptions: { cwd: packagePath, stdio: "inherit" } },
+    ]);
+  });
+
+  test("inherits terminal stdio for npm publishing through the Bun client", async () => {
+    const { cwd, packagePath, lockPath } = await createPublishFixture();
+
+    exec.mockImplementation((command, args = []) => {
+      if (command === "bun" && args.at(0) === "pm") return commandResult();
+      if (command === "npm" && args.at(0) === "publish") return commandResult();
+      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    });
+
+    await withTerminal({ isTTY: true }, async () => {
+      const context = await createResolvedContext({
+        cwd,
+        lockPath: lockPath,
+        npm: { client: "bun" },
+      });
+      const plan = await publishFixture(context, { dryRun: false });
+
+      expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    });
+
+    const packCall = exec.mock.calls.find(
+      ([command, args]) => command === "bun" && args?.at(0) === "pm",
+    );
+    expect(packCall?.[2]?.nodeOptions?.stdio).toBeUndefined();
+
+    const publishCall = exec.mock.calls.find(
+      ([command, args]) => command === "npm" && args?.at(0) === "publish",
+    );
+    expect(publishCall?.[2]?.nodeOptions).toEqual({ cwd: packagePath, stdio: "inherit" });
+  });
+
+  test("keeps registry output captured in CI even when stdin is a TTY", async () => {
+    const { cwd, packagePath, lockPath } = await createPublishFixture();
+
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "publish") return commandResult();
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    await withTerminal({ isTTY: true, ci: true }, async () => {
+      const context = await createResolvedContext({ cwd, lockPath: lockPath });
+      const plan = await publishFixture(context, { dryRun: false });
+
+      expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    });
+
+    expect(exec.mock.calls[0]?.[2]?.nodeOptions).toEqual({ cwd: packagePath });
   });
 
   test("still publishes when only replay changelog files remain", async () => {
@@ -439,6 +513,11 @@ async function createPublishFixture(options: { registry?: string } = {}): Promis
   tempDirs.push(cwd);
 
   await mkdir(packagePath, { recursive: true });
+  await writeJson(join(cwd, "package.json"), {
+    name: "fixture",
+    private: true,
+    workspaces: ["packages/*"],
+  });
   await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
   await writeJson(join(packagePath, "package.json"), {
     name: "@acme/core",
@@ -584,6 +663,32 @@ function normalizeChangelog(changelog: {
 function normalizeDirPath(path: string): string {
   const normalized = normalize(path);
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
+}
+
+async function withTerminal<T>(
+  options: { isTTY: boolean; ci?: boolean },
+  run: () => Promise<T>,
+): Promise<T> {
+  const stdinIsTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+  const previousCI = process.env.CI;
+
+  Object.defineProperty(process.stdin, "isTTY", {
+    configurable: true,
+    value: options.isTTY,
+  });
+
+  if (options.ci) process.env.CI = "true";
+  else delete process.env.CI;
+
+  try {
+    return await run();
+  } finally {
+    if (stdinIsTTY) Object.defineProperty(process.stdin, "isTTY", stdinIsTTY);
+    else Reflect.deleteProperty(process.stdin, "isTTY");
+
+    if (previousCI === undefined) delete process.env.CI;
+    else process.env.CI = previousCI;
+  }
 }
 
 function withPreflightWait(

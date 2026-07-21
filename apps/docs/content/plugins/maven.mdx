@@ -1,0 +1,78 @@
+---
+title: Maven
+description: Maven module support and Maven Central publishing.
+---
+
+The Maven plugin discovers modules from `pom.xml` files, bumps versions, updates inter-module dependency versions, and publishes with `mvn deploy`.
+
+```npm
+npm install @tegami/maven
+```
+
+```ts
+import { tegami } from "tegami";
+import { maven } from "@tegami/maven";
+
+const paper = tegami({
+  plugins: [maven()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+[Maven](https://maven.apache.org) (`mvn`) and a JDK must be available in CI. Deployment config and credentials live in your `pom.xml` and `settings.xml`. Tegami runs the deploy command; it does not configure deployment for you.
+
+</Callout>
+
+## Discovery
+
+Starting from the root `pom.xml`, Tegami follows `<modules>`. Use the `packages` option to include poms not reachable from the root.
+
+Coordinates are `groupId:artifactId`. Modules can inherit `groupId` and `version` from a parent, including `${revision}` properties. Aggregator poms are included like any other module.
+
+When modules share a parent version or `${revision}` property, bumping any of them edits that shared location so they release together.
+
+## Dependency bumping
+
+| Dependency scope      | Default dependent bump |
+| --------------------- | ---------------------- |
+| `compile` / `runtime` | patch                  |
+| `test` / `provided`   | none                   |
+
+Inter-module dependencies with a literal `<version>` are rewritten when the released version changes. `${project.version}` and other property references are left as-is.
+
+## Configuration
+
+```ts
+maven({
+  publishCommand: ["mvn", "-B", "-ntp", "-DskipTests", "deploy"],
+  registry: "https://repo1.maven.org/maven2",
+});
+```
+
+<auto-type-table type="import('@tegami/maven').MavenPluginOptions" />
+
+## Publishing
+
+By default Tegami runs `mvn -B -ntp -DskipTests deploy -pl <module>` at the workspace root, one module at a time in dependency order. Override the command with `publishCommand`. `-SNAPSHOT` versions are not publishable by default.
+
+<Callout type='warn' title="Avoid -am">
+
+Do not add `-am` to `publishCommand`. Tegami already publishes in dependency order, and re-deploying a version that already exists usually fails the build. If upstream modules need to be present locally, run `mvn install -DskipTests` before publishing.
+
+</Callout>
+
+Publish status is checked against Maven Central by default. Override with `registry`, or set `registry: false` for private repositories.
+
+<Callout type='info' title="Maven Central">
+
+Publishing to Maven Central through the [Central Publisher Portal](https://central.sonatype.org) requires the `central-publishing-maven-plugin` in your pom. Central has a sync delay, so a freshly deployed version may report as pending for a few minutes.
+
+When the [git](/plugins/git), [GitHub](/plugins/github), or [GitLab](/plugins/gitlab) plugin is configured, releases are tagged as `groupId/artifactId@version` (colons are not valid in git tags).
+
+</Callout>
+
+## Limitations
+
+- Only Maven (`pom.xml`) is supported; Gradle is out of scope.
+- Version ranges in dependency declarations are left untouched.

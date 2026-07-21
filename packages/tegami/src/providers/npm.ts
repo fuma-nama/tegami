@@ -10,7 +10,7 @@ import { execFailure, fetchFailure } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
 import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
-import { joinPath } from "../utils/common";
+import { isCI, joinPath } from "../utils/common";
 import {
   type DependencySpec,
   type DepField,
@@ -404,7 +404,12 @@ async function publish(
     const publishArgs = ["publish", tarballPath];
     if (distTag) publishArgs.push("--tag", distTag);
 
-    const publishResult = await x("npm", publishArgs, { nodeOptions: { cwd: pkg.path } });
+    const publishResult = await x("npm", publishArgs, {
+      nodeOptions: {
+        cwd: pkg.path,
+        ...(!isCI() && process.stdin.isTTY ? { stdio: "inherit" as const } : {}),
+      },
+    });
     if (publishResult.exitCode !== 0) {
       return {
         type: "failed",
@@ -436,7 +441,12 @@ async function publish(
       break;
   }
 
-  const result = await x(command, args, { nodeOptions: { cwd: pkg.path } });
+  const result = await x(command, args, {
+    nodeOptions: {
+      cwd: pkg.path,
+      ...(!isCI() && process.stdin.isTTY ? { stdio: "inherit" as const } : {}),
+    },
+  });
   if (result.exitCode !== 0) {
     return {
       type: "failed",

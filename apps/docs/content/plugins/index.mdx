@@ -44,14 +44,22 @@ const paper = tegami({
 
 Other plugins are opt-in, add them to the `plugins` array:
 
-| Plugin                    | Role                                                                   |
-| ------------------------- | ---------------------------------------------------------------------- |
-| [Cargo](/plugins/cargo)   | Discover Cargo workspace packages and publish to crates.io             |
-| [pip](/plugins/pip)       | Discover Python workspace packages and publish to PyPI (`@tegami/pip`) |
-| [Zig](/plugins/zig)       | Discover Zig packages from `build.zig.zon` (`@tegami/zig`)             |
-| [git](/plugins/git)       | Create git tags after publishing                                       |
-| [GitHub](/plugins/github) | Version Packages PRs and GitHub releases                               |
-| [Go](/plugins/go)         | Discover Go modules and publish via git tags                           |
+| Plugin                        | Role                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| [Cargo](/plugins/cargo)       | Discover Cargo workspace packages and publish to crates.io                     |
+| [pip](/plugins/pip)           | Discover Python workspace packages and publish to PyPI (`@tegami/pip`)         |
+| [Dart](/plugins/dart)         | Discover Dart pub workspaces and publish to pub.dev (`@tegami/dart`)           |
+| [Zig](/plugins/zig)           | Discover Zig packages from `build.zig.zon` (`@tegami/zig`)                     |
+| [Ruby](/plugins/gem)          | Discover Ruby gems and publish to RubyGems (`@tegami/gem`)                     |
+| [Composer](/plugins/composer) | Discover Composer packages and tag releases for Packagist (`@tegami/composer`) |
+| [NuGet](/plugins/nuget)       | Discover .NET projects and publish to NuGet (`@tegami/nuget`)                  |
+| [Elixir](/plugins/hex)        | Discover Mix projects and publish to Hex (`@tegami/hex`)                       |
+| [Maven](/plugins/maven)       | Discover Maven modules and publish to Maven Central (`@tegami/maven`)          |
+| [Swift](/plugins/swift)       | Discover Swift packages and publish via git tags (`@tegami/swift`)             |
+| [Go](/plugins/go)             | Discover Go modules and publish via git tags                                   |
+| [git](/plugins/git)           | Create git tags after publishing                                               |
+| [GitHub](/plugins/github)     | Version Packages PRs and GitHub releases                                       |
+| [GitLab](/plugins/gitlab)     | Version Packages MRs and GitLab releases                                       |
 
 ```ts
 import { cargo } from "tegami/plugins/cargo";

@@ -42,9 +42,7 @@ Tegami only auto-bumps dependents and rewrites constraints for dependencies decl
 | `optional-dependencies` | patch                  |
 | `dependency-groups`     | none                   |
 
-**Dependent version bumps**: when a workspace-linked package is released, its workspace dependents are patch-bumped even if the old range still accepts the new version.
-
-**Constraint rewrites**: only for workspace-linked dependencies, and only when the range no longer accepts the new version.
+Workspace dependents are patch-bumped when a linked package is released. Constraints are rewritten only when the range no longer accepts the new version.
 
 To release a path-linked package without `{ workspace = true }`, add it to a changelog explicitly.
 

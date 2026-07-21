@@ -1,0 +1,61 @@
+---
+title: NuGet
+description: .NET project support and NuGet publishing.
+---
+
+The NuGet plugin discovers .NET projects from `*.csproj` / `*.fsproj` files, bumps versions, updates package references, and publishes with `dotnet nuget push`.
+
+```npm
+npm install @tegami/nuget
+```
+
+```ts
+import { tegami } from "tegami";
+import { nuget } from "@tegami/nuget";
+
+const paper = tegami({
+  plugins: [nuget()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+The [.NET SDK](https://dotnet.microsoft.com) (`dotnet`) must be available in CI. Publishing reads the `NUGET_API_KEY` environment variable when set.
+
+</Callout>
+
+## Discovery
+
+Tegami globs `**/*.csproj` and `**/*.fsproj` (ignoring `bin`, `obj`, and `node_modules`). Each project file is one package.
+
+- **PackageId**: `<PackageId>`, or the project file name without extension.
+- **Version**: `<Version>` or `<VersionPrefix>` on the project, or inherited from the nearest `Directory.Build.props`.
+- **IsPackable**: `<IsPackable>false</IsPackable>` marks a project as not publishable.
+
+When several projects inherit their version from one `Directory.Build.props`, bumping any of them edits the shared file once.
+
+## Dependency bumping
+
+| Reference kind       | Default dependent bump |
+| -------------------- | ---------------------- |
+| `<ProjectReference>` | patch                  |
+| `<PackageReference>` | patch                  |
+
+`<ProjectReference>` versions are filled in at pack time, so nothing is rewritten in XML. Workspace `<PackageReference>` versions are rewritten when they no longer accept the released version.
+
+## Configuration
+
+```ts
+nuget({
+  registry: "https://api.nuget.org/v3/index.json",
+  bumpDep: ({ kind }) => (kind === "project" ? "patch" : "minor"),
+});
+```
+
+<auto-type-table type="import('@tegami/nuget').NugetPluginOptions" />
+
+## Publishing
+
+Tegami packs each project with `dotnet pack -c Release` and pushes the `.nupkg` with `dotnet nuget push`. When a version already exists, the package is skipped.
+
+For private feeds, set `statusUrl` to the feed's flat-container base URL to enable status checks.
