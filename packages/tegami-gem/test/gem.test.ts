@@ -207,9 +207,9 @@ describe("ruby requirement semantics", () => {
 
   test("never truncates prerelease versions", () => {
     // prerelease identifiers contain dots — truncation would mangle them
-    expect(formatRequirement(rewriteRequirement(parseRequirement("~> 1.0")!, "1.1.0-alpha.0"))).toBe(
-      "~> 1.1.0-alpha.0",
-    );
+    expect(
+      formatRequirement(rewriteRequirement(parseRequirement("~> 1.0")!, "1.1.0-alpha.0")),
+    ).toBe("~> 1.1.0-alpha.0");
     expect(formatRequirement(rewriteRequirement(parseRequirement("= 1.0.0")!, "2.0.0-rc.1"))).toBe(
       "= 2.0.0-rc.1",
     );

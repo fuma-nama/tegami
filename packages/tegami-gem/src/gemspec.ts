@@ -73,10 +73,7 @@ export async function parseGemspec(gemspecPath: string): Promise<ParsedGemspec> 
   return { name, version, gemspecFile, dependencies };
 }
 
-async function resolveVersion(
-  gemspecFile: TextFile,
-  dir: string,
-): Promise<VersionRef | undefined> {
+async function resolveVersion(gemspecFile: TextFile, dir: string): Promise<VersionRef | undefined> {
   const literal = VERSION_LITERAL_RE.exec(gemspecFile.content);
   if (literal) {
     const start = literal.index + literal[1]!.length + 1; // skip prefix + opening quote

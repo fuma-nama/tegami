@@ -129,7 +129,13 @@ describe("composer plugin", () => {
 
     // a real repo where the only tags are a subdirectory package's — the root
     // pattern `v*` also fnmatch-es `vendor-lib/v2.5.0`, which must be rejected
-    const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    };
     const run = async (...args: string[]) => {
       const { x } = await import("tinyexec");
       const result = await x("git", args, { nodeOptions: { cwd, env } });

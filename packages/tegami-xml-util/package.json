@@ -22,12 +22,12 @@
     "dev": "tsdown --watch"
   },
   "dependencies": {
-    "magic-string": "^0.30.21"
+    "magic-string": "^1.0.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@types/node": "^26.1.1",
-    "tsdown": "^0.22.4",
+    "tsdown": "^0.22.12",
     "typescript": "6.0.3"
   }
 }
