@@ -1,4 +1,4 @@
-import UnpluginTypia from "@typia/unplugin/rollup";
+import UnpluginTypia from "@typia/unplugin/rolldown";
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
@@ -13,5 +13,5 @@ export default defineConfig({
     onlyBundle: ["@renovatebot/pep440", "typia"],
   },
   exports: true,
-  plugins: [UnpluginTypia() as never],
+  plugins: [UnpluginTypia()],
 });

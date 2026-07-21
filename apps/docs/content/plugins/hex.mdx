@@ -1,0 +1,65 @@
+---
+title: Elixir
+description: Elixir Mix project support and Hex publishing.
+---
+
+The Elixir plugin discovers Mix projects from `mix.exs` files, bumps versions, updates dependency requirements, and publishes with `mix hex.publish`.
+
+```npm
+npm install @tegami/hex
+```
+
+```ts
+import { tegami } from "tegami";
+import { hex } from "@tegami/hex";
+
+const paper = tegami({
+  plugins: [hex()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+[Elixir](https://elixir-lang.org) (`mix` with Hex installed) must be available in CI. Publishing reads the `HEX_API_KEY` environment variable.
+
+</Callout>
+
+## Discovery
+
+Tegami reads the root `mix.exs`:
+
+- **Umbrella projects**: when the root declares `apps_path: "apps"`, each `apps/*` child with a `mix.exs` is discovered.
+- **Other monorepos**: pass directory globs via the `packages` option.
+- The root is included when it is itself an app (`app: :name` with a version).
+
+The version is read from `version: "1.2.3"` or a `@version "1.2.3"` module attribute. Packages whose version is computed another way are discovered but cannot be versioned.
+
+## Dependency bumping
+
+Tegami links workspace deps by app name or path, including `in_umbrella: true` and `path:` entries.
+
+| Dependency kind   | Default dependent bump |
+| ----------------- | ---------------------- |
+| runtime dep       | patch                  |
+| dev/test-only dep | none                   |
+
+A dep counts as dev/test-only when its `only:` list excludes `:prod`.
+
+When a released version falls outside a dependent's requirement, Tegami rewrites it while keeping the `~>` operator and its precision.
+
+## Configuration
+
+```ts
+hex({
+  registry: "https://hex.pm/api",
+  bumpDep: ({ dev }) => (dev ? false : "patch"),
+});
+```
+
+<auto-type-table type="import('@tegami/hex').HexPluginOptions" />
+
+## Publishing
+
+Tegami publishes each package with `mix hex.publish --yes`. A package is publishable when its `mix.exs` declares a `package:` key or `package/0` function; override this with `publish`. When the exact version already exists, the package is skipped.
+
+Set `registry` for self-hosted Hex.

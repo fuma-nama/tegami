@@ -1,0 +1,78 @@
+---
+title: Swift
+description: Swift Package Manager support and git-tag publishing.
+---
+
+The Swift plugin discovers packages from `Package.swift` manifests, bumps versions through git tags, and follows local `.package(path:)` dependencies.
+
+```npm
+npm install @tegami/swift
+```
+
+```ts
+import { tegami } from "tegami";
+import { git } from "tegami/plugins/git";
+import { swift } from "@tegami/swift";
+
+const paper = tegami({
+  plugins: [git(), swift()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+Swift packages publish through git tags, so the Swift plugin requires the [git](/plugins/git) plugin. The [GitHub](/plugins/github) and [GitLab](/plugins/gitlab) plugins include `git()` already. No Swift toolchain is required.
+
+</Callout>
+
+## How Swift versioning works
+
+Like Go modules, Swift packages have no version field in their manifest. SwiftPM resolves versions from git tags:
+
+- **Current version** is read from existing git tags (or the publish lock at publish time).
+- **Next version** is stored in the publish lock during `tegami version`.
+- **Publishing** creates git tags through the git plugin.
+
+## Discovery
+
+Tegami globs `**/Package.swift` (ignoring `.build`, `node_modules`, and `Pods`). The package name comes from the `Package(` initializer's `name:` argument.
+
+## Dependency bumping
+
+Tegami links `.package(path:)` entries to workspace packages. Local dependents are patch-bumped by default when a dependency is released. Remote `.package(url:)` entries are ignored.
+
+| Dependency kind           | Default dependent bump |
+| ------------------------- | ---------------------- |
+| `.package(path:)` (local) | patch                  |
+
+## Configuration
+
+```ts
+swift({
+  tagPrefix: "v",
+  publish: (pkg) => pkg.name !== "InternalTools",
+});
+```
+
+<auto-type-table type="import('@tegami/swift').SwiftPluginOptions" />
+
+Disable publishing for a package with `packages` or `groups`:
+
+```ts
+const paper = tegami({
+  plugins: [git(), swift()],
+  packages: {
+    InternalTools: { swift: { publish: false } },
+  },
+});
+```
+
+## Publishing
+
+Publishing creates a git tag per package (`{tagPrefix}{version}` at the repo root, `{relativeDir}/{tagPrefix}{version}` for subdirectory packages). When the tag already exists, the package is skipped.
+
+<Callout type='info' title="Subdirectory packages">
+
+SwiftPM resolves a git dependency to the `Package.swift` at the repository root, so only the root package is consumable by URL. Tegami still tags subdirectory packages to track releases, but consumers need repository splitting to depend on them remotely.
+
+</Callout>

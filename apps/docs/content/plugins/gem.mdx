@@ -1,0 +1,60 @@
+---
+title: Ruby
+description: Ruby gem workspace support and RubyGems publishing.
+---
+
+The Ruby plugin discovers gems from `*.gemspec` files, bumps versions, updates workspace dependency requirements, and publishes with `gem push`.
+
+```npm
+npm install @tegami/gem
+```
+
+```ts
+import { tegami } from "tegami";
+import { gem } from "@tegami/gem";
+
+const paper = tegami({
+  plugins: [gem()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+The [`gem`](https://rubygems.org) CLI must be available in CI. Publishing reads the `GEM_HOST_API_KEY` environment variable.
+
+</Callout>
+
+## Discovery
+
+Tegami globs `**/*.gemspec` (ignoring `vendor`, `node_modules`, and `tmp`). Each directory with a gemspec is one gem.
+
+Name and version are read from common gemspec forms:
+
+- `spec.name = "my_gem"`
+- `spec.version = "1.2.3"`, or a `MyGem::VERSION` constant defined in `lib/**/version.rb`
+
+Gems whose name or version is computed dynamically are skipped.
+
+## Dependency bumping
+
+| Dependency kind              | Default dependent bump |
+| ---------------------------- | ---------------------- |
+| `add_dependency` (runtime)   | patch                  |
+| `add_development_dependency` | none                   |
+
+When a released version falls outside a dependent's requirement, Tegami rewrites it while keeping the same operator style (`~> 1.2` becomes `~> 2.0`).
+
+## Configuration
+
+```ts
+gem({
+  registry: "https://rubygems.org",
+  bumpDep: ({ kind }) => (kind === "development" ? false : "patch"),
+});
+```
+
+<auto-type-table type="import('@tegami/gem').GemPluginOptions" />
+
+## Publishing
+
+Tegami builds each gem with `gem build` and pushes it with `gem push`. Set `registry` to publish to a private gem server. When a version already exists, the package is skipped.
