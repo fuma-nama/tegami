@@ -1,5 +1,11 @@
 import MagicString from "magic-string";
-import { parseRaw, type RawElement, type RawNode, type XmlAttribute } from "./parser";
+import {
+  decodeEntities,
+  parseRaw,
+  type RawElement,
+  type RawNode,
+  type XmlAttribute,
+} from "./parser";
 
 export type { Range, XmlAttribute } from "./parser";
 
@@ -151,7 +157,7 @@ export class XmlElement {
     const textNodes: { value: string; start: number; end: number }[] = [];
     for (const node of raw.children as RawNode[]) {
       if (node.kind === "element") children.push(new XmlElement(node, ci));
-      else textNodes.push({ value: stripCdata(node.value), start: node.start, end: node.end });
+      else textNodes.push({ value: readTextNode(node.value), start: node.start, end: node.end });
     }
     this.children = children;
     this.textNodes = textNodes;
@@ -207,7 +213,10 @@ export class XmlElement {
     return this.attributes.find((a) => this.eq(a.name, name));
   }
 
-  /** Trimmed text content (concatenation of direct text nodes). */
+  /**
+   * Trimmed text content (concatenation of direct text nodes), with entity
+   * references decoded. CDATA content is returned literally.
+   */
   get text(): string {
     return this.textNodes
       .map((t) => t.value)
@@ -258,11 +267,17 @@ function localName(name: string): string {
   return colon < 0 ? name : name.slice(colon + 1);
 }
 
-function stripCdata(value: string): string {
+/**
+ * Read a text node's value: CDATA sections are literal by definition, so their
+ * markers are stripped but their content is never entity-decoded. Ordinary text
+ * is decoded, which makes {@link XmlDocument.setText}(el, el.text) a no-op
+ * instead of double-escaping.
+ */
+function readTextNode(value: string): string {
   if (value.startsWith("<![CDATA[") && value.endsWith("]]>")) {
     return value.slice(9, -3);
   }
-  return value;
+  return decodeEntities(value);
 }
 
 function escapeText(value: string): string {

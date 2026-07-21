@@ -17,11 +17,76 @@ export interface Range {
 export interface XmlAttribute {
   /** attribute name, verbatim (namespace prefix included) */
   name: string;
-  /** attribute value, unescaped only of surrounding quotes */
+  /** attribute value, normalized (§3.3.3) and with entity references decoded */
   value: string;
   nameRange: Range;
-  /** range of the value, excluding the surrounding quotes */
+  /** range of the value in the source, excluding the surrounding quotes */
   valueRange: Range;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+/**
+ * The code points a document may contain (XML 1.0 §2.2 `Char`).
+ *
+ * Surrogates, NUL, and the other control characters are excluded: decoding
+ * `&#xD800;` would put a lone surrogate into the value, which cannot be encoded
+ * back to UTF-8 when the document is written out.
+ */
+function isLegalChar(codePoint: number): boolean {
+  return (
+    codePoint === 0x9 ||
+    codePoint === 0xa ||
+    codePoint === 0xd ||
+    (codePoint >= 0x20 && codePoint <= 0xd7ff) ||
+    (codePoint >= 0xe000 && codePoint <= 0xfffd) ||
+    (codePoint >= 0x10000 && codePoint <= 0x10ffff)
+  );
+}
+
+/**
+ * Decode XML entity references in a single pass, so `&amp;lt;` decodes to the
+ * literal text `&lt;` rather than being decoded twice into `<`.
+ *
+ * Unknown entities are left verbatim — this reader has no DTD, so inventing a
+ * replacement would lose information that a round-trip must preserve. So are
+ * character references outside `Char` (§4.1 WFC: Legal Character), which have no
+ * representable value to decode to.
+ */
+export function decodeEntities(value: string): string {
+  if (!value.includes("&")) return value;
+
+  // `CharRef` (§4.1) is decimal or lowercase-`x` hex only, so `&#1F;` is not a
+  // reference at all and must not be read as the decimal `1`.
+  return value.replace(/&(#[0-9]+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);/g, (match, ref: string) => {
+    if (ref.startsWith("#")) {
+      const codePoint = ref.startsWith("#x")
+        ? parseInt(ref.slice(2), 16)
+        : parseInt(ref.slice(1), 10);
+      return isLegalChar(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    return NAMED_ENTITIES[ref] ?? match;
+  });
+}
+
+/**
+ * Attribute-value normalization (§3.3.3): a literal whitespace character in an
+ * attribute value stands for a single space, and a CRLF pair collapses to one
+ * space (line endings are normalized first, §2.11). Multi-line attributes are
+ * common in the wild — `xsi:schemaLocation` conventionally wraps — so the value
+ * a caller reads must be the normalized one.
+ *
+ * Character references are decoded afterwards: the spec normalizes the literal
+ * characters, not the referenced ones, so `&#xA;` still yields a newline.
+ */
+export function normalizeAttributeValue(raw: string): string {
+  return decodeEntities(raw.replace(/\r\n|[\t\n\r]/g, " "));
 }
 
 export interface RawText {
@@ -83,21 +148,58 @@ class Parser {
     while (this.pos < this.s.length) {
       this.skipWhitespace();
       if (this.s.startsWith("<?", this.pos)) {
-        const end = this.s.indexOf("?>", this.pos);
-        this.pos = end < 0 ? this.s.length : end + 2;
+        this.skipProcessingInstruction();
         continue;
       }
       if (this.s.startsWith("<!--", this.pos)) {
-        const end = this.s.indexOf("-->", this.pos);
-        this.pos = end < 0 ? this.s.length : end + 3;
+        this.skipComment();
         continue;
       }
       if (this.s.startsWith("<!", this.pos)) {
-        const end = this.s.indexOf(">", this.pos);
-        this.pos = end < 0 ? this.s.length : end + 1;
+        this.skipDeclaration();
         continue;
       }
       break;
+    }
+  }
+
+  /** Skip a processing instruction, `<?` through the matching `?>` (§2.6). */
+  private skipProcessingInstruction(): void {
+    const end = this.s.indexOf("?>", this.pos + 2);
+    this.pos = end < 0 ? this.s.length : end + 2;
+  }
+
+  /** Skip a comment, `<!--` through the matching `-->` (§2.5). */
+  private skipComment(): void {
+    const end = this.s.indexOf("-->", this.pos + 4);
+    this.pos = end < 0 ? this.s.length : end + 3;
+  }
+
+  /**
+   * Skip a markup declaration such as `<!DOCTYPE ...>` (§2.8).
+   *
+   * The terminating `>` cannot be found by a plain search: `doctypedecl` may
+   * carry a `>` inside a quoted system/public literal or inside its `[...]`
+   * internal subset. Stopping at the first one would resume parsing mid-DTD and
+   * lose the root element entirely.
+   */
+  private skipDeclaration(): void {
+    this.pos += 2;
+    let subset = 0;
+    while (this.pos < this.s.length) {
+      const char = this.s[this.pos]!;
+      if (char === '"' || char === "'") {
+        const end = this.s.indexOf(char, this.pos + 1);
+        this.pos = end < 0 ? this.s.length : end + 1;
+        continue;
+      }
+      if (char === "[") subset++;
+      else if (char === "]") subset--;
+      else if (char === ">" && subset <= 0) {
+        this.pos++;
+        return;
+      }
+      this.pos++;
     }
   }
 
@@ -138,7 +240,7 @@ class Parser {
     }
 
     const children: RawNode[] = [];
-    const close = this.parseChildren(children);
+    const close = this.parseChildren(children, name, start);
 
     return {
       kind: "element",
@@ -153,8 +255,17 @@ class Parser {
     };
   }
 
-  /** Parse children until the matching closing tag; returns its offsets. */
-  private parseChildren(children: RawNode[]): { contentEnd: number; end: number } {
+  /**
+   * Parse children until the closing tag for `name`; returns its offsets.
+   *
+   * Throws when the closing tag names a different element or never arrives —
+   * accepting either would silently reparent nodes and corrupt edit offsets.
+   */
+  private parseChildren(
+    children: RawNode[],
+    name: string,
+    start: number,
+  ): { contentEnd: number; end: number } {
     while (this.pos < this.s.length) {
       const textStart = this.pos;
       while (this.pos < this.s.length && this.s[this.pos] !== "<") this.pos++;
@@ -170,8 +281,13 @@ class Parser {
       if (this.pos >= this.s.length) break;
 
       if (this.s.startsWith("<!--", this.pos)) {
-        const end = this.s.indexOf("-->", this.pos);
-        this.pos = end < 0 ? this.s.length : end + 3;
+        this.skipComment();
+        continue;
+      }
+      // `content` (§3) admits processing instructions between children, not just
+      // in the prolog; without this the PI would be read as an element named `?…`
+      if (this.s.startsWith("<?", this.pos)) {
+        this.skipProcessingInstruction();
         continue;
       }
       if (this.s.startsWith("<![CDATA[", this.pos)) {
@@ -189,7 +305,12 @@ class Parser {
       if (this.s.startsWith("</", this.pos)) {
         const contentEnd = this.pos;
         this.pos += 2;
-        this.readName();
+        const closeName = this.readName();
+        if (closeName !== name) {
+          throw new Error(
+            `Mismatched closing tag: expected "</${name}>" for the element opened at offset ${start}, found "</${closeName}>" at offset ${contentEnd}.`,
+          );
+        }
         this.skipWhitespace();
         if (this.s[this.pos] === ">") this.pos++;
         return { contentEnd, end: this.pos };
@@ -200,8 +321,7 @@ class Parser {
       children.push(child);
     }
 
-    // reached EOF without a closing tag
-    return { contentEnd: this.pos, end: this.pos };
+    throw new Error(`Unclosed element "${name}" opened at offset ${start}.`);
   }
 
   private parseAttributes(): XmlAttribute[] {
@@ -234,7 +354,7 @@ class Parser {
 
       attributes.push({
         name,
-        value: this.s.slice(valueStart, valueEnd),
+        value: normalizeAttributeValue(this.s.slice(valueStart, valueEnd)),
         nameRange,
         valueRange: { start: valueStart, end: valueEnd },
       });
