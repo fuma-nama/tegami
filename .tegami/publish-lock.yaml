@@ -63,6 +63,14 @@ core:packages:
       - 2026-07-11-xml-util.md
     id: npm:@tegami/xml-util
     updated: true
+npm:mark-latest:
+  - id: npm:@tegami/composer
+  - id: npm:@tegami/gem
+  - id: npm:@tegami/hex
+  - id: npm:@tegami/maven
+  - id: npm:@tegami/nuget
+  - id: npm:@tegami/swift
+  - id: npm:@tegami/xml-util
 npm:packages:
   - id: npm:root
   - id: npm:docs

@@ -23,6 +23,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,7 +50,7 @@ jobs:
 
 Set `id-token: write` so npm trusted publishing (OIDC) works without an `NPM_TOKEN`.
 
-The [GitHub plugin](/plugins/github) requires `GITHUB_TOKEN` to open pull requests and create GitHub releases after publish.
+Set `pull-requests: write` so the [GitHub plugin](/plugins/github) can open _Version Packages_ pull requests. The same `GITHUB_TOKEN` is also used to create GitHub releases after publish.
 
 ### Build packages
 
