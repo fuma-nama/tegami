@@ -25,6 +25,7 @@ vi.mock("tinyexec", () => ({
 }));
 vi.mock("../src/plugins/github/api", () => ({
   getPullRequest: vi.fn(),
+  listPullRequestsForCommit: vi.fn(),
   findIssueCommentByPrefix: vi.fn(),
   updateIssueComment: vi.fn(),
   createIssueComment: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("../src/plugins/github/api", () => ({
 const detectPackageManager = vi.mocked(detect);
 const exec = vi.mocked(x);
 const getPullRequest = vi.mocked(githubClient.getPullRequest);
+const listPullRequestsForCommit = vi.mocked(githubClient.listPullRequestsForCommit);
 const findIssueCommentByPrefix = vi.mocked(githubClient.findIssueCommentByPrefix);
 const updateIssueComment = vi.mocked(githubClient.updateIssueComment);
 const createIssueComment = vi.mocked(githubClient.createIssueComment);
@@ -42,6 +44,7 @@ afterEach(async () => {
   detectPackageManager.mockReset();
   exec.mockReset();
   getPullRequest.mockReset();
+  listPullRequestsForCommit.mockReset();
   findIssueCommentByPrefix.mockReset();
   updateIssueComment.mockReset();
   createIssueComment.mockReset();
@@ -424,6 +427,40 @@ packages: ["@acme/core"]
     );
   });
 
+  test("resolves fork pull requests by head commit", async () => {
+    process.env.GITHUB_REPOSITORY = "acme/repo";
+    await setWorkflowRunEvent({ headSha: "fork-head-sha" });
+
+    listPullRequestsForCommit.mockResolvedValue([
+      { number: 68, title: "contains the commit", state: "open", head: { sha: "other-head-sha" } },
+      { number: 69, title: "fix", state: "closed", head: { sha: "fork-head-sha" } },
+    ]);
+    findIssueCommentByPrefix.mockResolvedValue(undefined);
+    createIssueComment.mockResolvedValue(undefined);
+
+    await expect(postPrComment(createTestContext([]), "### Tegami\n")).resolves.toBe(true);
+
+    expect(listPullRequestsForCommit).toHaveBeenCalledWith("acme/repo", "fork-head-sha", undefined);
+    expect(createIssueComment).toHaveBeenCalledWith(
+      "acme/repo",
+      69,
+      "<!-- tegami -->\n### Tegami\n",
+      undefined,
+    );
+  });
+
+  test("skips commenting when no pull request matches the head commit", async () => {
+    process.env.GITHUB_REPOSITORY = "acme/repo";
+    await setWorkflowRunEvent({ headSha: "orphan-head-sha" });
+
+    listPullRequestsForCommit.mockResolvedValue([]);
+
+    await expect(postPrComment(createTestContext([]), "### Tegami\n")).resolves.toBe(false);
+
+    expect(createIssueComment).not.toHaveBeenCalled();
+    expect(updateIssueComment).not.toHaveBeenCalled();
+  });
+
   test("updates the first existing pull request comment", async () => {
     process.env.GITHUB_REPOSITORY = "acme/repo";
     await setWorkflowRunEvent({ pullRequestNumber: 42 });
@@ -476,6 +513,7 @@ async function setWorkflowRunEvent(options: {
   pullRequestNumber?: number;
   conclusion?: string;
   event?: string;
+  headSha?: string;
 }) {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-pr-comment-event-"));
   tempDirs.push(cwd);
@@ -487,6 +525,7 @@ async function setWorkflowRunEvent(options: {
       workflow_run: {
         event: options.event ?? "pull_request",
         conclusion: options.conclusion ?? "success",
+        head_sha: options.headSha,
         pull_requests: options.pullRequestNumber ? [{ number: options.pullRequestNumber }] : [],
       },
     }),

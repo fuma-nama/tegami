@@ -137,6 +137,8 @@ export async function createPullRequest(
 export interface PullRequestSummary {
   number: number;
   title: string;
+  state?: string;
+  head?: { sha: string };
   user?: { login: string };
 }
 

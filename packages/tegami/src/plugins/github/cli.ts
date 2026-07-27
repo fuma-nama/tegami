@@ -13,6 +13,7 @@ import {
   createIssueComment,
   findIssueCommentByPrefix,
   getPullRequest,
+  listPullRequestsForCommit,
   updateIssueComment,
 } from "./api";
 import { formatPreview } from "../../utils/version-request";
@@ -74,8 +75,8 @@ export function registerPrCli(cli: TegamiCliRegistry): void {
     })
     .positional("artifact")
     .action(async ({ context, positionals }) => {
-      await postPrComment(context, await readFile(positionals.artifact, "utf8"));
-      outro("Pull request comment updated.");
+      const posted = await postPrComment(context, await readFile(positionals.artifact, "utf8"));
+      if (posted) outro("Pull request comment updated.");
     });
 }
 
@@ -102,17 +103,17 @@ export async function buildPrPreview(
   });
 }
 
-export async function postPrComment(context: TegamiContext, body: string): Promise<void> {
+export async function postPrComment(context: TegamiContext, body: string): Promise<boolean> {
   const { repo, token } = context.github ?? {};
   if (!repo) {
     outro("GitHub plugin context is required.");
-    return;
+    return false;
   }
 
-  const pr = await readPullRequestFromWorkflowRunEvent();
+  const pr = await readPullRequestFromWorkflowRunEvent(repo, token);
   if (!pr.found) {
     outro(pr.reason);
-    return;
+    return false;
   }
 
   const markedBody = `${COMMENT_MARKER}\n${body}`;
@@ -120,10 +121,11 @@ export async function postPrComment(context: TegamiContext, body: string): Promi
 
   if (existingId) {
     await updateIssueComment(repo, existingId, markedBody, token);
-    return;
+    return true;
   }
 
   await createIssueComment(repo, pr.number, markedBody, token);
+  return true;
 }
 
 async function resolvePullRequest(
@@ -176,7 +178,7 @@ async function resolvePullRequest(
 
 function parseWorkflowRunEvent(
   raw: unknown,
-): { ok: true; number: number } | { ok: false; reason: string } {
+): { ok: true; number?: number; headSha?: string } | { ok: false; reason: string } {
   if (typeof raw !== "object" || raw === null || !("workflow_run" in raw)) {
     return { ok: false, reason: "A workflow_run event is required." };
   }
@@ -197,19 +199,22 @@ function parseWorkflowRunEvent(
   }
 
   const pullRequests = (workflowRun as { pull_requests?: unknown }).pull_requests;
-  if (!Array.isArray(pullRequests) || pullRequests.length === 0) {
-    return { ok: false, reason: "The preview workflow is not associated with a pull request." };
-  }
+  const number = Array.isArray(pullRequests)
+    ? (pullRequests[0] as { number?: unknown } | undefined)?.number
+    : undefined;
+  const headSha = (workflowRun as { head_sha?: unknown }).head_sha;
 
-  const number = (pullRequests[0] as { number?: unknown }).number;
-  if (typeof number !== "number" || !Number.isInteger(number)) {
-    return { ok: false, reason: "The preview workflow is not associated with a pull request." };
-  }
-
-  return { ok: true, number };
+  return {
+    ok: true,
+    number: typeof number === "number" && Number.isInteger(number) ? number : undefined,
+    headSha: typeof headSha === "string" && headSha.length > 0 ? headSha : undefined,
+  };
 }
 
-async function readPullRequestFromWorkflowRunEvent(): Promise<
+async function readPullRequestFromWorkflowRunEvent(
+  repo: string,
+  token: string | undefined,
+): Promise<
   | {
       found: true;
       number: number;
@@ -235,8 +240,31 @@ async function readPullRequestFromWorkflowRunEvent(): Promise<
   if (!parsed.ok) {
     return { found: false, reason: parsed.reason };
   }
+  if (parsed.number !== undefined) {
+    return { found: true, number: parsed.number };
+  }
 
-  return { found: true, number: parsed.number };
+  // GitHub leaves `pull_requests` empty when the pull request comes from a fork,
+  // look it up by the head commit of the preview workflow instead.
+  if (!parsed.headSha) {
+    return { found: false, reason: "The preview workflow is not associated with a pull request." };
+  }
+
+  // The commit can also match pull requests that merely contain it, prefer the one
+  // it is the head of.
+  const pullRequests = await listPullRequestsForCommit(repo, parsed.headSha, token);
+  const pullRequest =
+    pullRequests.find((pr) => pr.head?.sha === parsed.headSha) ??
+    pullRequests.find((pr) => pr.state === "open") ??
+    pullRequests[0];
+  if (!pullRequest) {
+    return {
+      found: false,
+      reason: `No pull request was found for commit ${parsed.headSha.slice(0, 7)}.`,
+    };
+  }
+
+  return { found: true, number: pullRequest.number };
 }
 
 async function listPullRequestChangelogFiles(

@@ -162,8 +162,7 @@ jobs:
   comment:
     if: >
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -193,6 +192,8 @@ jobs:
 ```
 
 The "Generate Comment" step **must** use `pull_request` over `pull_request_target`, it will run untrusted code.
+
+Only "Post Comment" needs `pull-requests: write`, and it checks out your default branch instead of the pull request head, so pull requests from forks are commented on without running their code with a writable token.
 
 ## Custom CLI hooks
 
