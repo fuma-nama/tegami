@@ -1,3 +1,9 @@
+## tegami@1.2.7
+
+### Comment on pull requests from forks
+
+`tegami pr comment` now finds the pull request by its head commit when GitHub omits it from the `workflow_run` event, which it always does for pull requests from forks. Previously those runs finished green without posting anything, and still reported the comment as updated.
+
 ## tegami@1.2.6
 
 ### Preserve interactive registry authentication
