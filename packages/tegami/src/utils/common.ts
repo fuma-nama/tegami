@@ -43,6 +43,11 @@ export function joinPath(...paths: string[]): string {
       continue;
     }
 
+    if (out.endsWith("/") && path.startsWith("/")) {
+      out += path.slice(1);
+      continue;
+    }
+
     if (!out.endsWith("/") && !path.startsWith("/")) out += "/";
     out += path;
   }
