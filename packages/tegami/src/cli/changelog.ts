@@ -24,14 +24,29 @@ import { type ChangelogPackageConfig, renderChangelog } from "../changelog/share
 export async function runChangelogTui(tegami: Tegami): Promise<void> {
   const context = await tegami._internal.context();
   intro("Create changelogs");
-  let selectedPackages: string[] = [];
 
-  if (!isCI()) {
-    selectedPackages = await promptPackageSelection(context.graph, context.cwd);
+  if (isCI()) {
+    await persistCommitChangelogs(context);
+    return;
   }
 
-  if (selectedPackages.length === 0) {
-    if (!isCI()) {
+  const versionablePackages = context.graph
+    .getPackages()
+    .filter((pkg) => pkg.version !== undefined);
+  // a single-package workspace has nothing to select
+  const soloPackage = versionablePackages.length === 1 ? versionablePackages[0] : undefined;
+  let selectedPackages: string[];
+
+  if (soloPackage) {
+    selectedPackages = [soloPackage.id];
+  } else {
+    selectedPackages = await promptPackageSelection(
+      context.graph,
+      versionablePackages,
+      context.cwd,
+    );
+
+    if (selectedPackages.length === 0) {
       const confirmed = await confirm({
         message: "Auto-generate changelog files from commits?",
         initialValue: true,
@@ -42,18 +57,22 @@ export async function runChangelogTui(tegami: Tegami): Promise<void> {
         outro("No changelogs created.");
         return;
       }
-    }
 
-    const created = await generateFromCommits(context);
-    await persistChangelogs(
-      context,
-      created.map(({ filename, content, packages }) => ({ filename, content, packages })),
-      "No matching conventional commits were found.",
-    );
+      await persistCommitChangelogs(context);
+      return;
+    }
+  }
+
+  const packageBumpMap = await promptPackageBumpTypes(selectedPackages, {
+    // skipping the selector also skips its empty-selection shortcut, offer it here instead
+    allowCommits: soloPackage !== undefined,
+  });
+
+  if (packageBumpMap === "from-commits") {
+    await persistCommitChangelogs(context);
     return;
   }
 
-  const packageBumpMap = await promptPackageBumpTypes(selectedPackages);
   const message = await multiline({
     message: "Describe change (Markdown supported, press tab then enter to exit)",
     placeholder: "The first line is heading\n\nAdditional description.",
@@ -72,6 +91,15 @@ export async function runChangelogTui(tegami: Tegami): Promise<void> {
       packages: packageBumpMap,
     },
   ]);
+}
+
+async function persistCommitChangelogs(context: TegamiContext): Promise<void> {
+  const created = await generateFromCommits(context);
+  await persistChangelogs(
+    context,
+    created.map(({ filename, content, packages }) => ({ filename, content, packages })),
+    "No matching conventional commits were found.",
+  );
 }
 
 async function persistChangelogs(
@@ -124,9 +152,12 @@ async function persistChangelogs(
   outro(entries.length === 1 ? "Changelog ready." : "Changelogs ready.");
 }
 
-async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise<string[]> {
+async function promptPackageSelection(
+  graph: PackageGraph,
+  versionablePackages: WorkspacePackage[],
+  cwd: string,
+): Promise<string[]> {
   const useShortname = new Map<string, boolean>();
-  const versionablePackages = graph.getPackages().filter((pkg) => pkg.version !== undefined);
 
   for (const pkg of versionablePackages) {
     if (useShortname.has(pkg.name)) useShortname.set(pkg.name, false);
@@ -177,30 +208,40 @@ async function promptPackageSelection(graph: PackageGraph, cwd: string): Promise
   return selected;
 }
 
+const bumpOptions: { value: BumpType; label: string }[] = [
+  { value: "patch", label: "patch" },
+  { value: "minor", label: "minor" },
+  { value: "major", label: "major" },
+];
+
 async function promptPackageBumpTypes(
   selectedPackages: string[],
-): Promise<Record<string, BumpType>> {
-  const packageBumpMap: Record<string, BumpType> = {};
+  { allowCommits = false }: { allowCommits?: boolean } = {},
+): Promise<Record<string, BumpType> | "from-commits"> {
+  const options: { value: BumpType | "per-package" | "from-commits"; label: string }[] = [
+    ...bumpOptions,
+  ];
+  if (selectedPackages.length > 1)
+    options.push({ value: "per-package", label: "choose per-package" });
+  if (allowCommits) options.push({ value: "from-commits", label: "auto-generate from commits" });
+
   const bumpType = await select({
-    message: "Select release type",
-    options: [
-      { value: "patch", label: "patch" },
-      { value: "minor", label: "minor" },
-      { value: "major", label: "major" },
-      { value: "per-package", label: "choose per-package" },
-    ],
+    message:
+      selectedPackages.length === 1
+        ? `Select release type for "${selectedPackages[0]}"`
+        : "Select release type",
+    options,
   });
   if (isCancel(bumpType)) throw new CancelledError();
+  if (bumpType === "from-commits") return "from-commits";
+
+  const packageBumpMap: Record<string, BumpType> = {};
 
   if (bumpType === "per-package") {
     for (const pkg of selectedPackages) {
       const selectedBump = await select({
         message: `Select release type for "${pkg}"`,
-        options: [
-          { value: "patch", label: "patch" },
-          { value: "minor", label: "minor" },
-          { value: "major", label: "major" },
-        ],
+        options: bumpOptions,
       });
 
       if (isCancel(selectedBump)) throw new CancelledError();
