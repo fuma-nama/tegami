@@ -104,6 +104,8 @@ With the GitHub plugin enabled, CI follows a two-step flow:
 
 Because the publish lock lives in git, failed publish jobs can be retried safely without duplicating releases.
 
+To run this flow on more than one branch, e.g. a canary channel, or maintenance branches for older majors, see [Multiple Release Lines](/multi-version).
+
 ## Pull request preview
 
 Use `tegami pr preview` and `tegami pr comment` on pull requests to post a release preview comment. The preview renders markdown that:

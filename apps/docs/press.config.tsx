@@ -5,6 +5,7 @@ import { llmsPlugin } from "fumapress/plugins/llms.txt";
 import { takumiPlugin } from "fumapress/plugins/takumi";
 import { docs } from "./.source/server";
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 import { TypeTable } from "fumadocs-ui/components/type-table";
 import { Image } from "fumapress/image";
 import { imagePlugin } from "fumapress/plugins/image/vercel";
@@ -85,6 +86,8 @@ export default defineConfig({
       getMdxComponents() {
         return {
           ...defaultMdxComponents,
+          Accordion,
+          Accordions,
           TypeTable,
           Mermaid,
         };

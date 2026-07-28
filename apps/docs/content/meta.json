@@ -6,6 +6,7 @@
     "changelog",
     "package-groups",
     "ci",
+    "multi-version",
     "plugins",
     "---Migration---",
     "migrating-from-changesets",
