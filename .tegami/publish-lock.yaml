@@ -1,6 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Comment on pull requests from forks\n\n`tegami pr comment` now finds the pull request by its head commit when GitHub omits it from the `workflow_run` event, which it always does for pull requests from forks. Previously those runs finished green without posting anything, and still reported the comment as updated.\n"
-    filename: 2026-07-27-4b1d90ac.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Skip the package selector for single-package workspaces\n\nRunning `tegami` in a workspace with only one versionable package now goes straight to the release type, which names the package it selected. That prompt offers `auto-generate from commits` in place of the skipped selector's empty-selection shortcut, and hides `choose per-package` whenever a single package is selected.\n"
+    filename: 2026-07-28-1f3ca07d.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix weird bumps with prerelease\n\nThe script-config syncing was causing unwanted bumps.\n"
+    filename: 2026-07-31-ms8xdpys.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -8,7 +11,8 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-27-4b1d90ac.md
+      - 2026-07-28-1f3ca07d.md
+      - 2026-07-31-ms8xdpys.md
     id: npm:tegami
     updated: true
   - id: npm:@tegami/composer
