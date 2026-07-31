@@ -1,3 +1,13 @@
+## tegami@1.2.8
+
+### Skip the package selector for single-package workspaces
+
+Running `tegami` in a workspace with only one versionable package now goes straight to the release type, which names the package it selected. That prompt offers `auto-generate from commits` in place of the skipped selector's empty-selection shortcut, and hides `choose per-package` whenever a single package is selected.
+
+### Fix weird bumps with prerelease
+
+The script-config syncing was causing unwanted bumps.
+
 ## tegami@1.2.7
 
 ### Comment on pull requests from forks
