@@ -1,3 +1,4 @@
+import { prerelease as getPrerelease } from "semver";
 import type { PackageDraft } from "./plans/draft";
 import type { GroupOptions, PackageOptions } from "./types";
 import { bumpVersion } from "./utils/semver";
@@ -18,9 +19,12 @@ export abstract class WorkspacePackage {
     return `${this.manager}:${this.name}`;
   }
 
-  /** create the initial draft. */
+  /** create the initial draft, reflecting the current state of the package. */
   initDraft(): PackageDraft {
+    const prerelease = this.version ? getPrerelease(this.version)?.[0] : undefined;
+
     return {
+      prerelease: typeof prerelease === "string" ? prerelease : undefined,
       bumpVersion(pkg) {
         if (!pkg.version) return;
         return bumpVersion(pkg.version, this.type, this.prerelease);
@@ -32,7 +36,7 @@ export abstract class WorkspacePackage {
   configureDraft({ draft }: { draft: PackageDraft }): void {
     const { prerelease = this.group?.options?.prerelease } = this.options;
 
-    if (prerelease !== undefined) draft.prerelease = prerelease;
+    draft.prerelease = prerelease;
   }
 }
 

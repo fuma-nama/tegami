@@ -67,6 +67,7 @@ describe("draft publish plans", () => {
           "npm": {
             "distTag": "alpha",
           },
+          "prerelease": undefined,
           "type": "minor",
         },
         "packages": [
@@ -85,6 +86,7 @@ describe("draft publish plans", () => {
           "npm": {
             "distTag": undefined,
           },
+          "prerelease": undefined,
           "type": "major",
         },
       }
@@ -385,6 +387,52 @@ Core only.
     ).graph;
 
     expect(graphByPattern.getPackages()).toEqual([]);
+  });
+
+  test("does not bump `workspace:*` dependents of an unchanged prerelease package", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-prerelease-dep-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0-beta.1",
+    });
+    await writeJson(join(cwd, "packages/cli-versions/package.json"), {
+      name: "acme-cli-versions",
+      version: "0.1.5",
+      private: true,
+      dependencies: {
+        "@acme/core": "workspace:*",
+      },
+    });
+    await writeJson(join(cwd, "packages/cli/package.json"), {
+      name: "acme-cli",
+      version: "0.1.5",
+    });
+
+    const paper = tegami({
+      cwd,
+      groups: {
+        web: { prerelease: "beta" },
+        cli: { syncBump: true },
+      },
+      packages: ({ name }) => {
+        if (name === "@acme/core") return { group: "web" };
+        return { group: "cli" };
+      },
+    });
+
+    const context = await paper._internal.context();
+    const draft = await paper.draft();
+
+    expect(getPendingPackageIds(draft, context.graph)).toEqual([]);
   });
 
   test("keeps replay changelog files until all replay conditions are consumed", async () => {
