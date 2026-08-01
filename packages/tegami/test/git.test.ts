@@ -4,13 +4,14 @@ import { join } from "node:path";
 import * as tinyexec from "tinyexec";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { tegami } from "../src";
-import { git } from "../src/plugins/git";
+import { PackagePublishTask, tegami } from "../src";
+import { git, GitCreateTagsTask, GitPushTagsTask } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
+import { createPublishTasksContext } from "../src/plans/publish";
 import { publishPlan } from "./helpers/plan";
 import { createTegamiCliRegistry } from "../src/cli/core";
-import { somePromise } from "../src/utils/common";
+import { pluginTaskStatus, runPluginTasks } from "./helpers/tasks";
 
 vi.mock("tinyexec", async (importOriginal) => {
   const actual = await importOriginal<typeof tinyexec>();
@@ -108,7 +109,7 @@ describe("git utils", () => {
       }),
     );
 
-    await plugin.afterPublishAll?.call(context, { plan });
+    await runPluginTasks(plugin, context, plan);
     expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
       [
         {
@@ -145,11 +146,13 @@ describe("git utils", () => {
       }),
     );
 
-    await plugin.afterPublishAll?.call(context, {
-      plan: publishPlan(context.graph, {
+    await runPluginTasks(
+      plugin,
+      context,
+      publishPlan(context.graph, {
         packages: [{ pkg: core, publishResult: { type: "skipped" } }],
       }),
-    });
+    );
 
     expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
       {
@@ -165,17 +168,23 @@ describe("git utils", () => {
     const context = pluginContext();
     const core = context.graph.get("test:@acme/core")!;
 
-    await git().afterPublishAll?.call(context, {
-      plan: publishPlan(context.graph, { dryRun: true, packages: [{ pkg: core }] }),
-    });
-    await git({ createTags: false }).afterPublishAll?.call(context, {
-      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-    });
-    await git().afterPublishAll?.call(context, {
-      plan: publishPlan(context.graph, {
+    await runPluginTasks(
+      git(),
+      context,
+      publishPlan(context.graph, { dryRun: true, packages: [{ pkg: core }] }),
+    );
+    await runPluginTasks(
+      git({ createTags: false }),
+      context,
+      publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    );
+    await runPluginTasks(
+      git(),
+      context,
+      publishPlan(context.graph, {
         packages: [{ pkg: core, publishResult: { type: "failed", error: "publish failed" } }],
       }),
-    });
+    );
 
     expect(exec).not.toHaveBeenCalled();
   });
@@ -196,9 +205,11 @@ describe("git utils", () => {
         }),
       );
 
-      await plugin.afterPublishAll?.call(context, {
-        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-      });
+      await runPluginTasks(
+        plugin,
+        context,
+        publishPlan(context.graph, { packages: [{ pkg: core }] }),
+      );
 
       expect(exec.mock.calls.map(normalizeExecCall)).toMatchInlineSnapshot(`
         [
@@ -248,9 +259,11 @@ describe("git utils", () => {
         }),
       );
 
-      await plugin.afterPublishAll?.call(context, {
-        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-      });
+      await runPluginTasks(
+        plugin,
+        context,
+        publishPlan(context.graph, { packages: [{ pkg: core }] }),
+      );
 
       expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
         {
@@ -291,9 +304,7 @@ describe("git utils", () => {
       );
 
       await expect(
-        plugin.afterPublishAll?.call(context, {
-          plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-        }),
+        runPluginTasks(plugin, context, publishPlan(context.graph, { packages: [{ pkg: core }] })),
       ).resolves.toBeUndefined();
 
       expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
@@ -329,13 +340,23 @@ describe("git utils", () => {
     );
 
     await expect(
-      plugin.afterPublishAll?.call(context, {
-        plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-      }),
+      runPluginTasks(plugin, context, publishPlan(context.graph, { packages: [{ pkg: core }] })),
     ).rejects.toThrow(/tag failed/);
   });
 
-  test("returns success from resolvePlanStatus when tag exists locally", async () => {
+  test("identifies task kinds with instanceof", async () => {
+    const plugin = git({ pushTags: true });
+    const context = pluginContext();
+    const plan = publishPlan(context.graph);
+
+    const tasks =
+      (await plugin.publishTasks?.call(context, createPublishTasksContext(context, plan))) ?? [];
+    expect(tasks.filter((t) => t instanceof GitCreateTagsTask)).toHaveLength(1);
+    expect(tasks.filter((t) => t instanceof GitPushTagsTask)).toHaveLength(1);
+    expect(tasks.filter((t) => t instanceof PackagePublishTask)).toHaveLength(0);
+  });
+
+  test("resolves task status as done when tag exists locally", async () => {
     const plugin = git();
     const context = pluginContext();
     const core = context.graph.get("test:@acme/core")!;
@@ -347,14 +368,13 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const status = await plugin.resolvePlanStatus?.call(context, {
-      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-    });
+    const status = await pluginTaskStatus(
+      plugin,
+      context,
+      publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    );
 
-    expect(Array.isArray(status)).toBe(true);
-    expect(
-      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
-    ).toBe(false);
+    expect(status).toBeUndefined();
     expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
       {
         args: ["rev-parse", "-q", "--verify", "refs/tags/@acme/core@1.0.1"],
@@ -365,7 +385,7 @@ describe("git utils", () => {
     ]);
   });
 
-  test("returns success from resolvePlanStatus when tag exists on origin", async () => {
+  test("resolves task status as done when tag exists on origin", async () => {
     const plugin = git();
     const context = pluginContext();
     const core = context.graph.get("test:@acme/core")!;
@@ -381,14 +401,13 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const status = await plugin.resolvePlanStatus?.call(context, {
-      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-    });
+    const status = await pluginTaskStatus(
+      plugin,
+      context,
+      publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    );
 
-    expect(Array.isArray(status)).toBe(true);
-    expect(
-      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
-    ).toBe(false);
+    expect(status).toBeUndefined();
     expect(exec.mock.calls.map(normalizeExecCall)).toEqual([
       {
         args: ["rev-parse", "-q", "--verify", "refs/tags/@acme/core@1.0.1"],
@@ -405,7 +424,7 @@ describe("git utils", () => {
     ]);
   });
 
-  test("returns pending from resolvePlanStatus when tag is missing", async () => {
+  test("resolves task status as pending when tag is missing", async () => {
     const plugin = git();
     const context = pluginContext();
     const core = context.graph.get("test:@acme/core")!;
@@ -421,14 +440,13 @@ describe("git utils", () => {
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    const status = await plugin.resolvePlanStatus?.call(context, {
-      plan: publishPlan(context.graph, { packages: [{ pkg: core }] }),
-    });
+    const status = await pluginTaskStatus(
+      plugin,
+      context,
+      publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    );
 
-    expect(Array.isArray(status)).toBe(true);
-    expect(
-      await somePromise(status as Promise<"pending" | undefined>[], (v) => v === "pending"),
-    ).toBe(true);
+    expect(status).toBe("pending");
   });
 });
 

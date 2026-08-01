@@ -3,8 +3,15 @@ import path from "node:path";
 import MagicString from "magic-string";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage } from "tegami";
+import type {
+  BumpType,
+  DraftPolicy,
+  PackageGraph,
+  PackagePublishResult,
+  TegamiContext,
+  TegamiPlugin,
+} from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure, joinPath } from "tegami/utils";
 import {
   parseGemspec,
@@ -102,6 +109,56 @@ export interface GemPluginOptions {
   bumpDep?: (opts: GemDependencyRef) => BumpType | false;
 }
 
+/** builds and pushes a gem to RubyGems (or the configured registry) */
+export class GemPublishTask extends PackagePublishTask<GemPackage> {
+  constructor(
+    pkg: GemPackage,
+    private readonly registry: string | undefined,
+  ) {
+    super(pkg);
+  }
+
+  async publish(): Promise<PackagePublishResult> {
+    const { pkg, registry } = this;
+    if (!pkg.version) return { type: "skipped" };
+
+    const build = await x("gem", ["build", pkg.gemspecFilename], {
+      nodeOptions: { cwd: pkg.path },
+    });
+    if (build.exitCode !== 0) {
+      return {
+        type: "failed",
+        error: execFailure(`Failed to build ${pkg.name}@${pkg.version}.`, build).message,
+      };
+    }
+
+    const gemFile = `${pkg.name}-${pkg.version}.gem`;
+    const push = await x("gem", ["push", gemFile, ...(registry ? ["--host", registry] : [])], {
+      nodeOptions: { cwd: pkg.path },
+    });
+    if (push.exitCode !== 0) {
+      const output = `${push.stdout}\n${push.stderr}`;
+      if (/Repushing of gem versions is not allowed/i.test(output)) {
+        return { type: "skipped" };
+      }
+
+      return {
+        type: "failed",
+        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, push).message,
+      };
+    }
+
+    return { type: "published" };
+  }
+
+  async status() {
+    const { pkg } = this;
+    if (!pkg.version) return;
+    if (!(await isGemVersionPublished(pkg.name, pkg.version, this.registry)))
+      return "pending" as const;
+  }
+}
+
 export function gem({
   packages,
   registry,
@@ -132,45 +189,11 @@ export function gem({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id);
-        if (!(pkg instanceof GemPackage) || !pkg.version) return;
-        if (!(await isGemVersionPublished(pkg.name, pkg.version, registry))) return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof GemPackage)) return;
-      if (!pkg.version) return;
-
-      const build = await x("gem", ["build", pkg.gemspecFilename], {
-        nodeOptions: { cwd: pkg.path },
-      });
-      if (build.exitCode !== 0) {
-        return {
-          type: "failed",
-          error: execFailure(`Failed to build ${pkg.name}@${pkg.version}.`, build).message,
-        };
-      }
-
-      const gemFile = `${pkg.name}-${pkg.version}.gem`;
-      const push = await x("gem", ["push", gemFile, ...(registry ? ["--host", registry] : [])], {
-        nodeOptions: { cwd: pkg.path },
-      });
-      if (push.exitCode !== 0) {
-        const output = `${push.stdout}\n${push.stderr}`;
-        if (/Repushing of gem versions is not allowed/i.test(output)) {
-          return { type: "skipped" };
-        }
-
-        return {
-          type: "failed",
-          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, push).message,
-        };
-      }
-
-      return { type: "published" };
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof GemPackage ? new GemPublishTask(pkg, registry) : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!active) return;

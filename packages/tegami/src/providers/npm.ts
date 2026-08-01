@@ -4,8 +4,9 @@ import { x } from "tinyexec";
 import { detect, type AgentName } from "package-manager-detector";
 import typia from "typia";
 import type { TegamiContext } from "../context";
-import type { PackagePublishResult } from "../plans/publish";
+import { PackagePublishTask, type PackagePublishResult } from "../plans/publish";
 import type { Awaitable, TegamiPlugin } from "../types";
+import type { PublishTaskRunContext } from "../utils/task";
 import { execFailure, fetchFailure } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
@@ -71,6 +72,53 @@ const validateNpmPackageLock: (input: unknown) => typia.IValidation<NpmPackageLo
 const validateNpmMarkLatestLock: (input: unknown) => typia.IValidation<NpmMarkLatestLock> =
   typia.createValidate<NpmMarkLatestLock>();
 
+/** publishes an npm package (and its dist tags) to the registry */
+export class NpmPublishTask extends PackagePublishTask<NpmPackage> {
+  constructor(
+    pkg: NpmPackage,
+    private readonly client: AgentName,
+  ) {
+    super(pkg);
+  }
+
+  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const pkg = this.pkg;
+    const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
+
+    const result = await publish(this.client, pkg, distTag);
+    if (result.type === "published" && markLatest) {
+      const tagResult = await x(
+        "npm",
+        [
+          "dist-tag",
+          "add",
+          `${pkg.name}@${pkg.version}`,
+          "latest",
+          "--registry",
+          pkg.getRegistry(),
+        ],
+        { nodeOptions: { cwd: pkg.path } },
+      );
+
+      if (tagResult.exitCode !== 0) {
+        return {
+          type: "failed",
+          error: execFailure("Failed to mark package as latest", tagResult).message,
+        };
+      }
+    }
+
+    return result;
+  }
+
+  async status() {
+    const { pkg } = this;
+    if (!pkg.version) return;
+    if (!(await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry())))
+      return "pending" as const;
+  }
+}
+
 export function npm({
   client: defaultClient,
   onBreakPeerDep = "set",
@@ -120,16 +168,12 @@ export function npm({
         optionalWait: optionalWait.length > 0 ? optionalWait : undefined,
       };
     },
-    resolvePlanStatus({ plan }) {
-      if (!this.npm?.graph) return;
-
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id)!;
-
-        if (!(pkg instanceof NpmPackage) || !pkg.version) return;
-        if (!(await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) return "pending";
-      });
+    publishTasks({ createPackagePublishTasks }) {
+      if (!this.npm) return;
+      const { client } = this.npm;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof NpmPackage ? new NpmPublishTask(pkg, client) : undefined,
+      );
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {
@@ -164,35 +208,6 @@ export function npm({
         packagePlan.npm ??= {};
         packagePlan.npm.markLatest = true;
       }
-    },
-    async publish({ pkg, plan }) {
-      if (!(pkg instanceof NpmPackage) || !this.npm) return;
-      const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
-
-      const result = await publish(this.npm.client, pkg, distTag);
-      if (result.type === "published" && markLatest) {
-        const tagResult = await x(
-          "npm",
-          [
-            "dist-tag",
-            "add",
-            `${pkg.name}@${pkg.version}`,
-            "latest",
-            "--registry",
-            pkg.getRegistry(),
-          ],
-          { nodeOptions: { cwd: pkg.path } },
-        );
-
-        if (tagResult.exitCode !== 0) {
-          return {
-            type: "failed",
-            error: execFailure("Failed to mark package as latest", tagResult).message,
-          };
-        }
-      }
-
-      return result;
     },
     initDraft(plan) {
       if (!this.npm?.graph) return;

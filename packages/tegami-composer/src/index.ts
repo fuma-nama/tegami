@@ -6,6 +6,7 @@ import { x } from "tinyexec";
 import typia from "typia";
 import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
 import { WorkspacePackage } from "tegami";
+import { GitTagPublishTask } from "tegami/plugins/git";
 import { execFailure, fetchFailure, joinPath } from "tegami/utils";
 import {
   assertComposerManifest,
@@ -148,6 +149,22 @@ interface ComposerPackageLock {
 const validateComposerPackageLock: (input: unknown) => typia.IValidation<ComposerPackageLock> =
   typia.createValidate<ComposerPackageLock>();
 
+/** Composer packages release through git tags, the registry only reports whether the version already exists */
+export class ComposerPublishTask extends GitTagPublishTask<ComposerPackage> {
+  constructor(
+    pkg: ComposerPackage,
+    private readonly registryUrl: string | undefined,
+  ) {
+    super(pkg);
+  }
+
+  async status() {
+    if (!this.registryUrl) return;
+    if (!(await isPackagePublished(this.registryUrl, this.pkg.name, this.pkg.version)))
+      return "pending" as const;
+  }
+}
+
 export function composer({
   packages: packageGlobs = [],
   tagPrefix = "v",
@@ -256,32 +273,11 @@ export function composer({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
-      if (!active || !registryUrl) return;
-
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-
-        const pkg = this.graph.get(id);
-        if (!(pkg instanceof ComposerPackage)) return;
-        if (!(await isPackagePublished(registryUrl, pkg.name, pkg.version))) return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof ComposerPackage)) return;
-
-      // Releasing is `git tag`, which needs no network — an unreachable or
-      // rate-limited registry must not block it, so a lookup failure just means
-      // "not known to be published" and the tag is created as usual.
-      if (registryUrl) {
-        const published = await isPackagePublished(registryUrl, pkg.name, pkg.version).catch(
-          () => false,
-        );
-        if (published) return { type: "skipped" };
-      }
-
-      // The git plugin creates the tag in `afterPublishAll`.
-      return { type: "published" };
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof ComposerPackage ? new ComposerPublishTask(pkg, registryUrl) : undefined,
+      );
     },
     async applyCliDraft() {
       if (!active || !updateLockFile) return;

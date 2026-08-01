@@ -8,10 +8,11 @@ import { cached, isCI, joinPath } from "../utils/common";
 import { PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
-  createAutoRelease,
+  ReleaseTask,
   versionRequestPlugin,
   resolveFileCommit,
   VersionRequestOptions,
+  type ReleaseProvider,
 } from "../utils/version-request";
 import {
   createMergeRequest,
@@ -83,7 +84,7 @@ export interface GitLabPluginOptions extends GitPluginOptions {
 export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
   const { release: releaseOptions = true } = options;
 
-  let autoRelease: ReturnType<typeof createAutoRelease<GitlabRelease>> | undefined;
+  let release: ReleaseProvider<GitlabRelease> | undefined;
 
   const plugin: TegamiPlugin = {
     name: "gitlab",
@@ -124,7 +125,7 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
           },
         );
 
-        autoRelease = createAutoRelease({
+        release = {
           eager,
           override: create,
           overrideGroup: createGrouped,
@@ -165,14 +166,12 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
           releaseExistsByTag(tag) {
             return releaseExistsByTag(repo, tag, api);
           },
-        });
+        };
       }
     },
-    async resolvePlanStatus({ plan }) {
-      if (await autoRelease?.hasPending.call(this, plan)) return "pending";
-    },
-    async afterPublishAll({ plan }) {
-      await autoRelease?.create.call(this, plan);
+    publishTasks() {
+      if (!release) return;
+      return [new ReleaseTask("gitlab:release", release)];
     },
     async initCli(cli) {
       registerMrCli(cli);

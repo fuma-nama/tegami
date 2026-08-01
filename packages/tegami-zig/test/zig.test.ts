@@ -2,7 +2,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { tegami, type TegamiPlugin } from "tegami";
+import { x } from "tinyexec";
+import { tegami } from "tegami";
+import { git } from "tegami/plugins/git";
 import { zig } from "../src/index";
 
 const tempDirs: string[] = [];
@@ -143,9 +145,18 @@ describe("zig plugin", () => {
       .draft()
       .then((draft) => draft.apply());
 
+    // the zig task waits for the git plugin to actually create the tag
+    await x("git", ["init"], { nodeOptions: { cwd }, throwOnError: true });
+    await x("git", ["add", "-A"], { nodeOptions: { cwd }, throwOnError: true });
+    await x(
+      "git",
+      ["-c", "user.name=Tegami", "-c", "user.email=tegami@example.com", "commit", "-m", "init"],
+      { nodeOptions: { cwd }, throwOnError: true },
+    );
+
     const result = await tegami({
       cwd,
-      plugins: [zig({ publish: "git-tag" }), pendingTagPlugin()],
+      plugins: [zig({ publish: "git-tag" }), git({ pushTags: false })],
     }).publish();
 
     expect(result).not.toBe("skipped");
@@ -215,23 +226,6 @@ describe("zig plugin", () => {
     expect(result.packages.get("zig:single")?.publishResult).toEqual({ type: "published" });
   });
 });
-
-function pendingTagPlugin(): TegamiPlugin {
-  return {
-    name: "test-release-tags",
-    initPublishPlan({ plan }) {
-      for (const [id, packagePlan] of plan.packages) {
-        const pkg = this.graph.get(id);
-        if (!pkg?.version) continue;
-        packagePlan.git ??= {};
-        packagePlan.git.tag ??= `${pkg.name}@${pkg.version}`;
-      }
-    },
-    resolvePlanStatus() {
-      return "pending";
-    },
-  };
-}
 
 async function createWorkspace(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-zig-"));

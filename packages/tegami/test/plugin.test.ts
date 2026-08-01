@@ -7,6 +7,7 @@ import type { TegamiPlugin } from "../src/types";
 import {
   installRegistryFetchMock,
   mockRegistryMissing,
+  mockRegistryPublished,
   uninstallRegistryFetchMock,
 } from "./helpers/registry-fetch";
 
@@ -72,6 +73,33 @@ describe("tegami plugins", () => {
         "afterPublishAll:post-b",
       ]
     `);
+  });
+
+  test("reports legacy resolvePlanStatus hooks through the task system", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+    mockRegistryPublished();
+
+    const legacy = (status: "pending" | "success"): TegamiPlugin => ({
+      name: "legacy",
+      resolvePlanStatus: () => status,
+    });
+
+    await tegami({ cwd, plugins: [legacy("pending")] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    await expect(tegami({ cwd, plugins: [legacy("pending")] }).getPublishStatus()).resolves.toEqual(
+      {
+        status: "pending",
+        reason: 'Task "legacy:plan-status" is pending',
+      },
+    );
+    await expect(tegami({ cwd, plugins: [legacy("success")] }).getPublishStatus()).resolves.toEqual(
+      {
+        status: "success",
+      },
+    );
   });
 });
 

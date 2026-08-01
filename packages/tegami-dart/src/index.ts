@@ -4,8 +4,15 @@ import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import { parseDocument, type Document } from "yaml";
-import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage } from "tegami";
+import type {
+  BumpType,
+  DraftPolicy,
+  PackageGraph,
+  PackagePublishResult,
+  TegamiContext,
+  TegamiPlugin,
+} from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure, isCI, joinPath } from "tegami/utils";
 import { assertHostedPackage, assertPubspec, type DartDependency, type Pubspec } from "./schema";
 
@@ -73,6 +80,40 @@ export interface DartPluginOptions {
   bumpDep?: (opts: DependentRef) => BumpType | false;
 }
 
+/** publishes a Dart package to its configured pub server */
+export class DartPublishTask extends PackagePublishTask<DartPackage> {
+  async publish(): Promise<PackagePublishResult> {
+    const { pkg } = this;
+    const result = await x("dart", ["pub", "publish", ...(isCI() ? ["--force"] : [])], {
+      nodeOptions: { cwd: pkg.path },
+    });
+
+    if (result.exitCode !== 0) {
+      if (
+        /already exists|already published|version already exists/i.test(
+          `${result.stdout}\n${result.stderr}`,
+        )
+      ) {
+        return { type: "skipped" };
+      }
+
+      return {
+        type: "failed",
+        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
+      };
+    }
+
+    return { type: "published" };
+  }
+
+  async status() {
+    const { pkg } = this;
+    if (!pkg.version) return;
+    if (!(await isPackagePublished(pkg.name, pkg.version, pkg.publishTo ?? DEFAULT_HOSTED_URL)))
+      return "pending" as const;
+  }
+}
+
 export function dart({
   updateLockFile = true,
   bumpDep: getBumpDepType,
@@ -102,38 +143,11 @@ export function dart({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id)!;
-        if (!(pkg instanceof DartPackage) || !pkg.version) return;
-        if (!(await isPackagePublished(pkg.name, pkg.version, pkg.publishTo ?? DEFAULT_HOSTED_URL)))
-          return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof DartPackage)) return;
-
-      const result = await x("dart", ["pub", "publish", ...(isCI() ? ["--force"] : [])], {
-        nodeOptions: { cwd: pkg.path },
-      });
-
-      if (result.exitCode !== 0) {
-        if (
-          /already exists|already published|version already exists/i.test(
-            `${result.stdout}\n${result.stderr}`,
-          )
-        ) {
-          return { type: "skipped" };
-        }
-
-        return {
-          type: "failed",
-          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-        };
-      }
-
-      return { type: "published" };
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof DartPackage ? new DartPublishTask(pkg) : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!active) return;

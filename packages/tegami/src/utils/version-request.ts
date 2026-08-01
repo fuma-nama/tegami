@@ -10,9 +10,12 @@ import { parsePublishLock, PublishLock } from "../plans/lock";
 import {
   initPublishPlan,
   PackagePublishPlan,
+  PackagePublishTask,
   runPreflights,
   type PublishPlan,
 } from "../plans/publish";
+import { GitCreateTagsTask, GitPushTagsTask } from "../plugins/git";
+import { PublishTask, type PublishTaskContext, type PublishTaskRunContext } from "./task";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
@@ -338,12 +341,8 @@ export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
     },
 
     /** report `pending` while publish groups are waiting for their request */
-    resolvePlanStatus({ plan }) {
-      const publishGroups = plan.$versionRequest?.publishGroups;
-      if (!publishGroups) return;
-      for (const s of publishGroups.values()) {
-        if (s === "pending") return "pending";
-      }
+    publishTasks() {
+      return [new VersionRequestTask(provider.name)];
     },
 
     /** re-sync the version requests of pending publish groups */
@@ -689,7 +688,7 @@ export function formatPreview(
   return lines.join("\n");
 }
 
-interface BaseRelease {
+export interface BaseRelease {
   title: string;
   notes: string;
 }
@@ -699,7 +698,9 @@ type ReleaseInput<V extends BaseRelease> = Omit<Partial<V>, "title" | "notes"> &
   notes: string;
 };
 
-interface GitReleaseProvider<V extends BaseRelease> {
+/** how a git provider (e.g. GitHub/GitLab) creates its releases */
+export interface ReleaseProvider<V extends BaseRelease> {
+  /** create releases immediately after successful publishes, without waiting for others */
   eager: boolean;
   releaseExistsByTag(this: TegamiContext, tag: string): Promise<boolean>;
   create(opts: {
@@ -735,123 +736,164 @@ export async function resolveFileCommit(
   return result.stdout.trim() || undefined;
 }
 
-export function createAutoRelease<V extends BaseRelease>({
-  eager,
-  create,
-  override,
-  overrideGroup,
-  releaseExistsByTag,
-  formatChangelog,
-}: GitReleaseProvider<V>) {
-  async function defaultNotes(
-    ctx: TegamiContext,
-    pkg: WorkspacePackage,
-    packagePlan?: PackagePublishPlan,
-  ): Promise<string> {
-    if (packagePlan && packagePlan.changelogs.length > 0) {
-      const notes = await Promise.all(packagePlan.changelogs.map(formatChangelog.bind(ctx)));
+/** reports `pending` while publish groups are waiting for their version request */
+class VersionRequestTask extends PublishTask<void> {
+  name: string;
+  description = "Track publish groups waiting for their version request.";
 
-      return notes.join("\n\n");
-    }
-
-    return `Published ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}.`;
+  constructor(providerName: string) {
+    super();
+    this.name = `${providerName}:version-request`;
   }
 
-  async function defaultGroupedNotes(
-    ctx: TegamiContext,
+  run() {}
+
+  status({ plan }: PublishTaskContext) {
+    const publishGroups = plan.$versionRequest?.publishGroups;
+    if (!publishGroups) return;
+    for (const s of publishGroups.values()) {
+      if (s === "pending") return "pending" as const;
+    }
+  }
+}
+
+/**
+ * Creates the releases of a git provider (e.g. GitHub/GitLab releases), grouped by git tag.
+ *
+ * It runs after every package publish and git tag task, and is skipped when git tag
+ * work failed, so releases never reference missing tags.
+ */
+export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
+  description = "Create releases for published packages.";
+
+  constructor(
+    public name: string,
+    private readonly provider: ReleaseProvider<V>,
+  ) {
+    super();
+  }
+
+  link({ tasks }: PublishTaskContext): void {
+    for (const t of tasks) {
+      if (t === this) continue;
+      if (
+        t instanceof PackagePublishTask ||
+        t instanceof GitCreateTagsTask ||
+        t instanceof GitPushTagsTask
+      ) {
+        this.optionalWait.push(t);
+      }
+    }
+  }
+
+  async status({ context, plan }: PublishTaskContext) {
+    const checks = Array.from(this.releaseGroups(context, plan).keys(), (tag) =>
+      this.provider.releaseExistsByTag.call(context, tag),
+    );
+
+    if (await somePromise(checks, (exists) => !exists)) return "pending" as const;
+  }
+
+  async run({ context, plan, getTaskResult }: PublishTaskRunContext) {
+    // skip when git tag work failed, releases must not reference missing tags
+    for (const dep of this.optionalWait) {
+      if (getTaskResult(dep)?.status === "failed") return;
+    }
+
+    // unless eager, wait for a run where every package published successfully
+    if (!this.provider.eager) {
+      for (const { publishResult } of plan.packages.values()) {
+        if (publishResult!.type === "failed") return;
+      }
+    }
+
+    await Promise.all(
+      Array.from(this.releaseGroups(context, plan), async ([tag, packages]) => {
+        const failed = packages.some(
+          (pkg) => plan.packages.get(pkg.id)!.publishResult!.type === "failed",
+        );
+        if (failed || (await this.provider.releaseExistsByTag.call(context, tag))) return;
+
+        let input: ReleaseInput<V>;
+        if (packages.length > 1) {
+          const {
+            title = tag,
+            notes = await this.groupedNotes(context, plan, packages),
+            ...rest
+          } = (await this.provider.overrideGroup?.call(context, { tag, packages, plan })) ??
+          ({} as Partial<V>);
+
+          input = { title, notes, ...rest };
+        } else {
+          const pkg = packages[0]!;
+          const packagePlan = plan.packages.get(pkg.id);
+          const {
+            title = formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
+            notes = await this.notes(context, pkg, packagePlan),
+            ...rest
+          } = (await this.provider.override?.call(context, { tag, pkg, plan })) ??
+          ({} as Partial<V>);
+
+          input = { title, notes, ...rest };
+        }
+
+        await this.provider.create({ input, tag, packages });
+      }),
+    );
+  }
+
+  /** git tag -> packages that should publish under it */
+  private releaseGroups(context: TegamiContext, plan: PublishPlan) {
+    const groups = new Map<string, WorkspacePackage[]>();
+
+    for (const [id, { preflight, git }] of plan.packages) {
+      const tag = git?.tag;
+      if (!tag || !preflight!.shouldPublish) continue;
+
+      const pkg = context.graph.get(id)!;
+      const group = groups.get(tag);
+      if (group) group.push(pkg);
+      else groups.set(tag, [pkg]);
+    }
+
+    return groups;
+  }
+
+  private async notes(
+    context: TegamiContext,
+    pkg: WorkspacePackage,
+    packagePlan: PackagePublishPlan | undefined,
+  ): Promise<string> {
+    const changelogs = packagePlan?.changelogs ?? [];
+    if (changelogs.length === 0) {
+      return `Published ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}.`;
+    }
+
+    const notes = await Promise.all(changelogs.map(this.provider.formatChangelog.bind(context)));
+    return notes.join("\n\n");
+  }
+
+  private async groupedNotes(
+    context: TegamiContext,
     plan: PublishPlan,
     packages: WorkspacePackage[],
   ): Promise<string> {
     const changelogs = new Map<string, ChangelogEntry>();
-
-    for (const pkg of packages) {
+    const lines = packages.map((pkg) => {
       const packagePlan = plan.packages.get(pkg.id);
-      if (!packagePlan) continue;
+      for (const entry of packagePlan?.changelogs ?? []) changelogs.set(entry.id, entry);
 
-      for (const entry of packagePlan.changelogs) changelogs.set(entry.id, entry);
-    }
+      return `- ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}`;
+    });
 
-    const sections = [
-      packages
-        .map((pkg) => {
-          const packagePlan = plan.packages.get(pkg.id);
-
-          return `- ${formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag)}`;
-        })
-        .join("\n"),
-    ];
-
+    const sections = [lines.join("\n")];
     if (changelogs.size > 0) {
-      const notes = await Promise.all(Array.from(changelogs.values(), formatChangelog.bind(ctx)));
+      const notes = await Promise.all(
+        Array.from(changelogs.values(), this.provider.formatChangelog.bind(context)),
+      );
       sections.push("", notes.join("\n\n"));
     }
 
     return sections.join("\n");
   }
-
-  return {
-    async hasPending(this: TegamiContext, plan: PublishPlan): Promise<boolean> {
-      const requiredTags = new Set<string>();
-      for (const pkg of plan.packages.values()) {
-        if (pkg.preflight!.shouldPublish && pkg.git?.tag) requiredTags.add(pkg.git.tag);
-      }
-
-      return somePromise(
-        Array.from(requiredTags, (tag) => releaseExistsByTag.call(this, tag)),
-        (exists) => !exists,
-      );
-    },
-    async create(this: TegamiContext, plan: PublishPlan) {
-      const groups = new Map<string, WorkspacePackage[]>();
-      for (const [id, { preflight, publishResult, git }] of plan.packages) {
-        if (!eager && publishResult!.type === "failed") return;
-
-        const tag = git?.tag;
-        if (!tag || !preflight!.shouldPublish) continue;
-
-        const pkg = this.graph.get(id)!;
-        const group = groups.get(tag);
-        if (group) group.push(pkg);
-        else groups.set(tag, [pkg]);
-      }
-
-      await Promise.all(
-        Array.from(groups, async ([tag, packages]) => {
-          for (const member of packages) {
-            const result = plan.packages.get(member.id)!.publishResult!;
-            if (result.type === "failed") return;
-          }
-
-          if (await releaseExistsByTag.call(this, tag)) return;
-
-          if (packages.length > 1) {
-            const {
-              title = tag,
-              notes = await defaultGroupedNotes(this, plan, packages),
-              ...rest
-            } = (await overrideGroup?.call(this, { tag, packages, plan })) ?? ({} as Partial<V>);
-            await create({
-              input: { title, notes, ...rest },
-              tag,
-              packages,
-            });
-            return;
-          }
-
-          const pkg = packages[0]!;
-          const packagePlan = plan.packages.get(pkg.id);
-          const {
-            title = formatPackageVersion(pkg.name, pkg.version, packagePlan?.npm?.distTag),
-            notes = await defaultNotes(this, pkg, packagePlan),
-            ...rest
-          } = (await override?.call(this, { tag, pkg, plan })) ?? ({} as Partial<V>);
-          await create({
-            input: { title, notes, ...rest },
-            tag,
-            packages,
-          });
-        }),
-      );
-    },
-  };
 }

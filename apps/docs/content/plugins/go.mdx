@@ -77,7 +77,8 @@ Publishing is handled through git tags, not a registry upload. Tegami:
 
 1. Sets the tag for each module (`v1.2.0` at the repo root, `relative/path/v1.2.0` for nested modules).
 2. Waits for workspace dependencies (from `require` and local `replace` directives) before publishing a module.
-3. Checks [proxy.golang.org](https://proxy.golang.org) to see whether a version is already available.
+3. Waits for the git plugin to create (and push) the tags, a module publish fails when its tag work fails.
+4. Checks [proxy.golang.org](https://proxy.golang.org) to see whether a version is already available.
 
 ### Package options
 

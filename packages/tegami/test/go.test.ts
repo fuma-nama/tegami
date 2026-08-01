@@ -417,7 +417,15 @@ Note.
       return mockGoExec(command, args, options);
     });
 
-    expect(await tegami({ cwd, plugins: [git(), go()] }).publish()).toBe("skipped");
+    const result = await tegami({ cwd, plugins: [git(), go()] }).publish();
+    if (result === "skipped") {
+      throw new Error("expected publish plan, got skipped");
+    }
+
+    // recreating the tag counts as publishing, even when the version is already on the proxy
+    expect(result.packages.get("go:example.com/acme/app")?.publishResult).toEqual({
+      type: "published",
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://proxy.golang.org/example.com%2Facme%2Fapp/@v/v1.0.1.info",
     );
@@ -426,6 +434,34 @@ Note.
         .filter(([command, args]) => command === "git" && args?.[0] === "tag" && args.length === 2)
         .map(([, args]) => args?.[1]),
     ).toEqual(["v1.0.1"]);
+  });
+
+  test("fails module publishes when git tag creation fails", async () => {
+    const cwd = await createRootModuleWorkspace();
+    tempDirs.push(cwd);
+
+    await tegami({ cwd, plugins: [git(), go()] })
+      .draft()
+      .then((draft) => draft.apply());
+
+    mockRegistryMissing();
+    exec.mockImplementation((command, args = [], options) => {
+      if (command === "git" && args[0] === "tag" && args[1] === "--list") {
+        return commandResult({ stdout: "v1.0.0\n" });
+      }
+
+      if (command === "git" && (args[0] === "rev-parse" || args[0] === "ls-remote")) {
+        return commandResult({ exitCode: 1 });
+      }
+
+      if (command === "git" && args[0] === "tag") {
+        return commandResult({ exitCode: 1, stderr: "tag failed" });
+      }
+
+      return mockGoExec(command, args, options);
+    });
+
+    await expect(tegami({ cwd, plugins: [git(), go()] }).publish()).rejects.toThrow(/tag failed/);
   });
 });
 

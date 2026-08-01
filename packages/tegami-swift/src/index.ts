@@ -8,11 +8,12 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PublishTaskContext,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
 import { WorkspacePackage } from "tegami";
+import { GitTagPublishTask } from "tegami/plugins/git";
 
 const DEFAULT_GLOBS = ["**/Package.swift"];
 const IGNORED_GLOBS = ["**/.build/**", "**/node_modules/**", "**/Pods/**"];
@@ -135,6 +136,14 @@ const validateSwiftPackageLock: (input: unknown) => typia.IValidation<SwiftPacka
  * - `tegami version` stores the next version in the publish lock, not in `Package.swift`.
  * - Publishing creates git tags, delegated to the git/github/gitlab plugin.
  */
+/** Swift packages release through git tags, pending until the tag exists locally or on origin */
+export class SwiftPublishTask extends GitTagPublishTask<SwiftPackage> {
+  async status({ context, plan }: PublishTaskContext) {
+    const tag = plan.packages.get(this.pkg.id)?.git?.tag;
+    if (tag && !(await isTagCreated(context.cwd, tag))) return "pending" as const;
+  }
+}
+
 export function swift({
   packages: packageGlobs = DEFAULT_GLOBS,
   tagPrefix = "",
@@ -227,29 +236,11 @@ export function swift({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
+    publishTasks({ createPackagePublishTasks }) {
       if (!active) return;
-
-      return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight!.shouldPublish) return;
-
-        const pkg = this.graph.get(id);
-        if (!(pkg instanceof SwiftPackage)) return;
-
-        const tag = packagePlan.git?.tag;
-        if (tag && !(await isTagCreated(this.cwd, tag))) return "pending";
-      });
-    },
-    async publish({ pkg, plan }): Promise<PackagePublishResult | undefined> {
-      if (!(pkg instanceof SwiftPackage)) return;
-
-      const tag = plan.packages.get(pkg.id)?.git?.tag;
-      if (tag && (await isTagCreated(this.cwd, tag))) {
-        return { type: "skipped" };
-      }
-
-      // The git/github/gitlab plugin creates the tag from `packagePlan.git.tag`.
-      return { type: "published" };
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof SwiftPackage ? new SwiftPublishTask(pkg) : undefined,
+      );
     },
   };
 }

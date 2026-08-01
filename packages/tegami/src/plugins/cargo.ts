@@ -6,6 +6,7 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
+import { PackagePublishTask, type PackagePublishResult } from "../plans/publish";
 import type { RequireFields, TegamiPlugin } from "../types";
 import { execFailure, fetchFailure } from "../utils/error";
 import { WorkspacePackage } from "../graph";
@@ -141,6 +142,37 @@ interface DependentRef {
   version?: string;
 }
 
+/** publishes a crate to crates.io */
+export class CargoPublishTask extends PackagePublishTask<CargoPackage> {
+  async publish(): Promise<PackagePublishResult> {
+    const { pkg } = this;
+    const result = await x("cargo", ["publish"], {
+      nodeOptions: {
+        cwd: pkg.path,
+      },
+    });
+
+    if (result.exitCode !== 0) {
+      if (/already exists|already published/i.test(`${result.stdout}\n${result.stderr}`)) {
+        return { type: "skipped" };
+      }
+
+      return {
+        type: "failed",
+        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
+      };
+    }
+
+    return {
+      type: "published",
+    };
+  }
+
+  async status() {
+    if (!(await isPackagePublished(this.pkg.name, this.pkg.version))) return "pending" as const;
+  }
+}
+
 export interface CargoPluginOptions {
   /**
    * Update lock file after versioning.
@@ -192,39 +224,11 @@ export function cargo({
 
       return { shouldPublish, wait };
     },
-    resolvePlanStatus({ plan }) {
+    publishTasks({ createPackagePublishTasks }) {
       if (!this.cargo) return;
-
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id)!;
-        if (!(pkg instanceof CargoPackage)) return;
-        if (!(await isPackagePublished(pkg.name, pkg.version))) return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof CargoPackage)) return;
-
-      const result = await x("cargo", ["publish"], {
-        nodeOptions: {
-          cwd: pkg.path,
-        },
-      });
-
-      if (result.exitCode !== 0) {
-        if (/already exists|already published/i.test(`${result.stdout}\n${result.stderr}`)) {
-          return { type: "skipped" };
-        }
-
-        return {
-          type: "failed",
-          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-        };
-      }
-
-      return {
-        type: "published",
-      };
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof CargoPackage ? new CargoPublishTask(pkg) : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!this.cargo) return;

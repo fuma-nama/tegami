@@ -3,10 +3,16 @@ import { ChangelogEntry, parseChangelogFile } from "../changelog/parse";
 import { TegamiContext } from "../context";
 import { validateChangelogStore, validatePackageStore } from "./draft";
 import { parsePublishLock, PublishLock } from "./lock";
-import { PublishPreflight } from "../types";
+import type { Awaitable, PublishPreflight, TegamiPlugin } from "../types";
 import { WorkspacePackage } from "../graph";
 import { handlePluginError } from "../utils/error";
-import { somePromise } from "../utils/common";
+import { findPromiseIndex, somePromise } from "../utils/common";
+import {
+  PublishTask,
+  runPublishTasks,
+  type PublishTaskContext,
+  type PublishTaskRunContext,
+} from "../utils/task";
 
 export interface PublishPlan {
   options: PublishOptions;
@@ -103,53 +109,223 @@ export async function initPublishPlan(
   return plan;
 }
 
-function resolvePublishTargets(plan: PublishPlan) {
-  /** the iteration order = publish order */
-  const orderedMap = new Map<string, { split: boolean; index: number }>();
-  let lastSplitIndex = -1;
-  /** package id -> true while scanning hard wait, false while scanning optional wait */
-  const stack = new Map<string, boolean>();
+/**
+ * Publishes a single package with the shared pipeline: dry-run handling,
+ * `willPublish`/`afterPublish` hooks, and capturing failures into `publishResult`.
+ *
+ * Providers extend this class and implement `publish()` (and optionally `status()`).
+ */
+export abstract class PackagePublishTask<
+  T extends WorkspacePackage = WorkspacePackage,
+> extends PublishTask<PackagePublishResult> {
+  name: string;
 
-  function scan(id: string): { split: boolean; index: number } | undefined {
-    const preflight = plan.packages.get(id)?.preflight;
-    if (!preflight || !preflight.shouldPublish) return;
-
-    switch (stack.get(id)) {
-      case true:
-        throw new Error(`circular reference of deps: ${[...stack.keys(), id].join(" -> ")}`);
-      case false:
-        return;
-    }
-
-    let ordered = orderedMap.get(id);
-    if (ordered) return ordered;
-
-    let split = false;
-    if (preflight.wait) {
-      stack.set(id, true);
-      for (const dep of preflight.wait) {
-        const ordered = scan(dep);
-        split ||= ordered !== undefined && ordered.index >= lastSplitIndex;
-      }
-    }
-
-    if (preflight.optionalWait) {
-      stack.set(id, false);
-      for (const dep of preflight.optionalWait) {
-        const ordered = scan(dep);
-        split ||= ordered !== undefined && ordered.index >= lastSplitIndex;
-      }
-    }
-
-    stack.delete(id);
-    ordered = { split, index: orderedMap.size };
-    if (split) lastSplitIndex = ordered.index;
-    orderedMap.set(id, ordered);
-    return ordered;
+  constructor(readonly pkg: T) {
+    super();
+    this.name = `publish:${pkg.id}`;
   }
 
-  for (const id of plan.packages.keys()) scan(id);
-  return orderedMap;
+  /** provider-specific publishing, thrown errors are captured into a `failed` result */
+  abstract publish(opts: PublishTaskRunContext): Awaitable<PackagePublishResult>;
+
+  /** link publish tasks from preflight `wait`/`optionalWait` data, a package may be published by more than one task */
+  link({ tasks, plan }: PublishTaskContext): void {
+    const preflight = plan.packages.get(this.pkg.id)?.preflight;
+    if (!preflight) return;
+
+    // unknown or unpublished dependencies are ignored
+    for (const t of tasks) {
+      if (!(t instanceof PackagePublishTask) || t === this) continue;
+      if (preflight.wait?.includes(t.pkg.id)) this.wait.push(t);
+      if (preflight.optionalWait?.includes(t.pkg.id)) this.optionalWait.push(t);
+    }
+  }
+
+  async run(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const { context, plan } = opts;
+    const pkg = this.pkg;
+    const result = await this.pipeline(opts);
+    const packagePlan = plan.packages.get(pkg.id);
+    if (packagePlan) packagePlan.publishResult = result;
+    if (result.type === "skipped") return result;
+
+    for (const plugin of context.plugins) {
+      await handlePluginError(plugin, "afterPublish", () =>
+        plugin.afterPublish?.call(context, { pkg, plan }),
+      );
+    }
+
+    return result;
+  }
+
+  private async pipeline(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const { context, plan } = opts;
+    const pkg = this.pkg;
+    if (plan.options.dryRun ?? false) {
+      return { type: "published" };
+    }
+
+    try {
+      for (const plugin of context.plugins) {
+        const next = await handlePluginError(plugin, "willPublish", () =>
+          plugin.willPublish?.call(context, { pkg }),
+        );
+
+        if (next === false) return { type: "skipped" };
+      }
+
+      return await this.publish(opts);
+    } catch (e) {
+      return {
+        type: "failed",
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+}
+
+/** the `opts` of the `publishTasks` hook */
+export interface PublishTasksContext {
+  plan: PublishPlan;
+  /** create a publish task for every package of the plan that should publish, `create` returns nothing for packages of other providers */
+  createPackagePublishTasks(
+    create: (pkg: WorkspacePackage) => PublishTask | undefined,
+  ): PublishTask[];
+}
+
+/** @internal build the `publishTasks` hook context of a plan */
+export function createPublishTasksContext(
+  context: TegamiContext,
+  plan: PublishPlan,
+): PublishTasksContext {
+  return {
+    plan,
+    createPackagePublishTasks(create) {
+      const tasks: PublishTask[] = [];
+
+      for (const [id, packagePlan] of plan.packages) {
+        if (!packagePlan.preflight?.shouldPublish) continue;
+        const pkg = context.graph.get(id);
+        if (!pkg) continue;
+
+        const task = create(pkg);
+        if (task) tasks.push(task);
+      }
+
+      return tasks;
+    },
+  };
+}
+
+/** backward compatibility: publishes a package through the legacy `publish` hook chain */
+class LegacyPublishTask extends PackagePublishTask {
+  async publish({ context, plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const { pkg } = this;
+
+    for (const plugin of context.plugins) {
+      const publishResult = await handlePluginError(plugin, "publish", () =>
+        plugin.publish?.call(context, { pkg, plan }),
+      );
+
+      if (publishResult) return publishResult;
+    }
+
+    return {
+      type: "failed",
+      error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
+    };
+  }
+}
+
+/** backward compatibility: runs a plugin's `afterPublishAll` hook as a task */
+export class PluginAfterPublishAllTask extends PublishTask<void> {
+  name: string;
+
+  constructor(private readonly plugin: TegamiPlugin) {
+    super();
+    this.name = `${plugin.name}:after-publish-all`;
+  }
+
+  /** legacy behaviour: `afterPublishAll` runs after every package publish, including tasks of plugins later in the plugin order */
+  link({ tasks }: PublishTaskContext): void {
+    for (const t of tasks) {
+      if (t instanceof PackagePublishTask) this.wait.push(t);
+    }
+  }
+
+  async run({ context, plan, getTaskResult }: PublishTaskRunContext): Promise<void> {
+    // legacy behaviour: a failed publish task aborts the `afterPublishAll` hooks
+    for (const dep of this.wait) {
+      if (getTaskResult(dep)?.status === "failed") return;
+    }
+
+    await handlePluginError(this.plugin, "afterPublishAll", () =>
+      this.plugin.afterPublishAll!.call(context, { plan }),
+    );
+  }
+}
+
+/** backward compatibility: reports a plugin's `resolvePlanStatus` hook as a task status */
+class PluginPlanStatusTask extends PublishTask<void> {
+  name: string;
+
+  constructor(private readonly plugin: TegamiPlugin) {
+    super();
+    this.name = `${plugin.name}:plan-status`;
+  }
+
+  run() {}
+
+  async status({ context, plan }: PublishTaskContext) {
+    const status = await handlePluginError(this.plugin, "resolvePlanStatus", () =>
+      this.plugin.resolvePlanStatus!.call(context, { plan }),
+    );
+
+    if (Array.isArray(status)) {
+      if (await somePromise(status, (v) => v === "pending")) return "pending" as const;
+      return;
+    }
+
+    if (status === "pending") return "pending" as const;
+    if (status === "success") return "done" as const;
+  }
+}
+
+export async function collectPublishTasks(
+  context: TegamiContext,
+  plan: PublishPlan,
+): Promise<PublishTask[]> {
+  const hookContext = createPublishTasksContext(context, plan);
+  const tasks: PublishTask[] = [];
+  for (const plugin of context.plugins) {
+    const created = await handlePluginError(plugin, "publishTasks", () =>
+      plugin.publishTasks?.call(context, hookContext),
+    );
+    if (created) tasks.push(...created);
+  }
+
+  // backward compatibility: packages without a publish task go through the legacy `publish` hook chain
+  for (const [id, packagePlan] of plan.packages) {
+    if (!packagePlan.preflight?.shouldPublish) continue;
+    if (tasks.some((t) => t instanceof PackagePublishTask && t.pkg.id === id)) continue;
+    const pkg = context.graph.get(id);
+    if (pkg) tasks.push(new LegacyPublishTask(pkg));
+  }
+
+  for (const plugin of context.plugins) {
+    if (plugin.afterPublishAll) {
+      tasks.push(new PluginAfterPublishAllTask(plugin));
+    }
+    if (plugin.resolvePlanStatus) {
+      tasks.push(new PluginPlanStatusTask(plugin));
+    }
+  }
+
+  for (const task of tasks) {
+    task.link?.({ context, plan, tasks });
+  }
+
+  return tasks;
 }
 
 export interface PublishOptions {
@@ -166,7 +342,7 @@ export interface PublishOptions {
   packages?: string[];
 
   /**
-   * The max amount of concurrent publishes (unstable, can change in anytime).
+   * The max amount of concurrently running publish tasks (unstable, can change in anytime).
    *
    * @default 5
    */
@@ -183,7 +359,7 @@ export type PackagePublishResult =
     };
 
 export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) {
-  const { dryRun = false, unstable_maxChunk = 5 } = plan.options;
+  const { unstable_maxChunk = 5 } = plan.options;
 
   for (const plugin of context.plugins) {
     await handlePluginError(plugin, "beforePublishAll", () =>
@@ -191,79 +367,29 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
     );
   }
 
-  async function publish(pkg: WorkspacePackage): Promise<PackagePublishResult> {
-    if (dryRun) {
-      return { type: "published" };
-    }
+  const tasks = await collectPublishTasks(context, plan);
 
-    try {
-      for (const plugin of context.plugins) {
-        const next = await handlePluginError(plugin, "willPublish", () =>
-          plugin.willPublish?.call(context, { pkg }),
-        );
-
-        if (next === false) return { type: "skipped" };
-      }
-
-      for (const plugin of context.plugins) {
-        const publishResult = await handlePluginError(plugin, "publish", () =>
-          plugin.publish?.call(context, { pkg, plan }),
-        );
-
-        if (publishResult) return publishResult;
-      }
-    } catch (e) {
-      return {
-        type: "failed",
-        error: e instanceof Error ? e.message : String(e),
-      };
-    }
-
-    return {
-      type: "failed",
-      error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
-    };
-  }
-
-  let promises: Promise<void>[] = [];
-  for (const [id, { split }] of resolvePublishTargets(plan)) {
-    const pkg = context.graph.get(id)!;
-    const packagePlan = plan.packages.get(pkg.id);
-    if (!pkg || !packagePlan) continue;
-
-    if (split || promises.length >= unstable_maxChunk) {
-      await Promise.all(promises);
-      promises = [];
-    }
-
-    promises.push(
-      publish(pkg).then(async (result) => {
-        packagePlan.publishResult = result;
-        if (result.type === "skipped") return;
-
-        for (const plugin of context.plugins) {
-          await handlePluginError(plugin, "afterPublish", () =>
-            plugin.afterPublish?.call(context, {
-              pkg,
-              plan,
-            }),
-          );
-        }
-      }),
-    );
-  }
-
-  await Promise.all(promises);
+  // packages excluded from publishing settle immediately, tasks that run after
+  // all package publishes can rely on `publishResult` being present
   for (const packagePlan of plan.packages.values()) {
-    packagePlan.publishResult ??= {
-      type: "skipped",
-    };
+    if (!packagePlan.preflight?.shouldPublish) {
+      packagePlan.publishResult ??= { type: "skipped" };
+    }
   }
 
-  for (const plugin of context.plugins) {
-    await handlePluginError(plugin, "afterPublishAll", () =>
-      plugin.afterPublishAll?.call(context, { plan }),
-    );
+  const states = await runPublishTasks(tasks, { context, plan, concurrency: unstable_maxChunk });
+
+  for (const packagePlan of plan.packages.values()) {
+    packagePlan.publishResult ??= { type: "skipped" };
+  }
+
+  const errors: Error[] = [];
+  for (const state of states.values()) {
+    if (state.status === "failed") errors.push(state.error);
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    throw new AggregateError(errors, `${errors.length} publish tasks failed.`);
   }
 }
 
@@ -326,17 +452,14 @@ export async function publishPlanStatus(
   status: "success" | "pending";
   reason?: string;
 }> {
-  for (const plugin of context.plugins) {
-    const status = await handlePluginError(plugin, "resolvePlanStatus", () =>
-      plugin.resolvePlanStatus?.call(context, { plan }),
-    );
+  const tasks = await collectPublishTasks(context, plan);
+  const pendingIdx = await findPromiseIndex(
+    tasks.map((task) => task.status?.({ context, plan, tasks })),
+    (check) => check === "pending",
+  );
 
-    if (
-      (Array.isArray(status) && (await somePromise(status, (v) => v === "pending"))) ||
-      status === "pending"
-    ) {
-      return { status: "pending", reason: `Plugin "${plugin.name}" has pending tasks` };
-    }
+  if (pendingIdx !== -1) {
+    return { status: "pending", reason: `Task "${tasks[pendingIdx]!.name}" is pending` };
   }
 
   return { status: "success" };

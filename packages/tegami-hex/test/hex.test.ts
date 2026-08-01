@@ -138,7 +138,7 @@ end
     expect(file.version).toBe("3.1.4");
   });
 
-  test("resolvePlanStatus checks the Hex registry", async () => {
+  test("isPackagePublished checks the Hex registry", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/packages/core")) {
         return new Response(JSON.stringify({ releases: [{ version: "2.0.0" }] }), { status: 200 });

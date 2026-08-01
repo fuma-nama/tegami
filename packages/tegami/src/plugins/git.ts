@@ -1,14 +1,154 @@
 import { x } from "tinyexec";
 import type { TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
-import { isCI } from "../utils/common";
-import type { PublishPlan } from "../plans/publish";
+import { isCI, somePromise } from "../utils/common";
+import { PackagePublishTask, type PackagePublishResult, type PublishPlan } from "../plans/publish";
+import type { WorkspacePackage } from "../graph";
+import { PublishTask, type PublishTaskContext, type PublishTaskRunContext } from "../utils/task";
 
 export interface GitPluginOptions {
   /** Set to false to skip creating git tags after all packages publish successfully. */
   createTags?: boolean;
   /** Push created tags to origin. Defaults to true in CI. */
   pushTags?: boolean;
+}
+
+/** creates git tags for published packages */
+export class GitCreateTagsTask extends PublishTask<{
+  createdTags: string[];
+}> {
+  name = "git:create-tags";
+  description = "Create git tags for published packages.";
+
+  async run({ plan, context }: PublishTaskRunContext) {
+    const createdTags: string[] = [];
+    const pendingTags = getPendingTags(plan);
+    if (pendingTags.size === 0) return { createdTags };
+
+    await Promise.all(
+      Array.from(pendingTags, async (tag) => {
+        const gitOut = await x("git", ["tag", tag], {
+          nodeOptions: { cwd: context.cwd },
+        });
+
+        if (gitOut.exitCode !== 0) {
+          if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
+
+          throw execFailure(`Failed to create Git tag "${tag}" for release`, gitOut);
+        }
+
+        createdTags.push(tag);
+      }),
+    );
+
+    return {
+      createdTags,
+    };
+  }
+
+  link({ tasks }: PublishTaskContext): void {
+    for (const t of tasks) {
+      // tag-published packages wait for the tags instead (see GitTagPublishTask)
+      if (t !== this && t instanceof PackagePublishTask && !(t instanceof GitTagPublishTask)) {
+        this.optionalWait.push(t);
+      }
+    }
+  }
+
+  async status({ plan, context }: PublishTaskContext) {
+    const pendingTags = getPendingTags(plan);
+
+    const checks = Array.from(pendingTags, async (tag) => {
+      const local = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
+        nodeOptions: { cwd: context.cwd },
+      });
+      if (local.exitCode === 0) return false;
+
+      // check from remote if `git pull` is not necessarily ran.
+      const origin = await x(
+        "git",
+        ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`],
+        { nodeOptions: { cwd: context.cwd } },
+      );
+
+      return origin.exitCode !== 0;
+    });
+
+    if (await somePromise(checks, (missing) => missing)) return "pending";
+  }
+}
+
+/** pushes created git tags to origin */
+export class GitPushTagsTask extends PublishTask<void> {
+  name = "git:push-tags";
+  description = "Push created git tags to origin.";
+
+  constructor(private readonly createTags: GitCreateTagsTask) {
+    super();
+    this.wait.push(createTags);
+  }
+
+  async run({ context, getTaskResult }: PublishTaskRunContext) {
+    const created = getTaskResult(this.createTags);
+    const createdTags = created?.status === "success" ? created.result.createdTags : [];
+    if (createdTags.length === 0) return;
+
+    const gitOut = await x("git", ["push", "origin", ...createdTags], {
+      nodeOptions: { cwd: context.cwd },
+    });
+
+    if (gitOut.exitCode !== 0) {
+      // this can happen in two concurrent runs: one of it pushed the tags, while another one just passed `git tag` but not pushed yet.
+      if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
+
+      throw execFailure(`Failed to push Git tags to origin: ${createdTags.join(", ")}`, gitOut);
+    }
+  }
+}
+
+/**
+ * Base task for packages published through their git tag (e.g. Go modules):
+ * it waits for the git plugin's tag work instead of the tag work waiting for it,
+ * fails when the tag work failed, and reports `skipped` when its tag already existed.
+ */
+export abstract class GitTagPublishTask<
+  T extends WorkspacePackage = WorkspacePackage,
+> extends PackagePublishTask<T> {
+  link(opts: PublishTaskContext): void {
+    super.link(opts);
+    for (const t of opts.tasks) {
+      if (t instanceof GitCreateTagsTask || t instanceof GitPushTagsTask) this.wait.push(t);
+    }
+  }
+
+  /** `published` when this run created the package's tag, `skipped` when the tag already existed */
+  async publish(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const { plan, tasks, getTaskResult } = opts;
+    const createTags = tasks.find((t): t is GitCreateTagsTask => t instanceof GitCreateTagsTask);
+    const created = createTags && getTaskResult(createTags);
+    if (!created || created.status === "failed") {
+      return {
+        type: "failed",
+        error: `Git tags were not created for package "${this.pkg.name}".`,
+      };
+    }
+
+    const tag = plan.packages.get(this.pkg.id)?.git?.tag;
+    if (!tag || !created.result.createdTags.includes(tag)) return { type: "skipped" };
+    return { type: "published" };
+  }
+}
+
+function getPendingTags(plan: PublishPlan) {
+  const pendingTags = new Set<string>();
+  for (const pkg of plan.packages.values()) {
+    if (!pkg.preflight!.shouldPublish) continue;
+    if (pkg.publishResult && pkg.publishResult.type === "failed") continue;
+
+    const tag = pkg.git?.tag;
+    if (tag) pendingTags.add(tag);
+  }
+  return pendingTags;
 }
 
 /**
@@ -19,22 +159,6 @@ export interface GitPluginOptions {
  */
 export function git(options: GitPluginOptions = {}): TegamiPlugin {
   const { createTags = true, pushTags = isCI() } = options;
-
-  function getPendingTags(plan: PublishPlan) {
-    const pendingTags = new Set<string>();
-    const dryRun = plan.options.dryRun ?? false;
-
-    if (dryRun || !createTags) return pendingTags;
-
-    for (const pkg of plan.packages.values()) {
-      if (!pkg.preflight!.shouldPublish) continue;
-      if (pkg.publishResult && pkg.publishResult.type === "failed") continue;
-
-      const tag = pkg.git?.tag;
-      if (tag) pendingTags.add(tag);
-    }
-    return pendingTags;
-  }
 
   return {
     name: "git",
@@ -65,60 +189,15 @@ export function git(options: GitPluginOptions = {}): TegamiPlugin {
             : `${pkg.name}@${pkg.version}`;
       }
     },
-    async resolvePlanStatus({ plan }) {
-      const pendingTags = getPendingTags(plan);
+    publishTasks({ plan }) {
+      const dryRun = plan.options.dryRun ?? false;
+      if (!createTags || dryRun) return;
 
-      return Array.from(pendingTags, async (tag) => {
-        const local = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
-          nodeOptions: { cwd: this.cwd },
-        });
-        if (local.exitCode === 0) return;
+      const createTask = new GitCreateTagsTask();
+      const tasks: PublishTask[] = [createTask];
+      if (pushTags) tasks.push(new GitPushTagsTask(createTask));
 
-        // check from remote if `git pull` is not necessarily ran.
-        const origin = await x(
-          "git",
-          ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`],
-          { nodeOptions: { cwd: this.cwd } },
-        );
-
-        if (origin.exitCode === 0) return;
-        return "pending";
-      });
-    },
-    async afterPublishAll({ plan }) {
-      const { cwd } = this;
-      const createdTags: string[] = [];
-      const pendingTags = getPendingTags(plan);
-      if (pendingTags.size === 0) return;
-
-      await Promise.all(
-        Array.from(pendingTags, async (tag) => {
-          const gitOut = await x("git", ["tag", tag], {
-            nodeOptions: { cwd },
-          });
-
-          if (gitOut.exitCode !== 0) {
-            if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
-
-            throw execFailure(`Failed to create Git tag "${tag}" for release`, gitOut);
-          }
-
-          createdTags.push(tag);
-        }),
-      );
-
-      if (pushTags && createdTags.length > 0) {
-        const gitOut = await x("git", ["push", "origin", ...createdTags], {
-          nodeOptions: { cwd },
-        });
-
-        if (gitOut.exitCode !== 0) {
-          // this can happen in two concurrent runs: one of it pushed the tags, while another one just passed `git tag` but not pushed yet.
-          if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
-
-          throw execFailure(`Failed to push Git tags to origin: ${createdTags.join(", ")}`, gitOut);
-        }
-      }
+      return tasks;
     },
   };
 }

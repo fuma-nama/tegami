@@ -2,9 +2,10 @@ import type { TegamiContext } from "./context";
 import type { Draft, PackageDraft } from "./plans/draft";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
-import type { PackagePublishResult, PublishPlan } from "./plans/publish";
+import type { PackagePublishResult, PublishPlan, PublishTasksContext } from "./plans/publish";
 import type { PublishLock } from "./plans/lock";
 import type { TegamiCliRegistry } from "./cli/core";
+import type { PublishTask } from "./utils/task";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -137,16 +138,31 @@ export interface TegamiPlugin {
   /** Called when all preflights finished */
   afterPreflight?(this: TegamiContext, opts: { plan: PublishPlan }): Awaitable<void>;
 
-  /** Publish package, return a result object indicating if the package is published, skipped, or failed. Return `undefined` if the package is not handled by this plugin. */
+  /**
+   * Publish package, return a result object indicating if the package is published, skipped, or failed. Return `undefined` if the package is not handled by this plugin.
+   *
+   * @deprecated create tasks extending `PackagePublishTask` from the `publishTasks` hook instead, this only runs for packages without a publish task.
+   */
   publish?(
     this: TegamiContext,
     opts: { pkg: WorkspacePackage; plan: PublishPlan },
   ): Promise<PackagePublishResult | undefined | void>;
 
   /**
+   * Create publish tasks for the plan, called in plugin order after preflights.
+   *
+   * Task creation must be side-effect free: tasks are also created (but not run) to
+   * resolve publish plan status via their `status()` method.
+   *
+   * This supersedes the deprecated `publish` & `resolvePlanStatus` hooks, while simple
+   * lifecycle hooks like `afterPublishAll` keep working alongside tasks.
+   */
+  publishTasks?(this: TegamiContext, opts: PublishTasksContext): Awaitable<PublishTask[] | void>;
+
+  /**
    * Resolve publish plan status, used to check if the plan is finished successfully, or needs retries.
    *
-   * Each plugin should only report the status of its own tasks, Tegami will summarize the results from all plugins.
+   * @deprecated implement `status()` on tasks created from the `publishTasks` hook instead.
    */
   resolvePlanStatus?(
     this: TegamiContext,

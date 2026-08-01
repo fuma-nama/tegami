@@ -7,6 +7,7 @@ import { createTegamiContext, resolveGraph } from "../src/context";
 import { initPublishPlan, runPreflights, publishPlanStatus } from "../src/plans/publish";
 import { NpmPackage } from "../src/providers/npm";
 import { writePublishLock } from "./helpers/lock";
+import { runPluginTasks } from "./helpers/tasks";
 import {
   fetchMock,
   installRegistryFetchMock,
@@ -70,7 +71,7 @@ describe("npm registry preflight", () => {
     exec.mockResolvedValue(execResult());
     const plan = await loadPlan(context, "next");
 
-    await npmPlugin.publish?.call(context, { pkg, plan });
+    await runPluginTasks(npmPlugin, context, plan);
 
     expect(exec).toHaveBeenCalledWith("yarn", ["publish", "--tag", "next"], {
       nodeOptions: {
@@ -88,7 +89,7 @@ describe("npm registry preflight", () => {
     exec.mockResolvedValue(execResult());
     const plan = await loadPlan(context, "next");
 
-    await npmPlugin.publish?.call(context, { pkg, plan });
+    await runPluginTasks(npmPlugin, context, plan);
 
     expect(exec).toHaveBeenCalledWith(client, ["publish", "--tag", "next"], {
       nodeOptions: {
@@ -107,7 +108,7 @@ describe("npm registry preflight", () => {
     exec.mockResolvedValueOnce(execResult()).mockResolvedValueOnce(execResult());
     const plan = await loadPlan(context);
 
-    await npmPlugin.publish?.call(context, { pkg, plan });
+    await runPluginTasks(npmPlugin, context, plan);
 
     expect(exec).toHaveBeenNthCalledWith(1, "bun", ["pm", "pack", "--filename", tarballPath], {
       nodeOptions: {
@@ -135,7 +136,7 @@ describe("npm registry preflight", () => {
     exec.mockResolvedValue(execResult());
     const plan = await loadPlan(context);
 
-    await npmPlugin.publish?.call(context, { pkg, plan });
+    await runPluginTasks(npmPlugin, context, plan);
 
     expect(exec).toHaveBeenNthCalledWith(1, "bun", ["run", "prepublishOnly"], {
       nodeOptions: { cwd: pkg.path },
@@ -180,7 +181,7 @@ describe("publish plan status", () => {
 
     await expect(publishPlanStatus(plan, context)).resolves.toEqual({
       status: "pending",
-      reason: 'Plugin "npm" has pending tasks',
+      reason: 'Task "publish:npm:@acme/core" is pending',
     });
   });
 });
