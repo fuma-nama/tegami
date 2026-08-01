@@ -144,12 +144,21 @@ export class Draft {
     return this.changelogs.get(id);
   }
 
-  addChangelog(entry: ChangelogEntry) {
-    this.changelogs.set(entry.id, entry);
+  addChangelog(...entries: ChangelogEntry[]) {
+    // dependency policies must evaluate against the final bumped versions, never against per-entry intermediates
+    const bumps = new Map<WorkspacePackage, BumpType>();
+    for (const entry of entries) {
+      this.changelogs.set(entry.id, entry);
 
-    for (const [pkg, bumpType] of getPackageBumps(this.context.graph, entry)) {
-      const pkgDraft = this.bumpPackage(pkg, { type: bumpType });
-      attachChangelog(pkgDraft, entry);
+      for (const [pkg, bumpType] of getPackageBumps(this.context.graph, entry)) {
+        attachChangelog(this.getOrInitPackage(pkg), entry);
+        const existing = bumps.get(pkg);
+        bumps.set(pkg, existing ? maxBump(existing, bumpType) : bumpType);
+      }
+    }
+
+    for (const [pkg, type] of bumps) {
+      this.bumpPackage(pkg, { type });
     }
   }
 
@@ -391,9 +400,7 @@ export async function createDraft(
     draft.getOrInitPackage(pkg);
   }
 
-  for (const entry of changelogs) {
-    draft.addChangelog(entry);
-  }
+  draft.addChangelog(...changelogs);
 
   return draft;
 }

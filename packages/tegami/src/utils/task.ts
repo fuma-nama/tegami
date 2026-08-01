@@ -122,12 +122,6 @@ export async function runPublishTasks(
 }
 
 /**
- * Schedule tasks into execution order, resolving their dependencies in a single scan:
- *
- * - `wait` edges must reference known tasks, circular `wait` relationships throw.
- * - `optionalWait` edges referencing unknown tasks or closing a dependency cycle are dropped,
- *   so the resolved graph is always acyclic.
- *
  * The returned map iterates in execution order (a topological order of the dependency
  * graph), each task mapped to the dependencies it waits for at run-time.
  */

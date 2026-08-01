@@ -606,6 +606,44 @@ Fixed something during beta.
   });
 });
 
+test("evaluates dependency policies against final bumps across changesets", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-final-"));
+  tempDirs.push(cwd);
+
+  await mkdir(join(cwd, "packages/core"), { recursive: true });
+  await mkdir(join(cwd, "packages/plugin"), { recursive: true });
+  await mkdir(join(cwd, ".tegami"), { recursive: true });
+  await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
+  await writeJson(join(cwd, "packages/core/package.json"), {
+    name: "@acme/core",
+    version: "1.2.0",
+  });
+  // the peer range requires the version core reaches only after ALL changesets settle
+  await writeJson(join(cwd, "packages/plugin/package.json"), {
+    name: "@acme/plugin",
+    version: "1.0.0",
+    peerDependencies: {
+      "@acme/core": "^1.3.0",
+    },
+  });
+
+  // the patch changeset sorts first: evaluating eagerly per entry would see core@1.2.1,
+  // break the peer range, and wrongly escalate the plugin to a major bump
+  await writeFile(
+    join(cwd, ".tegami/0-patch.md"),
+    `---\npackages:\n  "@acme/core": patch\n---\n\n### Fix\n`,
+  );
+  await writeFile(
+    join(cwd, ".tegami/1-minor.md"),
+    `---\npackages:\n  "@acme/core": minor\n  "@acme/plugin": minor\n---\n\n## Feature\n`,
+  );
+
+  const draft = await tegami({ cwd }).draft();
+
+  expect(draft.getPackageDraft("npm:@acme/core")?.type).toBe("minor");
+  expect(draft.getPackageDraft("npm:@acme/plugin")?.type).toBe("minor");
+});
+
 describe("npm graph", () => {
   test("discovers bun workspace object packages", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-graph-"));
