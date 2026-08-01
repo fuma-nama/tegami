@@ -4,6 +4,7 @@ import { x } from "tinyexec";
 import typia from "typia";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
+import { GitTagPublishTask } from "./git";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { execFailure, fetchFailure, isNodeError } from "../utils/error";
 import { PackageGraph, WorkspacePackage } from "../graph";
@@ -107,6 +108,13 @@ interface DependentRef {
   dependent: GoPackage;
   name: string;
   version: string;
+}
+
+/** Go modules are published by the git plugin's tags, this waits for the tag work and reports its outcome */
+export class GoPublishTask extends GitTagPublishTask<GoPackage> {
+  async status() {
+    if (!(await isModulePublished(this.pkg.name, this.pkg.version))) return "pending" as const;
+  }
 }
 
 export interface GoPluginOptions {
@@ -244,21 +252,11 @@ export function go({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
+    publishTasks({ createPackagePublishTasks }) {
       if (!active) return;
-
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-
-        const pkg = this.graph.get(id)!;
-        if (!(pkg instanceof GoPackage)) return;
-        if (!(await isModulePublished(pkg.name, pkg.version))) return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof GoPackage)) return;
-
-      return { type: (await isModulePublished(pkg.name, pkg.version)) ? "skipped" : "published" };
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof GoPackage ? new GoPublishTask(pkg) : undefined,
+      );
     },
     async applyCliDraft() {
       if (!active || !updateLockFile) return;

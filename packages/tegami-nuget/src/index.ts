@@ -4,8 +4,15 @@ import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage } from "tegami";
+import type {
+  BumpType,
+  DraftPolicy,
+  PackageGraph,
+  PackagePublishResult,
+  TegamiContext,
+  TegamiPlugin,
+} from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure } from "tegami/utils";
 import { parseDocument, type XmlDocument, type XmlElement } from "@tegami/xml-util";
 import { assertFlatContainerIndex } from "./schema";
@@ -135,6 +142,69 @@ export interface NugetPluginOptions {
   bumpDep?: (opts: NugetDependencyRef) => BumpType | false;
 }
 
+/** packs and pushes a .NET project to the NuGet registry */
+export class NugetPublishTask extends PackagePublishTask<NugetPackage> {
+  constructor(
+    pkg: NugetPackage,
+    private readonly registry: string,
+    private readonly statusBase: string | undefined,
+  ) {
+    super(pkg);
+  }
+
+  async publish(): Promise<PackagePublishResult> {
+    const { pkg, registry } = this;
+    if (!pkg.packable || !pkg.version) return { type: "skipped" };
+
+    const scratch = await mkdtemp(path.join(tmpdir(), "tegami-nuget-"));
+    try {
+      const pack = await x(
+        "dotnet",
+        ["pack", pkg.projectFile.path, "-c", "Release", "-o", scratch],
+        {
+          nodeOptions: { cwd: pkg.path },
+        },
+      );
+      if (pack.exitCode !== 0) {
+        return {
+          type: "failed",
+          error: execFailure(`Failed to pack ${pkg.packageId}@${pkg.version}.`, pack).message,
+        };
+      }
+
+      const nupkg = await findNupkg(scratch);
+      if (!nupkg) {
+        return { type: "failed", error: `No .nupkg produced for ${pkg.packageId}.` };
+      }
+
+      const args = ["nuget", "push", nupkg, "--source", registry];
+      const apiKey = process.env.NUGET_API_KEY;
+      if (apiKey) args.push("--api-key", apiKey);
+
+      const push = await x("dotnet", args, { nodeOptions: { cwd: pkg.path } });
+      if (push.exitCode !== 0) {
+        if (isAlreadyPushed(`${push.stdout}\n${push.stderr}`)) return { type: "skipped" };
+        return {
+          type: "failed",
+          error: execFailure(`Failed to push ${pkg.packageId}@${pkg.version}.`, push).message,
+        };
+      }
+
+      return { type: "published" };
+    } finally {
+      await rm(scratch, { force: true, recursive: true });
+    }
+  }
+
+  async status() {
+    const { pkg, statusBase } = this;
+    if (!statusBase || !pkg.version) return;
+    if (!(await isPackagePublished(statusBase, pkg.packageId, pkg.version))) {
+      return "pending" as const;
+    }
+  }
+}
+
 export function nuget({
   packages: patterns = DEFAULT_PACKAGES,
   registry = DEFAULT_REGISTRY,
@@ -166,59 +236,11 @@ export function nuget({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
-      if (!statusBase) return;
-
-      return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id);
-        if (!(pkg instanceof NugetPackage) || !pkg.version) return;
-
-        if (!(await isPackagePublished(statusBase, pkg.packageId, pkg.version))) {
-          return "pending";
-        }
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof NugetPackage)) return;
-      if (!pkg.packable || !pkg.version) return { type: "skipped" };
-
-      const scratch = await mkdtemp(path.join(tmpdir(), "tegami-nuget-"));
-      try {
-        const pack = await x(
-          "dotnet",
-          ["pack", pkg.projectFile.path, "-c", "Release", "-o", scratch],
-          { nodeOptions: { cwd: pkg.path } },
-        );
-        if (pack.exitCode !== 0) {
-          return {
-            type: "failed",
-            error: execFailure(`Failed to pack ${pkg.packageId}@${pkg.version}.`, pack).message,
-          };
-        }
-
-        const nupkg = await findNupkg(scratch);
-        if (!nupkg) {
-          return { type: "failed", error: `No .nupkg produced for ${pkg.packageId}.` };
-        }
-
-        const args = ["nuget", "push", nupkg, "--source", registry];
-        const apiKey = process.env.NUGET_API_KEY;
-        if (apiKey) args.push("--api-key", apiKey);
-
-        const push = await x("dotnet", args, { nodeOptions: { cwd: pkg.path } });
-        if (push.exitCode !== 0) {
-          if (isAlreadyPushed(`${push.stdout}\n${push.stderr}`)) return { type: "skipped" };
-          return {
-            type: "failed",
-            error: execFailure(`Failed to push ${pkg.packageId}@${pkg.version}.`, push).message,
-          };
-        }
-
-        return { type: "published" };
-      } finally {
-        await rm(scratch, { force: true, recursive: true });
-      }
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof NugetPackage ? new NugetPublishTask(pkg, registry, statusBase) : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!active) return;

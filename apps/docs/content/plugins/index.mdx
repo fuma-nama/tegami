@@ -26,6 +26,51 @@ const paper = tegami({
 
 <auto-type-table type="import('tegami').TegamiPlugin" />
 
+## Publish tasks
+
+Publishing runs on a task graph: plugins create tasks from the `publishTasks` hook, and Tegami runs them concurrently according to their `wait` / `optionalWait` relationships.
+
+- `link()`: wire cross-plugin dependencies in a phase once every task exists.
+- `status()`: report whether its work is already done from a previous run.
+
+```ts
+import {
+  tegami,
+  PublishTask,
+  PackagePublishTask,
+  type PublishTaskContext,
+  type PublishTaskRunContext,
+} from "tegami";
+
+class AnnounceTask extends PublishTask<void> {
+  name = "announce";
+
+  link({ tasks }: PublishTaskContext) {
+    // run after every package publish
+    for (const t of tasks) {
+      if (t instanceof PackagePublishTask) this.wait.push(t);
+    }
+  }
+
+  async run({ getTaskResult }: PublishTaskRunContext) {
+    // failed tasks don't block dependents, inspect their outcome with `getTaskResult`
+  }
+}
+
+const paper = tegami({
+  plugins: [
+    {
+      name: "announce",
+      publishTasks() {
+        return [new AnnounceTask()];
+      },
+    },
+  ],
+});
+```
+
+The main package publish task should extend `PackagePublishTask`, Tegami will handle the hooks calling & task dependencies automatically.
+
 ## Built-in plugins
 
 Tegami enables npm support automatically. Configure it through the top-level `npm` option:

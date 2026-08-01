@@ -10,6 +10,7 @@ import type { TegamiContext } from "../src/context";
 import type { PackageOptions } from "../src/types";
 import { getPendingPackageIds } from "./helpers/draft";
 import { publishPlan } from "./helpers/plan";
+import { runPluginTasks } from "./helpers/tasks";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -171,7 +172,7 @@ Breaking note.
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
-    await plugin.afterPublishAll?.call(context, { plan });
+    await runPluginTasks(plugin, context, plan);
 
     expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "tag")).toHaveLength(1);
   });

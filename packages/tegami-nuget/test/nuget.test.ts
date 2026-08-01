@@ -117,7 +117,7 @@ describe("nuget plugin", () => {
     expect(rewriteConstraint("[1.0,2.0)", "2.0.0")).toBeUndefined(); // interval left alone
   });
 
-  test("resolvePlanStatus checks the flat-container index", async () => {
+  test("isPackagePublished checks the flat-container index", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("acme.core")) {
         return new Response(JSON.stringify({ versions: ["1.0.0", "2.0.0"] }), { status: 200 });

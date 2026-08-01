@@ -10,8 +10,11 @@ import type {
   PublishPlan,
   TegamiContext,
   TegamiPlugin,
+  PublishTaskContext,
+  PublishTaskRunContext,
 } from "tegami";
-import { WorkspacePackage } from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
+import { GitTagPublishTask } from "tegami/plugins/git";
 import {
   getField,
   parseZonObject,
@@ -152,6 +155,65 @@ export class ZigPackage extends WorkspacePackage {
   }
 }
 
+/** git-tag publishing: the release is the git tag itself, created by the git/github/gitlab plugin */
+export class ZigTagPublishTask extends GitTagPublishTask<ZigPackage> {
+  constructor(
+    pkg: ZigPackage,
+    private readonly strategy: Extract<NormalizedZigPublishOptions, { type: "git-tag" }>,
+  ) {
+    super(pkg);
+  }
+
+  async publish(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+    if (!publishContext(this.pkg, opts.plan).tag) {
+      return {
+        type: "failed",
+        error:
+          "Zig git-tag publishing requires the git, github, or gitlab plugin to provide a release tag.",
+      };
+    }
+
+    return super.publish(opts);
+  }
+
+  async status({ context, plan }: PublishTaskContext) {
+    const ctx = publishContext(this.pkg, plan);
+    if (this.strategy.resolveStatus) {
+      return mapPublishStatus(await this.strategy.resolveStatus.call(context, ctx));
+    }
+
+    // without a custom check, the git plugin's tag status is authoritative
+    if (!ctx.tag) return "pending" as const;
+  }
+}
+
+/** custom publishing through the strategy's own `publish` callback */
+export class ZigCustomPublishTask extends PackagePublishTask<ZigPackage> {
+  constructor(
+    pkg: ZigPackage,
+    private readonly strategy: Extract<NormalizedZigPublishOptions, { type: "custom" }>,
+  ) {
+    super(pkg);
+  }
+
+  async publish({ context, plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const result = await this.strategy.publish.call(context, publishContext(this.pkg, plan));
+    return result ?? { type: "published" };
+  }
+
+  async status({ context, plan }: PublishTaskContext) {
+    if (!this.strategy.resolveStatus) return "pending" as const;
+    return mapPublishStatus(
+      await this.strategy.resolveStatus.call(context, publishContext(this.pkg, plan)),
+    );
+  }
+}
+
+function mapPublishStatus(status: ZigPublishStatus): "done" | "pending" | undefined {
+  if (status === "success") return "done";
+  if (status === "pending") return "pending";
+}
+
 export function zig({
   workspace = [],
   bumpDep: getBumpDepType,
@@ -182,46 +244,14 @@ export function zig({
         ...dependencyWaits(publishStrategy?.waitForDependencies ?? "optional", dependencyIds),
       };
     },
-    resolvePlanStatus({ plan }) {
-      if (!publishStrategy) return;
-
-      return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight?.shouldPublish) return;
-
-        const pkg = this.graph.get(id);
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active || !publishStrategy) return;
+      return createPackagePublishTasks((pkg) => {
         if (!(pkg instanceof ZigPackage)) return;
-
-        const ctx = publishContext(pkg, plan);
-        if (publishStrategy.resolveStatus) {
-          const status = await publishStrategy.resolveStatus.call(this, ctx);
-          return status === "success" || status === "pending" ? status : undefined;
-        }
-
-        if (publishStrategy.type === "git-tag" && packagePlan.git?.tag) {
-          return;
-        }
-
-        return "pending";
+        return publishStrategy.type === "git-tag"
+          ? new ZigTagPublishTask(pkg, publishStrategy)
+          : new ZigCustomPublishTask(pkg, publishStrategy);
       });
-    },
-    async publish({ pkg, plan }) {
-      if (!(pkg instanceof ZigPackage) || !publishStrategy) return;
-
-      const ctx = publishContext(pkg, plan);
-      switch (publishStrategy.type) {
-        case "git-tag":
-          if (!ctx.tag) {
-            return {
-              type: "failed",
-              error:
-                "Zig git-tag publishing requires the git, github, or gitlab plugin to provide a release tag.",
-            };
-          }
-
-          return { type: "published" };
-        case "custom":
-          return (await publishStrategy.publish.call(this, ctx)) ?? { type: "published" };
-      }
     },
     async applyDraft(draft) {
       if (!active) return;

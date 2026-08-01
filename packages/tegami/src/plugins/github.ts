@@ -9,10 +9,11 @@ import { cached, isCI } from "../utils/common";
 import { PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
-  createAutoRelease,
+  ReleaseTask,
   versionRequestPlugin,
   resolveFileCommit,
   VersionRequestOptions,
+  type ReleaseProvider,
 } from "../utils/version-request";
 import {
   createPullRequest,
@@ -79,7 +80,7 @@ export interface GitHubPluginOptions extends GitPluginOptions {
 export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
   const { release: releaseOptions = true } = options;
 
-  let autoRelease: ReturnType<typeof createAutoRelease<GithubRelease>> | undefined;
+  let release: ReleaseProvider<GithubRelease> | undefined;
   const plugin: TegamiPlugin = {
     name: "github",
     init() {
@@ -107,7 +108,7 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           },
         );
 
-        autoRelease = createAutoRelease({
+        release = {
           eager,
           override: create,
           overrideGroup: createGrouped,
@@ -151,14 +152,12 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
           releaseExistsByTag(tag) {
             return releaseExistsByTag(repo, tag, token);
           },
-        });
+        };
       }
     },
-    async resolvePlanStatus({ plan }) {
-      if (await autoRelease?.hasPending.call(this, plan)) return "pending";
-    },
-    async afterPublishAll({ plan }) {
-      await autoRelease?.create.call(this, plan);
+    publishTasks() {
+      if (!release) return;
+      return [new ReleaseTask("github:release", release)];
     },
     async initCli(cli) {
       registerPrCli(cli);

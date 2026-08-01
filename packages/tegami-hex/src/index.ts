@@ -1,8 +1,15 @@
 import path from "node:path";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage } from "tegami";
+import type {
+  BumpType,
+  DraftPolicy,
+  PackageGraph,
+  PackagePublishResult,
+  TegamiContext,
+  TegamiPlugin,
+} from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure, joinPath } from "tegami/utils";
 import { readMix, writeMix, type Edit, type MixFile } from "./mix";
 import { satisfiesRequirement, updateRequirement } from "./requirement";
@@ -105,6 +112,45 @@ declare module "tegami" {
   }
 }
 
+/** publishes a Mix project to Hex */
+export class HexPublishTask extends PackagePublishTask<HexPackage> {
+  constructor(
+    pkg: HexPackage,
+    private readonly registry: string,
+  ) {
+    super(pkg);
+  }
+
+  async publish(): Promise<PackagePublishResult> {
+    const { pkg } = this;
+    const result = await x("mix", ["hex.publish", "--yes"], {
+      nodeOptions: { cwd: pkg.path },
+    });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    // mix reports these when the exact version already exists on the registry
+    if (/already been published|choose a new package version/i.test(combined)) {
+      return { type: "skipped" };
+    }
+
+    if (result.exitCode !== 0) {
+      return {
+        type: "failed",
+        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
+      };
+    }
+
+    return { type: "published" };
+  }
+
+  async status() {
+    const { pkg } = this;
+    if (!pkg.version) return;
+    if (!(await isPackagePublished(pkg.name, pkg.version, this.registry)))
+      return "pending" as const;
+  }
+}
+
 export function hex({
   packages: packageGlobs = [],
   registry = DEFAULT_REGISTRY,
@@ -136,35 +182,11 @@ export function hex({
         wait,
       };
     },
-    resolvePlanStatus({ plan }) {
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id);
-        if (!(pkg instanceof HexPackage) || !pkg.version) return;
-        if (!(await isPackagePublished(pkg.name, pkg.version, registry))) return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof HexPackage)) return;
-
-      const result = await x("mix", ["hex.publish", "--yes"], {
-        nodeOptions: { cwd: pkg.path },
-      });
-      const combined = `${result.stdout}\n${result.stderr}`;
-
-      // mix reports these when the exact version already exists on the registry
-      if (/already been published|choose a new package version/i.test(combined)) {
-        return { type: "skipped" };
-      }
-
-      if (result.exitCode !== 0) {
-        return {
-          type: "failed",
-          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-        };
-      }
-
-      return { type: "published" };
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof HexPackage ? new HexPublishTask(pkg, registry) : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!active) return;

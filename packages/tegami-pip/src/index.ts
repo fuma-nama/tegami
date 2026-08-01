@@ -5,8 +5,15 @@ import initToml, { edit, parse } from "@rainbowatcher/toml-edit-js";
 import { satisfies, validRange } from "@renovatebot/pep440";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage } from "tegami";
+import type {
+  BumpType,
+  DraftPolicy,
+  PackageGraph,
+  PackagePublishResult,
+  TegamiContext,
+  TegamiPlugin,
+} from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
 import { execFailure } from "tegami/utils";
 import {
   assertPyprojectManifest,
@@ -86,6 +93,60 @@ export interface PipPluginOptions {
   publishIndex?: string;
 }
 
+/** publishes a Python package to the configured index with `uv publish` */
+export class PipPublishTask extends PackagePublishTask<PipPackage> {
+  constructor(
+    pkg: PipPackage,
+    private readonly publishIndex: string | undefined,
+    private readonly publishTarget: UvIndex,
+  ) {
+    super(pkg);
+  }
+
+  async publish(): Promise<PackagePublishResult> {
+    const { pkg, publishIndex, publishTarget } = this;
+    const publishArgs = ["publish"];
+    if (publishIndex && publishTarget["publish-url"]) {
+      publishArgs.push(
+        "--publish-url",
+        publishTarget["publish-url"],
+        "--check-url",
+        publishTarget.url,
+      );
+    } else if (publishIndex) {
+      publishArgs.push("--index", publishTarget.name);
+    }
+
+    const result = await x("uv", publishArgs, {
+      nodeOptions: { cwd: pkg.path },
+    });
+
+    if (result.exitCode !== 0) {
+      if (
+        /already exists|already uploaded|file already exists/i.test(
+          `${result.stdout}\n${result.stderr}`,
+        )
+      ) {
+        return { type: "skipped" };
+      }
+
+      return {
+        type: "failed",
+        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
+      };
+    }
+
+    return { type: "published" };
+  }
+
+  async status() {
+    const { pkg } = this;
+    if (!pkg.version) return;
+    if (!(await isPackagePublished(pkg.normalizedName, pkg.version, this.publishTarget.url)))
+      return "pending" as const;
+  }
+}
+
 export function pip({
   updateLockFile = true,
   bumpDep: getBumpDepType,
@@ -137,50 +198,13 @@ export function pip({
         optionalWait: optionalWait.length > 0 ? optionalWait : undefined,
       };
     },
-    resolvePlanStatus({ plan }) {
-      return Array.from(plan.packages, async ([id, { preflight }]) => {
-        if (!preflight!.shouldPublish) return;
-        const pkg = this.graph.get(id)!;
-        if (!(pkg instanceof PipPackage) || !pkg.version) return;
-        if (!(await isPackagePublished(pkg.normalizedName, pkg.version, publishTarget.url)))
-          return "pending";
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof PipPackage)) return;
-
-      const publishArgs = ["publish"];
-      if (publishIndex && publishTarget["publish-url"]) {
-        publishArgs.push(
-          "--publish-url",
-          publishTarget["publish-url"],
-          "--check-url",
-          publishTarget.url,
-        );
-      } else if (publishIndex) {
-        publishArgs.push("--index", publishTarget.name);
-      }
-
-      const result = await x("uv", publishArgs, {
-        nodeOptions: { cwd: pkg.path },
-      });
-
-      if (result.exitCode !== 0) {
-        if (
-          /already exists|already uploaded|file already exists/i.test(
-            `${result.stdout}\n${result.stderr}`,
-          )
-        ) {
-          return { type: "skipped" };
-        }
-
-        return {
-          type: "failed",
-          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-        };
-      }
-
-      return { type: "published" };
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof PipPackage
+          ? new PipPublishTask(pkg, publishIndex, publishTarget)
+          : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!active) return;

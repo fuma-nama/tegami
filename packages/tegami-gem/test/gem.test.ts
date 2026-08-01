@@ -111,7 +111,7 @@ describe("gem plugin publish preflight", () => {
   });
 });
 
-describe("gem plugin resolvePlanStatus", () => {
+describe("gem plugin publish task status", () => {
   test("returns pending until the version appears on the registry", async () => {
     const cwd = await createWorkspace();
     tempDirs.push(cwd);
@@ -122,17 +122,25 @@ describe("gem plugin resolvePlanStatus", () => {
       packages: new Map([["gem:core", { preflight: { shouldPublish: true } }]]),
     } as never;
 
+    const core = context.graph.get("gem:core")!;
+    const tasks =
+      (await plugin.publishTasks!.call(context, {
+        plan,
+        createPackagePublishTasks: (create) => {
+          const task = create(core);
+          return task ? [task] : [];
+        },
+      })) ?? [];
+    const task = tasks.find((t) => t.name === "publish:gem:core")!;
+    const statusOf = () => task.status?.({ context, plan, tasks });
+
     fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
-    const pending = await Promise.all(plugin.resolvePlanStatus!.call(context, { plan }) as never[]);
-    expect(pending).toEqual(["pending"]);
+    await expect(statusOf()).resolves.toBe("pending");
 
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify([{ number: "1.0.0" }, { number: "0.9.0" }]), { status: 200 }),
     );
-    const published = await Promise.all(
-      plugin.resolvePlanStatus!.call(context, { plan }) as never[],
-    );
-    expect(published).toEqual([undefined]);
+    await expect(statusOf()).resolves.toBeUndefined();
   });
 
   test("isGemVersionPublished validates the RubyGems response", async () => {

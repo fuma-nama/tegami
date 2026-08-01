@@ -335,7 +335,7 @@ Core only.
 
     await expect(tegami({ cwd }).getPublishStatus()).resolves.toEqual({
       status: "pending",
-      reason: 'Plugin "npm" has pending tasks',
+      reason: 'Task "publish:npm:@acme/core" is pending',
     });
     await expect(tegami({ cwd }).publishStatus()).resolves.toBe("pending");
   });

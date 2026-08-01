@@ -3,8 +3,16 @@ import path from "node:path";
 import * as semver from "semver";
 import { glob } from "tinyglobby";
 import { x } from "tinyexec";
-import type { BumpType, DraftPolicy, PackageGraph, TegamiContext, TegamiPlugin } from "tegami";
-import { WorkspacePackage } from "tegami";
+import type {
+  BumpType,
+  DraftPolicy,
+  PackageGraph,
+  PackagePublishResult,
+  PublishTaskRunContext,
+  TegamiContext,
+  TegamiPlugin,
+} from "tegami";
+import { PackagePublishTask, WorkspacePackage } from "tegami";
 import { execFailure, fetchFailure } from "tegami/utils";
 import { parseDocument, type XmlDocument, type XmlElement } from "@tegami/xml-util";
 
@@ -162,6 +170,51 @@ declare module "tegami" {
   }
 }
 
+/** publishes a Maven module with the configured publish command */
+export class MavenPublishTask extends PackagePublishTask<MavenPackage> {
+  constructor(
+    pkg: MavenPackage,
+    private readonly registry: string | false,
+    private readonly publishCommand: MavenPluginOptions["publishCommand"],
+  ) {
+    super(pkg);
+  }
+
+  async publish({ context }: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const { pkg, registry } = this;
+    const command = resolvePublishCommand(this.publishCommand, pkg, context.cwd);
+    const result = await x(command[0]!, command.slice(1), {
+      nodeOptions: { cwd: context.cwd },
+    });
+
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (result.exitCode !== 0) {
+      // A reactor build can fail on *another* module that is already deployed,
+      // so the marker alone does not prove this package was the one rejected —
+      // confirm against the registry before reporting it as skipped.
+      if (isAlreadyDeployed(output) && (await isThisVersionDeployed(registry, pkg))) {
+        return { type: "skipped" };
+      }
+
+      return {
+        type: "failed",
+        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
+      };
+    }
+
+    if (isAlreadyDeployed(output)) return { type: "skipped" };
+    return { type: "published" };
+  }
+
+  async status() {
+    const { pkg, registry } = this;
+    if (registry === false || !pkg.version) return;
+    if (!(await isVersionPublished(registry, pkg.groupId, pkg.artifactId, pkg.version))) {
+      return "pending" as const;
+    }
+  }
+}
+
 export function maven({
   packages: extraGlobs = [],
   bumpDep: getBumpDepType,
@@ -213,45 +266,13 @@ export function maven({
 
       return { shouldPublish, wait };
     },
-    resolvePlanStatus({ plan }) {
-      if (registry === false) return;
-
-      return Array.from(plan.packages, async ([id, packagePlan]) => {
-        if (!packagePlan.preflight!.shouldPublish) return;
-
-        const pkg = this.graph.get(id);
-        if (!(pkg instanceof MavenPackage) || !pkg.version) return;
-
-        if (!(await isVersionPublished(registry, pkg.groupId, pkg.artifactId, pkg.version))) {
-          return "pending";
-        }
-      });
-    },
-    async publish({ pkg }) {
-      if (!(pkg instanceof MavenPackage)) return;
-
-      const command = resolvePublishCommand(publishCommand, pkg, this.cwd);
-      const result = await x(command[0]!, command.slice(1), {
-        nodeOptions: { cwd: this.cwd },
-      });
-
-      const output = `${result.stdout}\n${result.stderr}`;
-      if (result.exitCode !== 0) {
-        // A reactor build can fail on *another* module that is already deployed,
-        // so the marker alone does not prove this package was the one rejected —
-        // confirm against the registry before reporting it as skipped.
-        if (isAlreadyDeployed(output) && (await isThisVersionDeployed(registry, pkg))) {
-          return { type: "skipped" };
-        }
-
-        return {
-          type: "failed",
-          error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-        };
-      }
-
-      if (isAlreadyDeployed(output)) return { type: "skipped" };
-      return { type: "published" };
+    publishTasks({ createPackagePublishTasks }) {
+      if (!active) return;
+      return createPackagePublishTasks((pkg) =>
+        pkg instanceof MavenPackage
+          ? new MavenPublishTask(pkg, registry, publishCommand)
+          : undefined,
+      );
     },
     async applyDraft(draft) {
       if (!active) return;

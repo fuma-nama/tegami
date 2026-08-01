@@ -14,6 +14,7 @@ import type { TegamiContext } from "../src/context";
 import type { PublishPreflight, TegamiPlugin } from "../src/types";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import { createTegamiCliRegistry } from "../src/cli/core";
+import { pluginTaskStatus, runPluginTasks } from "./helpers/tasks";
 
 vi.mock("tinyexec", () => ({
   x: vi.fn(),
@@ -1129,9 +1130,7 @@ async function runAfterPublishAll(
   plan: PublishPlan,
 ) {
   await initPlugins(plugins, context);
-  for (const plugin of plugins) {
-    await plugin.afterPublishAll?.call(context, { plan });
-  }
+  await runPluginTasks(plugins, context, plan);
 }
 
 async function resolvePlanStatus(
@@ -1140,10 +1139,7 @@ async function resolvePlanStatus(
   plan: PublishPlan,
 ): Promise<"pending" | undefined> {
   await initPlugins(plugins, context);
-  for (const plugin of plugins) {
-    const status = await plugin.resolvePlanStatus?.call(context, { plan });
-    if (status === "pending") return "pending";
-  }
+  return pluginTaskStatus(plugins, context, plan);
 }
 
 async function runInitPublishPlan(

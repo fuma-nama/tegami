@@ -2,36 +2,44 @@ import type { Awaitable } from "../types";
 
 export const isCI = () => Boolean(process.env.CI);
 
-export async function somePromise<T>(
+/** resolve with the first index satisfying `fn` as soon as it settles, or `-1` after all settle */
+export async function findPromiseIndex<T>(
   promises: Awaitable<T>[],
   fn: (value: T) => boolean,
-): Promise<boolean> {
+): Promise<number> {
   return new Promise((res, reject) => {
-    const n = promises.length;
-    if (n === 0) res(false);
+    let n = promises.length;
+    if (n === 0) res(-1);
 
-    let i = 0;
-    for (const promise of promises) {
+    for (let i = 0; i < promises.length; i++) {
+      const promise = promises[i]!;
       if (promise instanceof Promise) {
         void promise
           .then((v) => {
-            if (fn(v)) return res(true);
+            if (fn(v)) return res(i);
 
-            i++;
-            if (i === n) res(false);
+            n--;
+            if (n === 0) res(-1);
           })
           .catch(reject);
         continue;
       }
 
       if (fn(promise)) {
-        return res(true);
+        return res(i);
       }
 
-      i++;
-      if (i === n) res(false);
+      n--;
+      if (n === 0) res(-1);
     }
   });
+}
+
+export async function somePromise<T>(
+  promises: Awaitable<T>[],
+  fn: (value: T) => boolean,
+): Promise<boolean> {
+  return (await findPromiseIndex(promises, fn)) !== -1;
 }
 
 export function joinPath(...paths: string[]): string {
