@@ -284,6 +284,10 @@ export function npm({
         case "yarn@berry":
           args = ["install", "--mode=update-lockfile", "--no-immutable"];
           break;
+        case "deno":
+          // deno has no lockfile-only install mode
+          args = ["install"];
+          break;
         default:
           args = ["install"];
       }
@@ -451,6 +455,8 @@ async function publish(
     case "yarn":
       command = client;
       break;
+    // `deno publish` targets JSR, so registry publishes go through the npm CLI
+    case "deno":
     default:
       command = "npm";
       break;
