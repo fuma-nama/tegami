@@ -663,6 +663,60 @@ describe("npm graph", () => {
     expect([...graph.packages.keys()].sort()).toEqual(["@acme/root", "@acme/web"]);
   });
 
+  test("discovers deno workspace packages from deno.json", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-graph-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await mkdir(join(cwd, "packages/deno-only"), { recursive: true });
+    // no root package.json, the workspace is declared in deno.json only
+    await writeJson(join(cwd, "deno.json"), {
+      workspace: ["packages/*"],
+    });
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+    });
+    // deno-first members without a package.json are not npm packages
+    await writeJson(join(cwd, "packages/deno-only/deno.json"), {
+      name: "@acme/deno-only",
+      version: "1.0.0",
+    });
+
+    const graph = await resolveNpmGraph(cwd, "deno");
+    expect([...graph.packages.keys()]).toEqual(["@acme/core"]);
+  });
+
+  test("discovers deno workspace members from deno.jsonc", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-graph-"));
+    tempDirs.push(cwd);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await writeFile(
+      join(cwd, "deno.jsonc"),
+      `{
+  // comments and trailing commas are allowed in jsonc
+  "workspace": {
+    "members": ["packages/core" /* explicit member */,],
+  },
+}
+`,
+    );
+    await writeJson(join(cwd, "packages/core/package.json"), {
+      name: "@acme/core",
+      version: "1.0.0",
+    });
+
+    const graph = await resolveNpmGraph(cwd, "deno");
+    expect([...graph.packages.keys()]).toEqual(["@acme/core"]);
+  });
+
+  test("throws a clear error for a malformed deno.json workspace", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-graph-"));
+    tempDirs.push(cwd);
+    await writeJson(join(cwd, "deno.json"), { workspace: { members: "packages/*" } });
+
+    await expect(resolveNpmGraph(cwd, "deno")).rejects.toThrow(/failed to parse/);
+  });
+
   test("parseDependencySpec handles workspace scoped package names", () => {
     expect(parseDependencySpec("workspace:@acme/core")).toEqual({
       protocol: "workspace",

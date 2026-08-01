@@ -13,6 +13,9 @@ Tegami scans:
 - Workspace packages from the `workspaces` field in the root manifest.
 - `pnpm-workspace.yaml` for pnpm projects and Nub's pnpm-compatible mode.
 - `aube-workspace.yaml` for aube projects.
+- The `workspace` field in `deno.json`/`deno.jsonc` for Deno projects. Members without a `package.json` (e.g. JSR-only packages) are ignored.
+
+Deno is detected from `deno.lock`; set `client: "deno"` explicitly if your project has no lockfile. Since `deno publish` targets JSR, Tegami publishes through the npm CLI, and lockfile updates run `deno install`.
 
 Private packages are versioned but not published unless you set `publish: true` in `packages`.
 

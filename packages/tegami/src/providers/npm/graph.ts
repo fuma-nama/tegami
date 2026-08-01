@@ -9,6 +9,7 @@ import { isNodeError } from "../../utils/error";
 import type { AgentName } from "package-manager-detector";
 import { WorkspacePackage } from "../../graph";
 import type { PackageDraft } from "../../plans/draft";
+import type { ParseError } from "jsonc-parser";
 
 export class NpmPackage extends WorkspacePackage {
   readonly manager = "npm";
@@ -294,6 +295,9 @@ export async function resolveNpmGraph(cwd: string, client: AgentName): Promise<N
       const yarnCatalog = await readYarnCatalog(cwd);
       if (yarnCatalog) catalogSources.push(yarnCatalog);
       break;
+    case "deno":
+      patterns.push(...(await readDenoWorkspacePatterns(cwd)));
+      break;
   }
 
   if (workspaceFiles) {
@@ -428,6 +432,48 @@ async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise
   });
 
   return results.map((item) => (item.endsWith(path.sep) ? item.slice(0, -1) : item));
+}
+
+interface DenoConfig {
+  workspace?: string[] | { members?: string[] };
+}
+
+const assertDenoConfig = typia.createAssert<DenoConfig>();
+
+/** workspace member patterns from `deno.json`/`deno.jsonc`, members without a `package.json` are ignored later */
+async function readDenoWorkspacePatterns(cwd: string): Promise<string[]> {
+  for (const name of ["deno.json", "deno.jsonc"]) {
+    const filePath = path.join(cwd, name);
+    const content = await readFile(filePath, "utf8").catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (content === undefined) continue;
+
+    let config: DenoConfig;
+    try {
+      let parsed: unknown;
+      if (name.endsWith(".jsonc")) {
+        const { parse, printParseErrorCode } = await import("jsonc-parser");
+
+        const errors: ParseError[] = [];
+        parsed = parse(content, errors, { allowTrailingComma: true });
+        // `parse` is fault-tolerant and would silently return a partial result
+        const error = errors[0];
+        if (error) throw new Error(`${printParseErrorCode(error.error)} at offset ${error.offset}`);
+      } else {
+        parsed = JSON.parse(content);
+      }
+      config = assertDenoConfig(parsed);
+    } catch (error) {
+      throw new Error(`[Tegami] failed to parse "${filePath}"`, { cause: error });
+    }
+
+    const { workspace } = config;
+    return (Array.isArray(workspace) ? workspace : workspace?.members) ?? [];
+  }
+
+  return [];
 }
 
 async function readManifest(packagePath: string): Promise<PackageManifest> {
