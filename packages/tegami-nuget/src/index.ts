@@ -8,7 +8,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
@@ -152,7 +152,7 @@ export class NugetPublishTask extends PackagePublishTask<NugetPackage> {
     super(pkg);
   }
 
-  async publish(): Promise<PackagePublishResult> {
+  async publish(): Promise<PackagePublishTaskResult> {
     const { pkg, registry } = this;
     if (!pkg.packable || !pkg.version) return { type: "skipped" };
 
@@ -166,15 +166,12 @@ export class NugetPublishTask extends PackagePublishTask<NugetPackage> {
         },
       );
       if (pack.exitCode !== 0) {
-        return {
-          type: "failed",
-          error: execFailure(`Failed to pack ${pkg.packageId}@${pkg.version}.`, pack).message,
-        };
+        throw execFailure(`Failed to pack ${pkg.packageId}@${pkg.version}.`, pack);
       }
 
       const nupkg = await findNupkg(scratch);
       if (!nupkg) {
-        return { type: "failed", error: `No .nupkg produced for ${pkg.packageId}.` };
+        throw new Error(`No .nupkg produced for ${pkg.packageId}.`);
       }
 
       const args = ["nuget", "push", nupkg, "--source", registry];
@@ -184,10 +181,7 @@ export class NugetPublishTask extends PackagePublishTask<NugetPackage> {
       const push = await x("dotnet", args, { nodeOptions: { cwd: pkg.path } });
       if (push.exitCode !== 0) {
         if (isAlreadyPushed(`${push.stdout}\n${push.stderr}`)) return { type: "skipped" };
-        return {
-          type: "failed",
-          error: execFailure(`Failed to push ${pkg.packageId}@${pkg.version}.`, push).message,
-        };
+        throw execFailure(`Failed to push ${pkg.packageId}@${pkg.version}.`, push);
       }
 
       return { type: "published" };

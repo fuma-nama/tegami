@@ -6,7 +6,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   PublishPlan,
   TegamiContext,
   TegamiPlugin,
@@ -92,7 +92,7 @@ export type ZigPublishOptions =
       publish(
         this: TegamiContext,
         opts: ZigPublishContext,
-      ): Awaitable<PackagePublishResult | undefined | void>;
+      ): Awaitable<PackagePublishTaskResult | undefined | void>;
     });
 
 export interface ZigPluginOptions {
@@ -164,13 +164,11 @@ export class ZigTagPublishTask extends GitTagPublishTask<ZigPackage> {
     super(pkg);
   }
 
-  async publish(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async publish(opts: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     if (!publishContext(this.pkg, opts.plan).tag) {
-      return {
-        type: "failed",
-        error:
-          "Zig git-tag publishing requires the git, github, or gitlab plugin to provide a release tag.",
-      };
+      throw new Error(
+        "Zig git-tag publishing requires the git, github, or gitlab plugin to provide a release tag.",
+      );
     }
 
     return super.publish(opts);
@@ -196,7 +194,7 @@ export class ZigCustomPublishTask extends PackagePublishTask<ZigPackage> {
     super(pkg);
   }
 
-  async publish({ context, plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async publish({ context, plan }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const result = await this.strategy.publish.call(context, publishContext(this.pkg, plan));
     return result ?? { type: "published" };
   }

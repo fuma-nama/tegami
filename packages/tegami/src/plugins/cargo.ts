@@ -6,7 +6,7 @@ import { glob } from "tinyglobby";
 import { x } from "tinyexec";
 import type { TegamiContext } from "../context";
 import type { DraftPolicy } from "../plans/draft";
-import { PackagePublishTask, type PackagePublishResult } from "../plans/publish";
+import { PackagePublishTask, type PackagePublishTaskResult } from "../plans/publish";
 import type { RequireFields, TegamiPlugin } from "../types";
 import { execFailure, fetchFailure } from "../utils/error";
 import { WorkspacePackage } from "../graph";
@@ -144,7 +144,7 @@ interface DependentRef {
 
 /** publishes a crate to crates.io */
 export class CargoPublishTask extends PackagePublishTask<CargoPackage> {
-  async publish(): Promise<PackagePublishResult> {
+  async publish(): Promise<PackagePublishTaskResult> {
     const { pkg } = this;
     const result = await x("cargo", ["publish"], {
       nodeOptions: {
@@ -157,10 +157,7 @@ export class CargoPublishTask extends PackagePublishTask<CargoPackage> {
         return { type: "skipped" };
       }
 
-      return {
-        type: "failed",
-        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-      };
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
     }
 
     return {

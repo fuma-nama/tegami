@@ -31,6 +31,7 @@ export type { Draft, PackageDraft, DraftPolicy } from "./plans/draft";
 export type {
   PackagePublishPlan,
   PackagePublishResult,
+  PackagePublishTaskResult,
   PublishOptions,
   PublishPlan,
 } from "./plans/publish";

@@ -9,7 +9,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
@@ -103,7 +103,7 @@ export class PipPublishTask extends PackagePublishTask<PipPackage> {
     super(pkg);
   }
 
-  async publish(): Promise<PackagePublishResult> {
+  async publish(): Promise<PackagePublishTaskResult> {
     const { pkg, publishIndex, publishTarget } = this;
     const publishArgs = ["publish"];
     if (publishIndex && publishTarget["publish-url"]) {
@@ -130,10 +130,7 @@ export class PipPublishTask extends PackagePublishTask<PipPackage> {
         return { type: "skipped" };
       }
 
-      return {
-        type: "failed",
-        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-      };
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
     }
 
     return { type: "published" };

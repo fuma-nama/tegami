@@ -5,7 +5,7 @@ import { isCI, somePromise } from "../utils/common";
 import {
   PackagePublishTask,
   PublishTask,
-  type PackagePublishResult,
+  type PackagePublishTaskResult,
   type PublishPlan,
   type PublishTaskContext,
   type PublishTaskRunContext,
@@ -128,17 +128,13 @@ export abstract class GitTagPublishTask<
   }
 
   /** `published` when this run created the package's tag, `skipped` when the tag already existed */
-  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const createTags = plan.tasks.find(
       (t): t is GitCreateTagsTask => t instanceof GitCreateTagsTask,
     );
     const created = createTags?.getResult();
-    if (!created || created.status === "failed") {
-      return {
-        type: "failed",
-        error: `Git tags were not created for package "${this.pkg.name}".`,
-      };
-    }
+    if (!created) throw new Error(`Git tags were not created for package "${this.pkg.name}".`);
+    if (created.status === "failed") throw created.error;
 
     const tag = plan.packages.get(this.pkg.id)?.git?.tag;
     if (!tag || !created.result.createdTags.includes(tag)) return { type: "skipped" };

@@ -7,7 +7,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
@@ -118,7 +118,7 @@ export class GemPublishTask extends PackagePublishTask<GemPackage> {
     super(pkg);
   }
 
-  async publish(): Promise<PackagePublishResult> {
+  async publish(): Promise<PackagePublishTaskResult> {
     const { pkg, registry } = this;
     if (!pkg.version) return { type: "skipped" };
 
@@ -126,10 +126,7 @@ export class GemPublishTask extends PackagePublishTask<GemPackage> {
       nodeOptions: { cwd: pkg.path },
     });
     if (build.exitCode !== 0) {
-      return {
-        type: "failed",
-        error: execFailure(`Failed to build ${pkg.name}@${pkg.version}.`, build).message,
-      };
+      throw execFailure(`Failed to build ${pkg.name}@${pkg.version}.`, build);
     }
 
     const gemFile = `${pkg.name}-${pkg.version}.gem`;
@@ -142,10 +139,7 @@ export class GemPublishTask extends PackagePublishTask<GemPackage> {
         return { type: "skipped" };
       }
 
-      return {
-        type: "failed",
-        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, push).message,
-      };
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, push);
     }
 
     return { type: "published" };

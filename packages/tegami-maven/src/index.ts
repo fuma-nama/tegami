@@ -7,7 +7,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   PublishTaskRunContext,
   TegamiContext,
   TegamiPlugin,
@@ -180,7 +180,7 @@ export class MavenPublishTask extends PackagePublishTask<MavenPackage> {
     super(pkg);
   }
 
-  async publish({ context }: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async publish({ context }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const { pkg, registry } = this;
     const command = resolvePublishCommand(this.publishCommand, pkg, context.cwd);
     const result = await x(command[0]!, command.slice(1), {
@@ -196,10 +196,7 @@ export class MavenPublishTask extends PackagePublishTask<MavenPackage> {
         return { type: "skipped" };
       }
 
-      return {
-        type: "failed",
-        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-      };
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
     }
 
     if (isAlreadyDeployed(output)) return { type: "skipped" };

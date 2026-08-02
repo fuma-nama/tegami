@@ -241,7 +241,7 @@ export async function runPublishTasks(
   while (queue.length > 0) {
     // take the next tasks whose dependencies settled, the head is always ready
     const chunk: PublishTask[] = [];
-    for (let i = 0; i < queue.length && chunk.length < concurrency; ) {
+    for (let i = 0; i < queue.length && chunk.length < concurrency;) {
       const task = queue[i]!;
       if (schedule.get(task)!.every((dep) => dep.getResult() !== undefined)) {
         chunk.push(task);
@@ -305,13 +305,13 @@ function scheduleTasks(tasks: PublishTask[]): Map<PublishTask, PublishTask[]> {
 
 /**
  * Publishes a single package with the shared pipeline: dry-run handling,
- * `willPublish`/`afterPublish` hooks, and capturing failures into a `failed` result.
+ * `willPublish`/`afterPublish` hooks. Thrown failures are captured by the task runner.
  *
  * Providers extend this class and implement `publish()` (and optionally `status()`).
  */
 export abstract class PackagePublishTask<
   T extends WorkspacePackage = WorkspacePackage,
-> extends PublishTask<PackagePublishResult> {
+> extends PublishTask<PackagePublishTaskResult> {
   name: string;
 
   constructor(readonly pkg: T) {
@@ -319,8 +319,8 @@ export abstract class PackagePublishTask<
     this.name = `publish:${pkg.id}`;
   }
 
-  /** provider-specific publishing, thrown errors are captured into a `failed` result */
-  abstract publish(opts: PublishTaskRunContext): Awaitable<PackagePublishResult>;
+  /** provider-specific publishing; throw when publishing fails */
+  abstract publish(opts: PublishTaskRunContext): Awaitable<PackagePublishTaskResult>;
 
   /** link publish tasks from preflight `wait`/`optionalWait` data, a package may be published by more than one task */
   link({ plan }: PublishTaskContext): void {
@@ -335,7 +335,7 @@ export abstract class PackagePublishTask<
     }
   }
 
-  async run(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async run(opts: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const { context, plan } = opts;
     const pkg = this.pkg;
     const result = await this.pipeline(opts);
@@ -350,35 +350,28 @@ export abstract class PackagePublishTask<
     return result;
   }
 
-  private async pipeline(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
+  private async pipeline(opts: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const { context, plan } = opts;
     const pkg = this.pkg;
     if (plan.options.dryRun ?? false) {
       return { type: "published" };
     }
 
-    try {
-      for (const plugin of context.plugins) {
-        const next = await handlePluginError(plugin, "willPublish", () =>
-          plugin.willPublish?.call(context, { pkg }),
-        );
+    for (const plugin of context.plugins) {
+      const next = await handlePluginError(plugin, "willPublish", () =>
+        plugin.willPublish?.call(context, { pkg }),
+      );
 
-        if (next === false) return { type: "skipped" };
-      }
-
-      return await this.publish(opts);
-    } catch (e) {
-      return {
-        type: "failed",
-        error: e instanceof Error ? e.message : String(e),
-      };
+      if (next === false) return { type: "skipped" };
     }
+
+    return await this.publish(opts);
   }
 }
 
 /** backward compatibility: publishes a package through the legacy `publish` hook chain */
 class LegacyPublishTask extends PackagePublishTask {
-  async publish({ context, plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async publish({ context, plan }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const { pkg } = this;
 
     for (const plugin of context.plugins) {
@@ -386,13 +379,13 @@ class LegacyPublishTask extends PackagePublishTask {
         plugin.publish?.call(context, { pkg, plan }),
       );
 
+      if (publishResult?.type === "failed") throw new Error(publishResult.error);
       if (publishResult) return publishResult;
     }
 
-    return {
-      type: "failed",
-      error: `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
-    };
+    throw new Error(
+      `There is no plugin to publish package "${pkg.id}", please make sure the package has a supported provider plugin.`,
+    );
   }
 }
 
@@ -512,10 +505,14 @@ export interface PublishOptions {
   unstable_maxChunk?: number;
 }
 
+/** Successful outcome returned by a package publish task. Publish failures must be thrown. */
+export type PackagePublishTaskResult = {
+  type: "published" | "skipped";
+};
+
+/** Outcome exposed on a package's publish plan, including failures captured by the task runner. */
 export type PackagePublishResult =
-  | {
-      type: "published" | "skipped";
-    }
+  | PackagePublishTaskResult
   | {
       type: "failed";
       error: string;
@@ -533,14 +530,14 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
   const tasks = await collectPublishTasks(context, plan);
   await runPublishTasks(tasks, { context, plan, concurrency: unstable_maxChunk });
 
-  const errors: Error[] = [];
+  const errors = new Set<Error>();
   for (const task of tasks) {
     const state = task.getResult();
-    if (state?.status === "failed") errors.push(state.error);
+    if (state?.status === "failed") errors.add(state.error);
   }
-  if (errors.length === 1) throw errors[0];
-  if (errors.length > 1) {
-    throw new AggregateError(errors, `${errors.length} publish tasks failed.`);
+  if (errors.size === 1) throw errors.values().next().value;
+  if (errors.size > 1) {
+    throw new AggregateError(errors, `${errors.size} publish tasks failed.`);
   }
 }
 

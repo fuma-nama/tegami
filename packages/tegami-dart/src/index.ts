@@ -8,7 +8,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
@@ -82,7 +82,7 @@ export interface DartPluginOptions {
 
 /** publishes a Dart package to its configured pub server */
 export class DartPublishTask extends PackagePublishTask<DartPackage> {
-  async publish(): Promise<PackagePublishResult> {
+  async publish(): Promise<PackagePublishTaskResult> {
     const { pkg } = this;
     const result = await x("dart", ["pub", "publish", ...(isCI() ? ["--force"] : [])], {
       nodeOptions: { cwd: pkg.path },
@@ -97,10 +97,7 @@ export class DartPublishTask extends PackagePublishTask<DartPackage> {
         return { type: "skipped" };
       }
 
-      return {
-        type: "failed",
-        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-      };
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
     }
 
     return { type: "published" };
