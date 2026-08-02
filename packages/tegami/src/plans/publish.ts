@@ -170,7 +170,7 @@ export abstract class PublishTask<T = unknown> {
    */
   optionalWait: PublishTask[] = [];
 
-  /** @internal set by the task runner when the task settles */
+  /** @internal set when the task settles, always assigned by the task runner after `run` */
   $state?: PublishTaskState<T>;
 
   /** inspect the outcome of the task, `undefined` when the task has not settled */
@@ -377,34 +377,43 @@ export abstract class PackagePublishTask<
   async run(opts: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const { context, plan } = opts;
     const pkg = this.pkg;
-    const result = await this.pipeline(opts);
-    if (result.type === "skipped") return result;
+    let result: PackagePublishTaskResult | undefined;
 
-    for (const plugin of context.plugins) {
-      await handlePluginError(plugin, "afterPublish", () =>
-        plugin.afterPublish?.call(context, { pkg, plan }),
-      );
+    try {
+      if (plan.options.dryRun ?? false) {
+        result = { type: "published" };
+      } else {
+        for (const plugin of context.plugins) {
+          const next = await handlePluginError(plugin, "willPublish", () =>
+            plugin.willPublish?.call(context, { pkg }),
+          );
+
+          if (next === false) {
+            result = { type: "skipped" };
+            break;
+          }
+        }
+
+        result ??= await this.publish(opts);
+      }
+
+      this.$state = { status: "success", result };
+      return result;
+    } catch (e) {
+      this.$state = {
+        status: "failed",
+        error: e instanceof Error ? e : new Error(String(e)),
+      };
+      throw e;
+    } finally {
+      if (!result || result.type !== "skipped") {
+        for (const plugin of context.plugins) {
+          await handlePluginError(plugin, "afterPublish", () =>
+            plugin.afterPublish?.call(context, { pkg, plan }),
+          );
+        }
+      }
     }
-
-    return result;
-  }
-
-  private async pipeline(opts: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
-    const { context, plan } = opts;
-    const pkg = this.pkg;
-    if (plan.options.dryRun ?? false) {
-      return { type: "published" };
-    }
-
-    for (const plugin of context.plugins) {
-      const next = await handlePluginError(plugin, "willPublish", () =>
-        plugin.willPublish?.call(context, { pkg }),
-      );
-
-      if (next === false) return { type: "skipped" };
-    }
-
-    return await this.publish(opts);
   }
 }
 

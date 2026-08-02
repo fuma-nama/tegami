@@ -26,7 +26,9 @@ export async function findPromiseIndex<T>(
       }
 
       if (fn(promise)) {
-        return res(i);
+        // keep looping so the remaining promises still get rejection handlers attached
+        res(i);
+        continue;
       }
 
       n--;

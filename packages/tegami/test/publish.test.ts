@@ -11,6 +11,7 @@ import {
   initPublishPlan,
   runPreflights,
   runPublishPlan,
+  type PackagePublishResult,
   type PublishPlan,
 } from "../src/plans/publish";
 import { writePublishLock } from "./helpers/lock";
@@ -169,6 +170,44 @@ Some description.
       type: "failed",
     });
     expect(exec.mock.calls.every(([, args]) => args?.at(0) !== "tag")).toBe(true);
+  });
+
+  test("runs afterPublish hooks for failed publishes, exposing the outcome", async () => {
+    const { cwd, lockPath } = await createMultiPackagePublishFixture();
+
+    exec.mockImplementation((_command, args = [], options = {}) => {
+      if (args.at(0) === "publish") {
+        const cwd = options.nodeOptions?.cwd;
+        if (typeof cwd === "string" && normalizeDirPath(cwd).endsWith("packages/ui")) {
+          return commandResult({ exitCode: 1, stderr: "publish failed" });
+        }
+
+        return commandResult();
+      }
+
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const observed = new Map<string, PackagePublishResult | undefined>();
+    const context = await createResolvedContext({ cwd, lockPath });
+    context.plugins = [
+      ...context.plugins,
+      {
+        name: "observer",
+        afterPublish({ pkg, plan }) {
+          observed.set(pkg.id, plan.packages.get(pkg.id)?.publishResult);
+        },
+      },
+    ];
+
+    const plan = await initPublishPlan(context, {});
+    if (!plan) throw new Error("missing plan");
+    await runPreflights(context, plan);
+
+    await expect(runPublishPlan(context, plan)).rejects.toThrow("Failed to publish @acme/ui@1.0.1");
+
+    expect(observed.get("npm:@acme/core")).toEqual({ type: "published" });
+    expect(observed.get("npm:@acme/ui")).toMatchObject({ type: "failed" });
   });
 
   test("rejects multiple package publish tasks for the same package", async () => {

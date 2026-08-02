@@ -73,6 +73,31 @@ describe("cli registry", () => {
     expect(action).toHaveBeenCalledWith({ artifact: "preview.md" });
   });
 
+  test("reports every publish task failure and exits with code 1", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-publish-"));
+    tempDirs.push(cwd);
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const previousExitCode = process.exitCode;
+
+    try {
+      await createCli(tegami({ cwd }), {
+        publish() {
+          throw new AggregateError(
+            [new Error("Failed to publish @acme/core"), new Error("Failed to publish @acme/ui")],
+            "2 publish tasks failed.",
+          );
+        },
+      }).parseAsync(["publish"]);
+
+      const output = write.mock.calls.map(([chunk]) => String(chunk)).join("");
+      expect(output).toContain("Failed to publish @acme/core");
+      expect(output).toContain("Failed to publish @acme/ui");
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
   test("runs the registered root command without argv", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-cli-root-"));
     tempDirs.push(cwd);

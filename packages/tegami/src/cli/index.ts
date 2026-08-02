@@ -218,12 +218,25 @@ async function publishPackages(
 
   const s = spinner();
   s.start(dryRun ? "Validating publish lock" : "Publishing packages");
-  const plan = customPublish
-    ? await customPublish()
-    : await tegami.publish({
-        dryRun,
-        packages: options.packages && options.packages.length > 0 ? options.packages : undefined,
-      });
+  let plan: PublishPlan | "skipped";
+  try {
+    plan = customPublish
+      ? await customPublish()
+      : await tegami.publish({
+          dryRun,
+          packages: options.packages && options.packages.length > 0 ? options.packages : undefined,
+        });
+  } catch (error) {
+    if (error instanceof CancelledError) throw error;
+
+    s.stop(dryRun ? "Publish lock validation failed" : "Publish failed");
+    const errors =
+      error instanceof AggregateError && error.errors.length > 0 ? error.errors : [error];
+    note(errors.map((e) => (e instanceof Error ? e.message : String(e))).join("\n\n"), "Error");
+    process.exitCode = 1;
+    outro("Failed to publish.");
+    return false;
+  }
 
   if (plan === "skipped") {
     s.stop(dryRun ? "No publish lock to validate" : "Nothing to publish");

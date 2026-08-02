@@ -144,6 +144,18 @@ describe("github release plugin", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  test("does not create releases on dry runs", async () => {
+    const plugins = githubPlugin(releasePluginOptions);
+    const context = publishContext();
+    const plan = releasePlan(context, [{}]);
+    plan.options.dryRun = true;
+
+    await runAfterPublishAll(plugins, context, plan);
+
+    expect(releaseExistsByTag).not.toHaveBeenCalled();
+    expect(createGitHubRelease).not.toHaveBeenCalled();
+  });
+
   test("does not create releases when release is disabled", async () => {
     const plugins = githubPlugin({ ...releasePluginOptions, release: false });
     const context = publishContext();

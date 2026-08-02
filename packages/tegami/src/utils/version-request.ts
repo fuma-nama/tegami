@@ -793,6 +793,9 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
   }
 
   async run({ context, plan }: PublishTaskRunContext) {
+    // dry runs must not create releases, their git tags are never created
+    if (plan.options.dryRun) return;
+
     // skip when git tag work failed, releases must not reference missing tags
     for (const dep of this.optionalWait) {
       if (dep.getResult()?.status === "failed") return;
