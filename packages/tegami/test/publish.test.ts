@@ -195,9 +195,7 @@ Some description.
 
     await expect(
       collectPublishTasks({ ...context, plugins: [npmPlugin, duplicatePlugin] }, plan),
-    ).rejects.toThrow(
-      /Package "npm:@acme\/core" has multiple publish tasks.*plugin "npm".*plugin "duplicate"/,
-    );
+    ).rejects.toThrow(/Package "npm:@acme\/core" has multiple publish tasks/);
   });
 
   test("rejects package tasks for packages not selected for publishing", async () => {
