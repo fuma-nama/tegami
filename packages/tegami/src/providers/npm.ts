@@ -4,9 +4,12 @@ import { x } from "tinyexec";
 import { detect, type AgentName } from "package-manager-detector";
 import typia from "typia";
 import type { TegamiContext } from "../context";
-import { PackagePublishTask, type PackagePublishResult } from "../plans/publish";
+import {
+  PackagePublishTask,
+  type PackagePublishResult,
+  type PublishTaskRunContext,
+} from "../plans/publish";
 import type { Awaitable, TegamiPlugin } from "../types";
-import type { PublishTaskRunContext } from "../utils/task";
 import { execFailure, fetchFailure } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
@@ -168,12 +171,12 @@ export function npm({
         optionalWait: optionalWait.length > 0 ? optionalWait : undefined,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!this.npm) return;
       const { client } = this.npm;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof NpmPackage ? new NpmPublishTask(pkg, client) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof NpmPackage && new NpmPublishTask(pkg, client));
     },
     initPublishLock({ lock, draft }) {
       for (const [id, pkg] of draft.getPackageDrafts()) {

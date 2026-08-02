@@ -37,13 +37,13 @@ export type {
 export { PackageGraph, type PackageGroup } from "./graph";
 export type { TegamiContext } from "./context";
 export type { BumpType } from "./utils/semver";
-export type {
-  PublishTaskMetadata,
-  PublishTaskState,
-  PublishTaskContext,
-  PublishTaskRunContext,
-} from "./utils/task";
-export { PluginAfterPublishAllTask, type PublishTasksContext } from "./plans/publish";
+export {
+  PluginAfterPublishAllTask,
+  type PublishTaskMetadata,
+  type PublishTaskState,
+  type PublishTaskContext,
+  type PublishTaskRunContext,
+} from "./plans/publish";
 
 export interface GenerateChangelogOptions extends GenerateFromCommitsOptions {
   /**
@@ -57,10 +57,8 @@ export interface GenerateChangelogOptions extends GenerateFromCommitsOptions {
 // this is required to fix a bundling problem of tsdown, where it exports abstract classes as type-only
 import { WorkspacePackage as b } from "./graph";
 export { b as WorkspacePackage };
-import { PublishTask as t } from "./utils/task";
-export { t as PublishTask };
-import { PackagePublishTask as p } from "./plans/publish";
-export { p as PackagePublishTask };
+import { PublishTask as t, PackagePublishTask as p } from "./plans/publish";
+export { t as PublishTask, p as PackagePublishTask };
 
 export interface Tegami {
   /** Create pending changelog files from git commit history. */

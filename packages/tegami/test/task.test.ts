@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
 import type { TegamiContext } from "../src/context";
-import type { PublishPlan } from "../src/plans/publish";
 import {
   PublishTask,
   runPublishTasks,
+  type PublishPlan,
   type PublishTaskRunContext,
   type PublishTaskState,
-} from "../src/utils/task";
+} from "../src/plans/publish";
 
 class TestTask extends PublishTask<string> {
   constructor(
@@ -53,9 +53,9 @@ describe("publish tasks", () => {
     b.wait = [a];
     c.wait = [b];
 
-    const states = await runPublishTasks([c, b, a], base());
+    await runPublishTasks([c, b, a], base());
     expect(order).toEqual(["a", "b", "c"]);
-    expect([...states.values()].every((state) => state.status === "success")).toBe(true);
+    expect([a, b, c].every((task) => task.getResult()?.status === "success")).toBe(true);
   });
 
   test("limits concurrently running tasks", async () => {
@@ -101,9 +101,9 @@ describe("publish tasks", () => {
     a.optionalWait = [b];
     b.optionalWait = [a];
 
-    const states = await runPublishTasks([a, b], base());
-    expect(states.get(a)).toEqual({ status: "success", result: "a" });
-    expect(states.get(b)).toEqual({ status: "success", result: "b" });
+    await runPublishTasks([a, b], base());
+    expect(a.getResult()).toEqual({ status: "success", result: "a" });
+    expect(b.getResult()).toEqual({ status: "success", result: "b" });
   });
 
   test("preserves ordering of the honored edge in circular optional waits", async () => {
@@ -139,32 +139,52 @@ describe("publish tasks", () => {
     });
 
     let observed: PublishTaskState<string> | undefined;
-    const dependent = testTask("dependent", ({ getTaskResult }) => {
-      observed = getTaskResult(failing);
+    const dependent = testTask("dependent", () => {
+      observed = failing.getResult();
       return "dependent";
     });
     dependent.wait = [failing];
 
-    const states = await runPublishTasks([failing, dependent], base());
-    expect(states.get(failing)).toMatchObject({
+    await runPublishTasks([failing, dependent], base());
+    expect(failing.getResult()).toMatchObject({
       status: "failed",
       error: new Error("task failed"),
     });
-    expect(states.get(dependent)).toEqual({ status: "success", result: "dependent" });
+    expect(dependent.getResult()).toEqual({ status: "success", result: "dependent" });
     expect(observed).toMatchObject({ status: "failed", error: new Error("task failed") });
   });
 
-  test("exposes results of finished tasks through getTaskResult", async () => {
+  test("exposes results of finished tasks through getResult", async () => {
     const producer = testTask("producer", () => "produced value");
 
     let received: PublishTaskState<string> | undefined;
-    const consumer = testTask("consumer", ({ getTaskResult }) => {
-      received = getTaskResult(producer);
+    const consumer = testTask("consumer", () => {
+      received = producer.getResult();
       return "consumer";
     });
     consumer.wait = [producer];
 
     await runPublishTasks([producer, consumer], base());
     expect(received).toEqual({ status: "success", result: "produced value" });
+  });
+
+  test("clears stale results before rerunning tasks", async () => {
+    let run = 0;
+    const received: string[] = [];
+    const producer = testTask("producer", async () => {
+      await sleep(1);
+      return `run ${++run}`;
+    });
+    const consumer = testTask("consumer", () => {
+      const state = producer.getResult();
+      if (state?.status === "success") received.push(state.result);
+      return "consumer";
+    });
+    consumer.wait = [producer];
+
+    await runPublishTasks([producer, consumer], base());
+    await runPublishTasks([producer, consumer], base());
+
+    expect(received).toEqual(["run 1", "run 2"]);
   });
 });

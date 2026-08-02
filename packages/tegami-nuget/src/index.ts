@@ -236,11 +236,13 @@ export function nuget({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof NugetPackage ? new NugetPublishTask(pkg, registry, statusBase) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map(
+          (pkg) => pkg instanceof NugetPackage && new NugetPublishTask(pkg, registry, statusBase),
+        );
     },
     async applyDraft(draft) {
       if (!active) return;

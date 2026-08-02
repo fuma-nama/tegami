@@ -266,13 +266,15 @@ export function maven({
 
       return { shouldPublish, wait };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof MavenPackage
-          ? new MavenPublishTask(pkg, registry, publishCommand)
-          : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) =>
+          pkg instanceof MavenPackage
+            ? new MavenPublishTask(pkg, registry, publishCommand)
+            : undefined,
+        );
     },
     async applyDraft(draft) {
       if (!active) return;

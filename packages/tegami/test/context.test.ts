@@ -352,6 +352,8 @@ function emptyPlan() {
     options: {},
     changelogs: new Map(),
     packages: new Map(),
+    tasks: [],
+    getPackagesToPublish: () => [],
   };
 }
 

@@ -1432,6 +1432,16 @@ function releasePlan(
     options: {},
     changelogs: new Map(),
     packages,
+    tasks: [],
+    getPackagesToPublish() {
+      const result: WorkspacePackage[] = [];
+      for (const [id, packagePlan] of packages) {
+        if (!packagePlan.preflight?.shouldPublish) continue;
+        const pkg = context.graph.get(id);
+        if (pkg) result.push(pkg);
+      }
+      return result;
+    },
   };
 }
 
