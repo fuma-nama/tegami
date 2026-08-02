@@ -17,7 +17,7 @@ import {
   type PublishTaskContext,
   type PublishTaskRunContext,
 } from "../plans/publish";
-import { GitCreateTagsTask, GitPushTagsTask } from "../plugins/git";
+import { GitCreateTagsTask } from "../plugins/git";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
@@ -778,11 +778,7 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
   link({ plan }: PublishTaskContext): void {
     for (const t of plan.tasks) {
       if (t === this) continue;
-      if (
-        t instanceof PackagePublishTask ||
-        t instanceof GitCreateTagsTask ||
-        t instanceof GitPushTagsTask
-      ) {
+      if (t instanceof PackagePublishTask || t instanceof GitCreateTagsTask) {
         this.optionalWait.push(t);
       }
     }
