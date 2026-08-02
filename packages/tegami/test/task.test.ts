@@ -76,6 +76,37 @@ describe("publish tasks", () => {
     expect(maxActive).toBe(2);
   });
 
+  test("starts newly ready tasks without waiting for the current batch", async () => {
+    const order: string[] = [];
+    const slow = testTask("slow", async () => {
+      await sleep(50);
+      order.push("slow");
+      return "slow";
+    });
+    const fast = testTask("fast", async () => {
+      await sleep(1);
+      order.push("fast");
+      return "fast";
+    });
+    const dependent = testTask("dependent", () => {
+      order.push("dependent");
+      return "dependent";
+    });
+    dependent.wait = [fast];
+
+    await runPublishTasks([slow, fast, dependent], { ...base(), concurrency: 2 });
+    expect(order).toEqual(["fast", "dependent", "slow"]);
+  });
+
+  test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid concurrency %s",
+    async (concurrency) => {
+      await expect(runPublishTasks([testTask("a")], { ...base(), concurrency })).rejects.toThrow(
+        /positive integer/,
+      );
+    },
+  );
+
   test("throws on circular waits", async () => {
     const a = testTask("a");
     const b = testTask("b");
@@ -93,6 +124,13 @@ describe("publish tasks", () => {
     a.wait = [missing];
 
     await expect(runPublishTasks([a], base())).rejects.toThrow(/not part of the publish tasks/);
+  });
+
+  test("rejects duplicate task instances", async () => {
+    const task = testTask("duplicate");
+    await expect(runPublishTasks([task, task], base())).rejects.toThrow(
+      /same task instance more than once/,
+    );
   });
 
   test("breaks circular optional waits", async () => {
@@ -133,6 +171,15 @@ describe("publish tasks", () => {
     await expect(runPublishTasks([a, b], base())).rejects.toThrow(/circular reference of deps/);
   });
 
+  test("rejects mixed cycles regardless of task order", async () => {
+    const a = testTask("a");
+    const b = testTask("b");
+    a.optionalWait = [b];
+    b.wait = [a];
+
+    await expect(runPublishTasks([a, b], base())).rejects.toThrow(/circular reference of deps/);
+  });
+
   test("still runs dependents of failed tasks, exposing the failure", async () => {
     const failing = testTask("failing", () => {
       throw new Error("task failed");
@@ -168,23 +215,28 @@ describe("publish tasks", () => {
     expect(received).toEqual({ status: "success", result: "produced value" });
   });
 
-  test("clears stale results before rerunning tasks", async () => {
-    let run = 0;
-    const received: string[] = [];
-    const producer = testTask("producer", async () => {
-      await sleep(1);
-      return `run ${++run}`;
-    });
-    const consumer = testTask("consumer", () => {
-      const state = producer.getResult();
-      if (state?.status === "success") received.push(state.result);
-      return "consumer";
-    });
-    consumer.wait = [producer];
+  test("rejects reused task instances and preserves their result", async () => {
+    const task = testTask("single-use");
 
-    await runPublishTasks([producer, consumer], base());
-    await runPublishTasks([producer, consumer], base());
+    await runPublishTasks([task], base());
+    await expect(runPublishTasks([task], base())).rejects.toThrow(/already been run.*single-use/);
+    expect(task.getResult()).toEqual({ status: "success", result: "single-use" });
+  });
 
-    expect(received).toEqual(["run 1", "run 2"]);
+  test("rejects overlapping runs of the same task instance", async () => {
+    let finish!: () => void;
+    const task = testTask(
+      "running",
+      () =>
+        new Promise<string>((resolve) => {
+          finish = () => resolve("done");
+        }),
+    );
+
+    const firstRun = runPublishTasks([task], base());
+    await expect(runPublishTasks([task], base())).rejects.toThrow(/already been run/);
+    finish();
+    await firstRun;
+    expect(task.getResult()).toEqual({ status: "success", result: "done" });
   });
 });

@@ -30,6 +30,8 @@ const paper = tegami({
 
 Publishing runs on a task graph: plugins create tasks from the `publishTasks` hook, and Tegami runs them concurrently according to their `wait` / `optionalWait` relationships.
 
+Task instances are single-use and each package can have at most one `PackagePublishTask` in a publish graph. Tegami creates a fresh graph for every publish or status check.
+
 - `link()`: wire cross-plugin dependencies in a phase once every task exists.
 - `status()`: report whether its work is already done from a previous run.
 
@@ -68,7 +70,7 @@ const paper = tegami({
 });
 ```
 
-The main package publish task should extend `PackagePublishTask`, Tegami will handle the hooks calling & task dependencies automatically.
+The package publish task should extend `PackagePublishTask`; Tegami handles the hook calls and package dependencies automatically.
 
 ## Built-in plugins
 

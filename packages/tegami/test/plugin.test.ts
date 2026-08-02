@@ -101,6 +101,32 @@ describe("tegami plugins", () => {
       },
     );
   });
+
+  test("awaits legacy afterPublishAll hooks in plugin order", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+    const calls: string[] = [];
+    const first: TegamiPlugin = {
+      name: "first",
+      async afterPublishAll() {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        calls.push("first");
+      },
+    };
+    const second: TegamiPlugin = {
+      name: "second",
+      afterPublishAll() {
+        calls.push("second");
+      },
+    };
+
+    await tegami({ cwd, plugins: [first, second] })
+      .draft()
+      .then((draft) => draft.apply());
+    await tegami({ cwd, plugins: [first, second] }).publish({ dryRun: true });
+
+    expect(calls).toEqual(["first", "second"]);
+  });
 });
 
 function plugin(name: string, calls: string[], enforce?: TegamiPlugin["enforce"]): TegamiPlugin {

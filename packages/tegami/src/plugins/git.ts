@@ -22,14 +22,16 @@ export interface GitPluginOptions {
 /** creates git tags for published packages */
 export class GitCreateTagsTask extends PublishTask<{
   createdTags: string[];
+  tagsToPush: string[];
 }> {
   name = "git:create-tags";
   description = "Create git tags for published packages.";
 
   async run({ plan, context }: PublishTaskRunContext) {
     const createdTags: string[] = [];
+    const tagsToPush: string[] = [];
     const pendingTags = getPendingTags(plan);
-    if (pendingTags.size === 0) return { createdTags };
+    if (pendingTags.size === 0) return { createdTags, tagsToPush };
 
     await Promise.all(
       Array.from(pendingTags, async (tag) => {
@@ -38,17 +40,24 @@ export class GitCreateTagsTask extends PublishTask<{
         });
 
         if (gitOut.exitCode !== 0) {
-          if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
+          if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) {
+            // A previous attempt may have created this locally before another tag failed.
+            // Keep it in the push set so the retry cannot strand the tag locally.
+            tagsToPush.push(tag);
+            return;
+          }
 
           throw execFailure(`Failed to create Git tag "${tag}" for release`, gitOut);
         }
 
         createdTags.push(tag);
+        tagsToPush.push(tag);
       }),
     );
 
     return {
       createdTags,
+      tagsToPush,
     };
   }
 
@@ -96,20 +105,60 @@ export class GitPushTagsTask extends PublishTask<void> {
 
   async run({ context }: PublishTaskRunContext) {
     const created = this.createTags.getResult();
-    const createdTags = created?.status === "success" ? created.result.createdTags : [];
-    if (createdTags.length === 0) return;
+    const tagsToPush = created?.status === "success" ? created.result.tagsToPush : [];
+    if (tagsToPush.length === 0) return;
 
-    const gitOut = await x("git", ["push", "origin", ...createdTags], {
+    const gitOut = await x("git", ["push", "origin", ...tagsToPush], {
       nodeOptions: { cwd: context.cwd },
     });
 
     if (gitOut.exitCode !== 0) {
       // this can happen in two concurrent runs: one of it pushed the tags, while another one just passed `git tag` but not pushed yet.
-      if (/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) return;
+      if (
+        /already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`) &&
+        (await Promise.all(tagsToPush.map((tag) => remoteTagMatches(context.cwd, tag)))).every(
+          Boolean,
+        )
+      ) {
+        return;
+      }
 
-      throw execFailure(`Failed to push Git tags to origin: ${createdTags.join(", ")}`, gitOut);
+      throw execFailure(`Failed to push Git tags to origin: ${tagsToPush.join(", ")}`, gitOut);
     }
   }
+
+  async status({ plan, context }: PublishTaskContext) {
+    const checks = Array.from(getPendingTags(plan), async (tag) => {
+      const origin = await x(
+        "git",
+        ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`],
+        { nodeOptions: { cwd: context.cwd } },
+      );
+      return origin.exitCode !== 0;
+    });
+
+    if (await somePromise(checks, (missing) => missing)) return "pending" as const;
+  }
+}
+
+async function remoteTagMatches(cwd: string, tag: string): Promise<boolean> {
+  const [local, remote] = await Promise.all([
+    x("git", ["rev-parse", `refs/tags/${tag}^{}`], { nodeOptions: { cwd } }),
+    x("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
+      nodeOptions: { cwd },
+    }),
+  ]);
+  if (local.exitCode !== 0 || remote.exitCode !== 0) return false;
+
+  const remoteRefs = new Map(
+    remote.stdout
+      .trim()
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/, 2) as [string, string])
+      .map(([sha, ref]) => [ref, sha]),
+  );
+  const remoteSha = remoteRefs.get(`refs/tags/${tag}^{}`) ?? remoteRefs.get(`refs/tags/${tag}`);
+  return remoteSha !== undefined && remoteSha === local.stdout.trim();
 }
 
 /**

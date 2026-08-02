@@ -239,7 +239,7 @@ describe("git utils", () => {
     }
   });
 
-  test("skips duplicate local tags without pushing them", async () => {
+  test("pushes duplicate local tags so retries cannot strand them", async () => {
     const previousCi = process.env.CI;
     process.env.CI = "true";
 
@@ -255,6 +255,8 @@ describe("git utils", () => {
               stderr: "fatal: tag '@acme/core@1.0.1' already exists",
             });
           }
+
+          if (args.at(0) === "push") return commandResult();
         }),
       );
 
@@ -271,6 +273,12 @@ describe("git utils", () => {
           cwd: "/repo",
           throwOnError: undefined,
         },
+        {
+          args: ["push", "origin", "@acme/core@1.0.1"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
       ]);
     } finally {
       if (previousCi === undefined) delete process.env.CI;
@@ -278,7 +286,7 @@ describe("git utils", () => {
     }
   });
 
-  test("skips push when remote tag already exists", async () => {
+  test("accepts a concurrent push when the remote tag matches", async () => {
     const previousCi = process.env.CI;
     process.env.CI = "true";
 
@@ -299,6 +307,11 @@ describe("git utils", () => {
                 "! [rejected] @acme/core@1.0.1 -> @acme/core@1.0.1 (already exists)\nerror: failed to push some refs",
             });
           }
+
+          if (args.at(0) === "rev-parse") return commandResult({ stdout: "abc123\n" });
+          if (args.at(0) === "ls-remote") {
+            return commandResult({ stdout: "abc123\trefs/tags/@acme/core@1.0.1\n" });
+          }
         }),
       );
 
@@ -315,6 +328,24 @@ describe("git utils", () => {
         },
         {
           args: ["push", "origin", "@acme/core@1.0.1"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
+        {
+          args: ["rev-parse", "refs/tags/@acme/core@1.0.1^{}"],
+          command: "git",
+          cwd: "/repo",
+          throwOnError: undefined,
+        },
+        {
+          args: [
+            "ls-remote",
+            "--tags",
+            "origin",
+            "refs/tags/@acme/core@1.0.1",
+            "refs/tags/@acme/core@1.0.1^{}",
+          ],
           command: "git",
           cwd: "/repo",
           throwOnError: undefined,
@@ -424,6 +455,25 @@ describe("git utils", () => {
         return commandResult({ exitCode: 2 });
       }
 
+      throw new Error(`Unexpected command: ${args.join(" ")}`);
+    });
+
+    const status = await pluginTaskStatus(
+      plugin,
+      context,
+      publishPlan(context.graph, { packages: [{ pkg: core }] }),
+    );
+
+    expect(status).toBe("pending");
+  });
+
+  test("resolves push status as pending while a tag is missing from origin", async () => {
+    const plugin = git({ pushTags: true });
+    const context = pluginContext();
+    const core = context.graph.get("test:@acme/core")!;
+    exec.mockImplementation((_command, args = []) => {
+      if (args.at(0) === "rev-parse") return commandResult();
+      if (args.at(0) === "ls-remote") return commandResult({ exitCode: 2 });
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
 
