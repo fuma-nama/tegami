@@ -189,11 +189,11 @@ export function gem({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof GemPackage ? new GemPublishTask(pkg, registry) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof GemPackage && new GemPublishTask(pkg, registry));
     },
     async applyDraft(draft) {
       if (!active) return;

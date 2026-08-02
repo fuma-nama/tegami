@@ -2,9 +2,15 @@ import { x } from "tinyexec";
 import type { TegamiPlugin } from "../types";
 import { execFailure } from "../utils/error";
 import { isCI, somePromise } from "../utils/common";
-import { PackagePublishTask, type PackagePublishResult, type PublishPlan } from "../plans/publish";
+import {
+  PackagePublishTask,
+  PublishTask,
+  type PackagePublishResult,
+  type PublishPlan,
+  type PublishTaskContext,
+  type PublishTaskRunContext,
+} from "../plans/publish";
 import type { WorkspacePackage } from "../graph";
-import { PublishTask, type PublishTaskContext, type PublishTaskRunContext } from "../utils/task";
 
 export interface GitPluginOptions {
   /** Set to false to skip creating git tags after all packages publish successfully. */
@@ -46,8 +52,8 @@ export class GitCreateTagsTask extends PublishTask<{
     };
   }
 
-  link({ tasks }: PublishTaskContext): void {
-    for (const t of tasks) {
+  link({ plan }: PublishTaskContext): void {
+    for (const t of plan.tasks) {
       // tag-published packages wait for the tags instead (see GitTagPublishTask)
       if (t !== this && t instanceof PackagePublishTask && !(t instanceof GitTagPublishTask)) {
         this.optionalWait.push(t);
@@ -88,8 +94,8 @@ export class GitPushTagsTask extends PublishTask<void> {
     this.wait.push(createTags);
   }
 
-  async run({ context, getTaskResult }: PublishTaskRunContext) {
-    const created = getTaskResult(this.createTags);
+  async run({ context }: PublishTaskRunContext) {
+    const created = this.createTags.getResult();
     const createdTags = created?.status === "success" ? created.result.createdTags : [];
     if (createdTags.length === 0) return;
 
@@ -116,16 +122,17 @@ export abstract class GitTagPublishTask<
 > extends PackagePublishTask<T> {
   link(opts: PublishTaskContext): void {
     super.link(opts);
-    for (const t of opts.tasks) {
+    for (const t of opts.plan.tasks) {
       if (t instanceof GitCreateTagsTask || t instanceof GitPushTagsTask) this.wait.push(t);
     }
   }
 
   /** `published` when this run created the package's tag, `skipped` when the tag already existed */
-  async publish(opts: PublishTaskRunContext): Promise<PackagePublishResult> {
-    const { plan, tasks, getTaskResult } = opts;
-    const createTags = tasks.find((t): t is GitCreateTagsTask => t instanceof GitCreateTagsTask);
-    const created = createTags && getTaskResult(createTags);
+  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+    const createTags = plan.tasks.find(
+      (t): t is GitCreateTagsTask => t instanceof GitCreateTagsTask,
+    );
+    const created = createTags?.getResult();
     if (!created || created.status === "failed") {
       return {
         type: "failed",

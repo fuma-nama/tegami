@@ -224,11 +224,11 @@ export function cargo({
 
       return { shouldPublish, wait };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!this.cargo) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof CargoPackage ? new CargoPublishTask(pkg) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof CargoPackage && new CargoPublishTask(pkg));
     },
     async applyDraft(draft) {
       if (!this.cargo) return;

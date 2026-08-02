@@ -236,11 +236,11 @@ export function swift({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof SwiftPackage ? new SwiftPublishTask(pkg) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof SwiftPackage && new SwiftPublishTask(pkg));
     },
   };
 }

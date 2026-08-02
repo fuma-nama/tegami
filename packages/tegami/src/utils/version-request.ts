@@ -11,11 +11,13 @@ import {
   initPublishPlan,
   PackagePublishPlan,
   PackagePublishTask,
+  PublishTask,
   runPreflights,
   type PublishPlan,
+  type PublishTaskContext,
+  type PublishTaskRunContext,
 } from "../plans/publish";
 import { GitCreateTagsTask, GitPushTagsTask } from "../plugins/git";
-import { PublishTask, type PublishTaskContext, type PublishTaskRunContext } from "./task";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
@@ -342,7 +344,7 @@ export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
 
     /** report `pending` while publish groups are waiting for their request */
     publishTasks() {
-      return [new VersionRequestTask(provider.name)];
+      return new VersionRequestTask(provider.name);
     },
 
     /** re-sync the version requests of pending publish groups */
@@ -773,8 +775,8 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
     super();
   }
 
-  link({ tasks }: PublishTaskContext): void {
-    for (const t of tasks) {
+  link({ plan }: PublishTaskContext): void {
+    for (const t of plan.tasks) {
       if (t === this) continue;
       if (
         t instanceof PackagePublishTask ||
@@ -794,10 +796,10 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
     if (await somePromise(checks, (exists) => !exists)) return "pending" as const;
   }
 
-  async run({ context, plan, getTaskResult }: PublishTaskRunContext) {
+  async run({ context, plan }: PublishTaskRunContext) {
     // skip when git tag work failed, releases must not reference missing tags
     for (const dep of this.optionalWait) {
-      if (getTaskResult(dep)?.status === "failed") return;
+      if (dep.getResult()?.status === "failed") return;
     }
 
     // unless eager, wait for a run where every package published successfully

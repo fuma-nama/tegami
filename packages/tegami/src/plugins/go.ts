@@ -252,11 +252,11 @@ export function go({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof GoPackage ? new GoPublishTask(pkg) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof GoPackage && new GoPublishTask(pkg));
     },
     async applyCliDraft() {
       if (!active || !updateLockFile) return;

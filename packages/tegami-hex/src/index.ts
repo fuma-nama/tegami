@@ -182,11 +182,11 @@ export function hex({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof HexPackage ? new HexPublishTask(pkg, registry) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof HexPackage && new HexPublishTask(pkg, registry));
     },
     async applyDraft(draft) {
       if (!active) return;

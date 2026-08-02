@@ -53,5 +53,15 @@ export function publishPlan(
     options: { dryRun: options.dryRun },
     changelogs: new Map(),
     packages,
+    tasks: [],
+    getPackagesToPublish() {
+      const result: WorkspacePackage[] = [];
+      for (const [id, packagePlan] of packages) {
+        if (!packagePlan.preflight?.shouldPublish) continue;
+        const pkg = graph.get(id);
+        if (pkg) result.push(pkg);
+      }
+      return result;
+    },
   };
 }

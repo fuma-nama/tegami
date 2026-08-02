@@ -4,11 +4,10 @@ import { join } from "node:path";
 import * as tinyexec from "tinyexec";
 import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { PackagePublishTask, tegami } from "../src";
-import { git, GitCreateTagsTask, GitPushTagsTask } from "../src/plugins/git";
+import { tegami } from "../src";
+import { git } from "../src/plugins/git";
 import { PackageGraph, WorkspacePackage } from "../src/graph";
 import type { TegamiContext } from "../src/context";
-import { createPublishTasksContext } from "../src/plans/publish";
 import { publishPlan } from "./helpers/plan";
 import { createTegamiCliRegistry } from "../src/cli/core";
 import { pluginTaskStatus, runPluginTasks } from "./helpers/tasks";
@@ -342,18 +341,6 @@ describe("git utils", () => {
     await expect(
       runPluginTasks(plugin, context, publishPlan(context.graph, { packages: [{ pkg: core }] })),
     ).rejects.toThrow(/tag failed/);
-  });
-
-  test("identifies task kinds with instanceof", async () => {
-    const plugin = git({ pushTags: true });
-    const context = pluginContext();
-    const plan = publishPlan(context.graph);
-
-    const tasks =
-      (await plugin.publishTasks?.call(context, createPublishTasksContext(context, plan))) ?? [];
-    expect(tasks.filter((t) => t instanceof GitCreateTagsTask)).toHaveLength(1);
-    expect(tasks.filter((t) => t instanceof GitPushTagsTask)).toHaveLength(1);
-    expect(tasks.filter((t) => t instanceof PackagePublishTask)).toHaveLength(0);
   });
 
   test("resolves task status as done when tag exists locally", async () => {

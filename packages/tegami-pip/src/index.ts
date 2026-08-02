@@ -198,13 +198,15 @@ export function pip({
         optionalWait: optionalWait.length > 0 ? optionalWait : undefined,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof PipPackage
-          ? new PipPublishTask(pkg, publishIndex, publishTarget)
-          : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) =>
+          pkg instanceof PipPackage
+            ? new PipPublishTask(pkg, publishIndex, publishTarget)
+            : undefined,
+        );
     },
     async applyDraft(draft) {
       if (!active) return;

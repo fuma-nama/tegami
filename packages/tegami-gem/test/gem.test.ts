@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { tegami } from "tegami";
-import { gem, isGemVersionPublished, type GemPackage } from "../src/index";
+import { tegami, type PublishPlan } from "tegami";
+import { GemPublishTask, gem, isGemVersionPublished, type GemPackage } from "../src/index";
 import {
   formatRequirement,
   parseRequirement,
@@ -118,21 +118,25 @@ describe("gem plugin publish task status", () => {
 
     const plugin = gem();
     const context = await tegami({ cwd, plugins: [plugin] })._internal.context();
-    const plan = {
-      packages: new Map([["gem:core", { preflight: { shouldPublish: true } }]]),
-    } as never;
-
     const core = context.graph.get("gem:core")!;
-    const tasks =
-      (await plugin.publishTasks!.call(context, {
-        plan,
-        createPackagePublishTasks: (create) => {
-          const task = create(core);
-          return task ? [task] : [];
-        },
-      })) ?? [];
-    const task = tasks.find((t) => t.name === "publish:gem:core")!;
-    const statusOf = () => task.status?.({ context, plan, tasks });
+    const plan: PublishPlan = {
+      options: {},
+      changelogs: new Map(),
+      packages: new Map([
+        ["gem:core", { changelogs: [], updated: true, preflight: { shouldPublish: true } }],
+      ]),
+      tasks: [],
+      getPackagesToPublish: () => [core],
+    };
+
+    const created = await plugin.publishTasks!.call(context, { plan });
+    expect(created).toBeInstanceOf(Array);
+    if (!Array.isArray(created)) throw new Error("Expected Gem publish tasks.");
+    const task = created.find((task) => task instanceof GemPublishTask);
+    expect(task).toBeDefined();
+    if (!task) throw new Error("Expected a Gem publish task.");
+    plan.tasks = [task];
+    const statusOf = () => task.status?.();
 
     fetchMock.mockResolvedValue(new Response("Not found", { status: 404 }));
     await expect(statusOf()).resolves.toBe("pending");

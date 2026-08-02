@@ -531,7 +531,13 @@ Release with separators.
     await expect(
       pipPlugin.publishPreflight?.call(context, {
         pkg: api,
-        plan: { options: {}, changelogs: new Map(), packages: new Map() },
+        plan: {
+          options: {},
+          changelogs: new Map(),
+          packages: new Map(),
+          tasks: [],
+          getPackagesToPublish: () => [],
+        },
       }),
     ).resolves.toEqual({
       shouldPublish: true,

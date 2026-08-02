@@ -273,11 +273,11 @@ export function composer({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof ComposerPackage ? new ComposerPublishTask(pkg, registryUrl) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof ComposerPackage && new ComposerPublishTask(pkg, registryUrl));
     },
     async applyCliDraft() {
       if (!active || !updateLockFile) return;

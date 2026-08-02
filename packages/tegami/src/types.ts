@@ -2,10 +2,9 @@ import type { TegamiContext } from "./context";
 import type { Draft, PackageDraft } from "./plans/draft";
 import type { NpmPluginOptions } from "./providers/npm";
 import type { WorkspacePackage } from "./graph";
-import type { PackagePublishResult, PublishPlan, PublishTasksContext } from "./plans/publish";
+import type { PackagePublishResult, PublishPlan, PublishTask } from "./plans/publish";
 import type { PublishLock } from "./plans/lock";
 import type { TegamiCliRegistry } from "./cli/core";
-import type { PublishTask } from "./utils/task";
 
 /** Generates changelog content for a package release. */
 export interface LogGenerator {
@@ -153,11 +152,13 @@ export interface TegamiPlugin {
    *
    * Task creation must be side-effect free: tasks are also created (but not run) to
    * resolve publish plan status via their `status()` method.
-   *
-   * This supersedes the deprecated `publish` & `resolvePlanStatus` hooks, while simple
-   * lifecycle hooks like `afterPublishAll` keep working alongside tasks.
    */
-  publishTasks?(this: TegamiContext, opts: PublishTasksContext): Awaitable<PublishTask[] | void>;
+  publishTasks?(
+    this: TegamiContext,
+    opts: { plan: PublishPlan },
+  ): Awaitable<
+    PublishTask | (PublishTask | false | null | undefined)[] | false | null | undefined | void
+  >;
 
   /**
    * Resolve publish plan status, used to check if the plan is finished successfully, or needs retries.

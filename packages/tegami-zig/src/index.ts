@@ -244,9 +244,9 @@ export function zig({
         ...dependencyWaits(publishStrategy?.waitForDependencies ?? "optional", dependencyIds),
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active || !publishStrategy) return;
-      return createPackagePublishTasks((pkg) => {
+      return plan.getPackagesToPublish().map((pkg) => {
         if (!(pkg instanceof ZigPackage)) return;
         return publishStrategy.type === "git-tag"
           ? new ZigTagPublishTask(pkg, publishStrategy)

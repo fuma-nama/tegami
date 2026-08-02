@@ -143,11 +143,11 @@ export function dart({
         wait,
       };
     },
-    publishTasks({ createPackagePublishTasks }) {
+    publishTasks({ plan }) {
       if (!active) return;
-      return createPackagePublishTasks((pkg) =>
-        pkg instanceof DartPackage ? new DartPublishTask(pkg) : undefined,
-      );
+      return plan
+        .getPackagesToPublish()
+        .map((pkg) => pkg instanceof DartPackage && new DartPublishTask(pkg));
     },
     async applyDraft(draft) {
       if (!active) return;
