@@ -7,9 +7,11 @@ import { tegami } from "../src";
 import { createTegamiContext, resolveGraph } from "../src/context";
 import {
   PackagePublishTask,
+  collectPublishTasks,
   initPublishPlan,
   runPreflights,
   runPublishPlan,
+  type PublishPlan,
 } from "../src/plans/publish";
 import { writePublishLock } from "./helpers/lock";
 import {
@@ -167,6 +169,60 @@ Some description.
       type: "failed",
     });
     expect(exec.mock.calls.every(([, args]) => args?.at(0) !== "tag")).toBe(true);
+  });
+
+  test("rejects multiple package publish tasks for the same package", async () => {
+    const { cwd, lockPath } = await createPublishFixture();
+    const context = await createResolvedContext({ cwd, lockPath });
+    const plan = await initPublishPlan(context, {});
+    if (!plan) throw new Error("missing plan");
+    await runPreflights(context, plan);
+
+    const npmPlugin = context.plugins.find((plugin) => plugin.name === "npm")!;
+    const duplicatePlugin = {
+      name: "duplicate",
+      publishTasks({ plan }: { plan: PublishPlan }) {
+        return plan.getPackagesToPublish().map(
+          (pkg) =>
+            new (class extends PackagePublishTask {
+              publish() {
+                return { type: "published" as const };
+              }
+            })(pkg),
+        );
+      },
+    };
+
+    await expect(
+      collectPublishTasks({ ...context, plugins: [npmPlugin, duplicatePlugin] }, plan),
+    ).rejects.toThrow(
+      /Package "npm:@acme\/core" has multiple publish tasks.*plugin "npm".*plugin "duplicate"/,
+    );
+  });
+
+  test("rejects package tasks for packages not selected for publishing", async () => {
+    const { cwd, lockPath } = await createPublishFixture();
+    const context = await createResolvedContext({ cwd, lockPath });
+    const plan = await initPublishPlan(context, {});
+    if (!plan) throw new Error("missing plan");
+    await runPreflights(context, plan);
+
+    const pkg = context.graph.get("npm:@acme/core")!;
+    plan.packages.get(pkg.id)!.preflight!.shouldPublish = false;
+    const invalidPlugin = {
+      name: "invalid",
+      publishTasks() {
+        return new (class extends PackagePublishTask {
+          publish() {
+            return { type: "published" as const };
+          }
+        })(pkg);
+      },
+    };
+
+    await expect(
+      collectPublishTasks({ ...context, plugins: [invalidPlugin] }, plan),
+    ).rejects.toThrow(/not selected for publishing/);
   });
 
   test("publishes versions that are missing from the registry", async () => {

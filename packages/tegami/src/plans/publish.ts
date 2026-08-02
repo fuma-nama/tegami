@@ -177,6 +177,9 @@ export abstract class PublishTask<T = unknown> {
   /** @internal set by the task runner when the task settles */
   $state?: PublishTaskState<T>;
 
+  /** @internal task instances are single-use */
+  $started = false;
+
   /** inspect the outcome of the task, `undefined` when the task has not settled */
   getResult(): PublishTaskState<T> | undefined {
     return this.$state;
@@ -206,7 +209,8 @@ export type PublishTaskState<T = unknown> =
  * Failed tasks never prevent dependents from running, tasks can inspect the outcome of
  * their waited tasks with `getResult` and decide on their own.
  *
- * Errors thrown by tasks are captured into the task states, never thrown.
+ * Errors thrown by tasks are captured into the task states, never thrown. Task instances
+ * are single-use; publish hooks create a fresh graph for every run.
  */
 export async function runPublishTasks(
   tasks: PublishTask[],
@@ -221,10 +225,20 @@ export async function runPublishTasks(
     concurrency?: number;
   },
 ): Promise<void> {
-  for (const task of tasks) task.$state = undefined;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new RangeError(`Task concurrency must be a positive integer, received ${concurrency}.`);
+  }
 
   const schedule = scheduleTasks(tasks);
-  const queue = [...schedule.keys()];
+  for (const task of schedule.keys()) {
+    if (task.$started) {
+      throw new Error(
+        `Publish task "${task.name}" has already been run; task instances are single-use.`,
+      );
+    }
+  }
+  for (const task of schedule.keys()) task.$started = true;
+
   const runContext: PublishTaskRunContext = { plan, context };
 
   async function run(task: PublishTask) {
@@ -238,20 +252,53 @@ export async function runPublishTasks(
     }
   }
 
-  while (queue.length > 0) {
-    // take the next tasks whose dependencies settled, the head is always ready
-    const chunk: PublishTask[] = [];
-    for (let i = 0; i < queue.length && chunk.length < concurrency;) {
-      const task = queue[i]!;
-      if (schedule.get(task)!.every((dep) => dep.getResult() !== undefined)) {
-        chunk.push(task);
-        queue.splice(i, 1);
-      } else {
-        i++;
-      }
+  const remainingDeps = new Map<PublishTask, number>();
+  const dependents = new Map<PublishTask, PublishTask[]>();
+  const ready: PublishTask[] = [];
+  for (const [task, deps] of schedule) {
+    remainingDeps.set(task, deps.length);
+    if (deps.length === 0) ready.push(task);
+    for (const dep of deps) {
+      const list = dependents.get(dep) ?? [];
+      list.push(task);
+      dependents.set(dep, list);
+    }
+  }
+
+  let readyIndex = 0;
+  let running = 0;
+  let settled = 0;
+  const completed: PublishTask[] = [];
+  let notify: (() => void) | undefined;
+
+  function start(task: PublishTask) {
+    running++;
+    void run(task).then(() => {
+      completed.push(task);
+      notify?.();
+      notify = undefined;
+    });
+  }
+
+  while (settled < schedule.size) {
+    while (running < concurrency && readyIndex < ready.length) start(ready[readyIndex++]!);
+
+    if (completed.length === 0) {
+      await new Promise<void>((resolve) => {
+        notify = resolve;
+      });
     }
 
-    await Promise.all(chunk.map(run));
+    for (const task of completed.splice(0)) {
+      running--;
+      settled++;
+
+      for (const dependent of dependents.get(task) ?? []) {
+        const count = remainingDeps.get(dependent)! - 1;
+        remainingDeps.set(dependent, count);
+        if (count === 0) ready.push(dependent);
+      }
+    }
   }
 }
 
@@ -261,40 +308,62 @@ export async function runPublishTasks(
  */
 function scheduleTasks(tasks: PublishTask[]): Map<PublishTask, PublishTask[]> {
   const taskSet = new Set(tasks);
+  if (taskSet.size !== tasks.length) {
+    throw new Error("The publish task list contains the same task instance more than once.");
+  }
   const resolved = new Map<PublishTask, PublishTask[]>();
-  /** task -> true while scanning `wait`, false while scanning `optionalWait` */
-  const stack = new Map<PublishTask, boolean>();
+  const stack: PublishTask[] = [];
+  const stackIndex = new Map<PublishTask, number>();
+  /** edge kinds from `stack[i]` to `stack[i + 1]` */
+  const stackEdges: boolean[] = [];
 
   /** returns `false` when the edge to this task must be dropped to break a cycle */
-  function scan(task: PublishTask): boolean {
-    switch (stack.get(task)) {
-      case true:
+  function scan(task: PublishTask, requiredEdge?: boolean): boolean {
+    const cycleStart = stackIndex.get(task);
+    if (cycleStart !== undefined) {
+      const cycleHasRequiredEdge =
+        requiredEdge === true || stackEdges.slice(cycleStart).includes(true);
+      if (cycleHasRequiredEdge) {
         throw new Error(
-          `circular reference of deps: ${[...stack.keys(), task].map((t) => t.name).join(" -> ")}`,
+          `circular reference of deps: ${[...stack.slice(cycleStart), task]
+            .map((t) => t.name)
+            .join(" -> ")}`,
         );
-      case false:
-        return false;
+      }
+      return false;
     }
     if (resolved.has(task)) return true;
 
     const deps: PublishTask[] = [];
-    stack.set(task, true);
+    const depSet = new Set<PublishTask>();
+    const addDep = (dep: PublishTask) => {
+      if (!depSet.has(dep)) {
+        depSet.add(dep);
+        deps.push(dep);
+      }
+    };
+    stackIndex.set(task, stack.length);
+    stack.push(task);
     for (const dep of task.wait) {
       if (!taskSet.has(dep)) {
         throw new Error(
           `Task "${task.name}" waits on task "${dep.name}" which is not part of the publish tasks.`,
         );
       }
-      if (scan(dep)) deps.push(dep);
+      stackEdges.push(true);
+      if (scan(dep, true)) addDep(dep);
+      stackEdges.pop();
     }
 
-    stack.set(task, false);
     for (const dep of task.optionalWait) {
       if (!taskSet.has(dep) || dep === task) continue;
-      if (scan(dep)) deps.push(dep);
+      stackEdges.push(false);
+      if (scan(dep, false)) addDep(dep);
+      stackEdges.pop();
     }
 
-    stack.delete(task);
+    stack.pop();
+    stackIndex.delete(task);
     resolved.set(task, deps);
     return true;
   }
@@ -393,9 +462,13 @@ class LegacyPublishTask extends PackagePublishTask {
 export class PluginAfterPublishAllTask extends PublishTask<void> {
   name: string;
 
-  constructor(private readonly plugin: TegamiPlugin) {
+  constructor(
+    private readonly plugin: TegamiPlugin,
+    previous?: PluginAfterPublishAllTask,
+  ) {
     super();
     this.name = `${plugin.name}:after-publish-all`;
+    if (previous) this.wait.push(previous);
   }
 
   /** legacy behaviour: `afterPublishAll` runs after every package publish, including tasks of plugins later in the plugin order */
@@ -449,28 +522,49 @@ export async function collectPublishTasks(
 ): Promise<PublishTask[]> {
   const hookContext = { plan };
   const tasks: PublishTask[] = (plan.tasks = []);
+  const packageTasks = new Map<string, { task: PackagePublishTask; plugin: TegamiPlugin }>();
   for (const plugin of context.plugins) {
     const created = await handlePluginError(plugin, "publishTasks", () =>
       plugin.publishTasks?.call(context, hookContext),
     );
-    if (Array.isArray(created)) {
-      for (const t of created) if (t) tasks.push(t);
-    } else if (created) {
-      tasks.push(created);
+    const createdTasks = Array.isArray(created) ? created : [created];
+    for (const task of createdTasks) {
+      if (!task) continue;
+
+      if (task instanceof PackagePublishTask) {
+        if (!plan.packages.get(task.pkg.id)?.preflight?.shouldPublish) {
+          throw new Error(
+            `Plugin "${plugin.name}" created package publish task "${task.name}" for "${task.pkg.id}", but that package is not selected for publishing.`,
+          );
+        }
+
+        const existing = packageTasks.get(task.pkg.id);
+        if (existing) {
+          throw new Error(
+            `Package "${task.pkg.id}" has multiple publish tasks: "${existing.task.name}" from plugin "${existing.plugin.name}" and "${task.name}" from plugin "${plugin.name}". Only one PackagePublishTask is allowed per package.`,
+          );
+        }
+        packageTasks.set(task.pkg.id, { task, plugin });
+      }
+
+      tasks.push(task);
     }
   }
 
   // backward compatibility: packages without a publish task go through the legacy `publish` hook chain
   for (const [id, packagePlan] of plan.packages) {
     if (!packagePlan.preflight?.shouldPublish) continue;
-    if (tasks.some((t) => t instanceof PackagePublishTask && t.pkg.id === id)) continue;
+    if (packageTasks.has(id)) continue;
     const pkg = context.graph.get(id);
     if (pkg) tasks.push(new LegacyPublishTask(pkg));
   }
 
+  let previousAfterPublishAll: PluginAfterPublishAllTask | undefined;
   for (const plugin of context.plugins) {
     if (plugin.afterPublishAll) {
-      tasks.push(new PluginAfterPublishAllTask(plugin));
+      const task = new PluginAfterPublishAllTask(plugin, previousAfterPublishAll);
+      tasks.push(task);
+      previousAfterPublishAll = task;
     }
     if (plugin.resolvePlanStatus) {
       tasks.push(new PluginPlanStatusTask(plugin));
