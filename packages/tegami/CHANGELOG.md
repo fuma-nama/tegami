@@ -1,3 +1,35 @@
+## tegami@1.3.0
+
+### Support Deno as a package manager in the npm plugin
+
+The npm plugin now understands Deno-managed workspaces:
+
+- Workspace packages are discovered from the `workspace` field in `deno.json`/`deno.jsonc` (both the array and `members` forms). Members without a `package.json` (e.g. JSR-only packages) are ignored.
+- Lockfile updates run `deno install` after applying a draft.
+- Publishing goes through the npm CLI, since `deno publish` targets JSR rather than npm registries.
+
+Deno is detected automatically from `deno.lock`, or set `npm: { client: "deno" }` explicitly.
+
+### Evaluate dependency policies against final bumps
+
+Dependency policies (e.g. npm peer range checks) now run after the direct bumps of every changeset settled, instead of reacting to each changeset with intermediate versions. Previously, a patch changeset processed before a minor one could break a peer range that the final version satisfies, escalating dependents to an unwanted major bump.
+
+### Harden publish task execution and tag retries
+
+Publish task graphs now reject duplicate package publishers, reused task instances, invalid concurrency, and package tasks outside the selected release. The executor starts newly unblocked work immediately while respecting its concurrency limit, preserves required dependency edges consistently, and keeps legacy `afterPublishAll` hooks ordered.
+
+Git tag retries now push tags left locally by a partial prior attempt, keep publish status pending until requested tags reach the remote, and only accept concurrent push conflicts when the remote tags point to the expected commits.
+
+### Introduce the publish task system
+
+Publishing now runs on a task graph. Plugins create tasks from the new `publishTasks` hook, and Tegami runs them concurrently according to their `wait` / `optionalWait` relationships, with a `link()` phase for cross-plugin dependencies and a `status()` method for resolving plan status.
+
+- Extend `PublishTask` for custom publish-time work, or `PackagePublishTask` for package providers — Tegami handles dry runs, `willPublish`/`afterPublish` hooks, and dependency ordering from preflight data.
+- Extend `GitTagPublishTask` (from `tegami/plugins/git`) for packages published through git tags: the task waits for the git plugin's tag work and reports `published` when this run created the tag, `skipped` when it already existed.
+- The `publish` and `resolvePlanStatus` plugin hooks are deprecated, they keep working through built-in compatibility tasks. Other lifecycle hooks such as `afterPublishAll` are unaffected.
+
+All built-in plugins (npm, cargo, go, git, GitHub, GitLab) are task-based now. Notably, Go modules rely on the git plugin's actual tag creation instead of assuming tags will be created, so a failed tag surfaces as a failed module publish.
+
 ## tegami@1.2.8
 
 ### Skip the package selector for single-package workspaces
