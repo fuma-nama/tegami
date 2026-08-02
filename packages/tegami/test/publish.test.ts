@@ -5,7 +5,12 @@ import { x } from "tinyexec";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tegami } from "../src";
 import { createTegamiContext, resolveGraph } from "../src/context";
-import { initPublishPlan, runPreflights, runPublishPlan } from "../src/plans/publish";
+import {
+  PackagePublishTask,
+  initPublishPlan,
+  runPreflights,
+  runPublishPlan,
+} from "../src/plans/publish";
 import { writePublishLock } from "./helpers/lock";
 import {
   fetchMock,
@@ -120,7 +125,7 @@ Some description.
     `);
   });
 
-  test("does not run plugin work when any package publish fails", async () => {
+  test("captures package publish failures in the task state", async () => {
     const { cwd, lockPath } = await createMultiPackagePublishFixture();
 
     exec.mockImplementation((_command, args = [], options = {}) => {
@@ -137,9 +142,27 @@ Some description.
     });
 
     const context = await createResolvedContext({ cwd, lockPath: lockPath });
-    const plan = await publishFixture(context);
+    const plan = await initPublishPlan(context, {});
+    if (!plan) throw new Error("missing plan");
+    await runPreflights(context, plan);
+
+    await expect(runPublishPlan(context, plan)).rejects.toThrow(
+      'Failed to publish @acme/ui@1.0.1 with dist-tag "latest".',
+    );
+
+    const task = plan.tasks.find(
+      (task) => task instanceof PackagePublishTask && task.pkg.id === "npm:@acme/ui",
+    );
     const ui = plan.packages.get("npm:@acme/ui");
 
+    expect(task?.getResult()).toMatchObject({
+      status: "failed",
+      error: {
+        message: expect.stringContaining(
+          'Failed to publish @acme/ui@1.0.1 with dist-tag "latest".',
+        ),
+      },
+    });
     expect(ui?.publishResult).toMatchObject({
       type: "failed",
     });

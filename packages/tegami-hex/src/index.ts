@@ -5,7 +5,7 @@ import type {
   BumpType,
   DraftPolicy,
   PackageGraph,
-  PackagePublishResult,
+  PackagePublishTaskResult,
   TegamiContext,
   TegamiPlugin,
 } from "tegami";
@@ -121,7 +121,7 @@ export class HexPublishTask extends PackagePublishTask<HexPackage> {
     super(pkg);
   }
 
-  async publish(): Promise<PackagePublishResult> {
+  async publish(): Promise<PackagePublishTaskResult> {
     const { pkg } = this;
     const result = await x("mix", ["hex.publish", "--yes"], {
       nodeOptions: { cwd: pkg.path },
@@ -134,10 +134,7 @@ export class HexPublishTask extends PackagePublishTask<HexPackage> {
     }
 
     if (result.exitCode !== 0) {
-      return {
-        type: "failed",
-        error: execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result).message,
-      };
+      throw execFailure(`Failed to publish ${pkg.name}@${pkg.version}.`, result);
     }
 
     return { type: "published" };

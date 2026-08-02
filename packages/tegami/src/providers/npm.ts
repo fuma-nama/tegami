@@ -6,7 +6,7 @@ import typia from "typia";
 import type { TegamiContext } from "../context";
 import {
   PackagePublishTask,
-  type PackagePublishResult,
+  type PackagePublishTaskResult,
   type PublishTaskRunContext,
 } from "../plans/publish";
 import type { Awaitable, TegamiPlugin } from "../types";
@@ -84,7 +84,7 @@ export class NpmPublishTask extends PackagePublishTask<NpmPackage> {
     super(pkg);
   }
 
-  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishResult> {
+  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const pkg = this.pkg;
     const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
 
@@ -104,10 +104,7 @@ export class NpmPublishTask extends PackagePublishTask<NpmPackage> {
       );
 
       if (tagResult.exitCode !== 0) {
-        return {
-          type: "failed",
-          error: execFailure("Failed to mark package as latest", tagResult).message,
-        };
+        throw execFailure("Failed to mark package as latest", tagResult);
       }
     }
 
@@ -391,7 +388,7 @@ async function publish(
   client: AgentName,
   pkg: NpmPackage,
   distTag?: string,
-): Promise<PackagePublishResult> {
+): Promise<PackagePublishTaskResult> {
   if (!pkg.version || (await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) {
     return { type: "skipped" };
   }
@@ -405,11 +402,7 @@ async function publish(
       const result = await x("bun", ["run", script], { nodeOptions: { cwd: pkg.path } });
       if (result.exitCode === 0) continue;
 
-      return {
-        type: "failed",
-        error: execFailure(`Failed to run ${script} script for ${pkg.name}@${pkg.version}.`, result)
-          .message,
-      };
+      throw execFailure(`Failed to run ${script} script for ${pkg.name}@${pkg.version}.`, result);
     }
 
     const tarballPath = path.resolve(pkg.path, "pkg.tgz");
@@ -417,10 +410,7 @@ async function publish(
       nodeOptions: { cwd: pkg.path },
     });
     if (packResult.exitCode !== 0) {
-      return {
-        type: "failed",
-        error: execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult).message,
-      };
+      throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
     }
 
     const publishArgs = ["publish", tarballPath];
@@ -433,13 +423,10 @@ async function publish(
       },
     });
     if (publishResult.exitCode !== 0) {
-      return {
-        type: "failed",
-        error: execFailure(
-          `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-          publishResult,
-        ).message,
-      };
+      throw execFailure(
+        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+        publishResult,
+      );
     }
     return { type: "published" };
   }
@@ -472,13 +459,10 @@ async function publish(
     },
   });
   if (result.exitCode !== 0) {
-    return {
-      type: "failed",
-      error: execFailure(
-        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
-        result,
-      ).message,
-    };
+    throw execFailure(
+      `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+      result,
+    );
   }
 
   return { type: "published" };

@@ -1,6 +1,35 @@
 import type { TegamiContext } from "../../src/context";
-import { collectPublishTasks, runPublishTasks, type PublishPlan } from "../../src/plans/publish";
+import {
+  PackagePublishTask,
+  collectPublishTasks,
+  runPublishTasks,
+  type PackagePublishTaskResult,
+  type PublishPlan,
+  type PublishTaskRunContext,
+} from "../../src/plans/publish";
 import type { TegamiPlugin } from "../../src/types";
+
+/** Gives synthetic plans a no-op package task for their pre-populated plan-level result. */
+class PresetPackagePublishTask extends PackagePublishTask {
+  async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
+    const result = plan.packages.get(this.pkg.id)?.publishResult;
+    if (result?.type === "published" || result?.type === "skipped") return result;
+    return { type: "skipped" } satisfies PackagePublishTaskResult;
+  }
+}
+
+const presetPackagePublisher: TegamiPlugin = {
+  name: "test:preset-package-publisher",
+  publishTasks({ plan }) {
+    return plan
+      .getPackagesToPublish()
+      .filter(
+        (pkg) =>
+          !plan.tasks.some((task) => task instanceof PackagePublishTask && task.pkg.id === pkg.id),
+      )
+      .map((pkg) => new PresetPackagePublishTask(pkg));
+  },
+};
 
 /** create & run the publish tasks of the given plugins, throwing the first task error */
 export async function runPluginTasks(
@@ -8,10 +37,11 @@ export async function runPluginTasks(
   context: TegamiContext,
   plan: PublishPlan,
 ): Promise<void> {
+  const pluginList = Array.isArray(plugins) ? plugins : [plugins];
   const tasks = await collectPublishTasks(
     {
       ...context,
-      plugins: Array.isArray(plugins) ? plugins : [plugins],
+      plugins: [...pluginList, presetPackagePublisher],
     },
     plan,
   );

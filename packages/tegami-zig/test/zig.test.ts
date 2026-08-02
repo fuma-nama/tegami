@@ -175,19 +175,14 @@ describe("zig plugin", () => {
       .draft()
       .then((draft) => draft.apply());
 
-    const result = await tegami({
-      cwd,
-      plugins: [zig({ publish: "git-tag" })],
-    }).publish();
-
-    expect(result).not.toBe("skipped");
-    if (result === "skipped") return;
-
-    expect(result.packages.get("zig:single")?.publishResult).toEqual({
-      type: "failed",
-      error:
-        "Zig git-tag publishing requires the git, github, or gitlab plugin to provide a release tag.",
-    });
+    await expect(
+      tegami({
+        cwd,
+        plugins: [zig({ publish: "git-tag" })],
+      }).publish(),
+    ).rejects.toThrow(
+      "Zig git-tag publishing requires the git, github, or gitlab plugin to provide a release tag.",
+    );
   });
 
   test("publishes with custom application logic", async () => {
