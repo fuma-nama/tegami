@@ -32,7 +32,7 @@ export class GitCreateTagsTask extends PublishTask<{
 
   async run({ plan, context }: PublishTaskRunContext) {
     const createdTags: string[] = [];
-    const tags = [...getPendingTags(plan)];
+    const tags = Array.from(getPendingTags(plan));
 
     await Promise.all(
       tags.map(async (tag) => {
@@ -55,14 +55,50 @@ export class GitCreateTagsTask extends PublishTask<{
         nodeOptions: { cwd: context.cwd },
       });
 
-      if (
-        gitOut.exitCode !== 0 &&
-        (!/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`) ||
-          !(await Promise.all(tags.map((tag) => remoteTagMatches(context.cwd, tag)))).every(
-            Boolean,
-          ))
-      ) {
-        throw execFailure(`Failed to push Git tags to origin: ${tags.join(", ")}`, gitOut);
+      if (gitOut.exitCode !== 0) {
+        if (!/already exists/i.test(`${gitOut.stdout}\n${gitOut.stderr}`)) {
+          throw execFailure(`Failed to push Git tags to origin: ${tags.join(", ")}`, gitOut);
+        }
+
+        const [local, remote] = await Promise.all([
+          x("git", ["rev-parse", ...tags.map((tag) => `refs/tags/${tag}^{}`)], {
+            nodeOptions: { cwd: context.cwd },
+          }),
+          x(
+            "git",
+            [
+              "ls-remote",
+              "--tags",
+              "origin",
+              ...tags.flatMap((tag) => [`refs/tags/${tag}`, `refs/tags/${tag}^{}`]),
+            ],
+            { nodeOptions: { cwd: context.cwd } },
+          ),
+        ]);
+
+        if (local.exitCode !== 0 || remote.exitCode !== 0) {
+          throw execFailure(`Failed to push Git tags to origin: ${tags.join(", ")}`, gitOut);
+        }
+
+        const remoteRefs = new Map<string, string>();
+        for (let line of remote.stdout.split("\n")) {
+          line = line.trim();
+          if (line.length === 0) continue;
+          const [sha, ref] = line.split(/\s+/, 2) as [string, string];
+          remoteRefs.set(ref, sha);
+        }
+        const localShas = local.stdout
+          .trim()
+          .split("\n")
+          .map((s) => s.trim());
+        for (const [i, tag] of tags.entries()) {
+          const remoteSha =
+            remoteRefs.get(`refs/tags/${tag}^{}`) ?? remoteRefs.get(`refs/tags/${tag}`);
+
+          if (!remoteSha || remoteSha !== localShas[i]) {
+            throw execFailure(`Failed to push Git tag "${tag}" to origin`, gitOut);
+          }
+        }
       }
     }
 
@@ -80,7 +116,6 @@ export class GitCreateTagsTask extends PublishTask<{
 
   async status({ plan, context }: PublishTaskContext) {
     const pendingTags = getPendingTags(plan);
-
     const checks = Array.from(pendingTags, async (tag) => {
       if (!this.pushTags) {
         const local = await x("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`], {
@@ -100,26 +135,6 @@ export class GitCreateTagsTask extends PublishTask<{
 
     if (await somePromise(checks, (missing) => missing)) return "pending";
   }
-}
-
-async function remoteTagMatches(cwd: string, tag: string): Promise<boolean> {
-  const [local, remote] = await Promise.all([
-    x("git", ["rev-parse", `refs/tags/${tag}^{}`], { nodeOptions: { cwd } }),
-    x("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
-      nodeOptions: { cwd },
-    }),
-  ]);
-  if (local.exitCode !== 0 || remote.exitCode !== 0) return false;
-
-  const remoteRefs = new Map(
-    remote.stdout
-      .trim()
-      .split("\n")
-      .map((line) => line.trim().split(/\s+/, 2) as [string, string])
-      .map(([sha, ref]) => [ref, sha]),
-  );
-  const remoteSha = remoteRefs.get(`refs/tags/${tag}^{}`) ?? remoteRefs.get(`refs/tags/${tag}`);
-  return remoteSha !== undefined && remoteSha === local.stdout.trim();
 }
 
 /**
