@@ -1,9 +1,18 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Skip the package selector for single-package workspaces\n\nRunning `tegami` in a workspace with only one versionable package now goes straight to the release type, which names the package it selected. That prompt offers `auto-generate from commits` in place of the skipped selector's empty-selection shortcut, and hides `choose per-package` whenever a single package is selected.\n"
-    filename: 2026-07-28-1f3ca07d.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Support Deno as a package manager in the npm plugin\n\nThe npm plugin now understands Deno-managed workspaces:\n\n- Workspace packages are discovered from the `workspace` field in `deno.json`/`deno.jsonc` (both the array and `members` forms). Members without a `package.json` (e.g. JSR-only packages) are ignored.\n- Lockfile updates run `deno install` after applying a draft.\n- Publishing goes through the npm CLI, since `deno publish` targets JSR rather than npm registries.\n\nDeno is detected automatically from `deno.lock`, or set `npm: { client: \"deno\" }` explicitly.\n"
+    filename: 2026-08-02-denopm.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Fix weird bumps with prerelease\n\nThe script-config syncing was causing unwanted bumps.\n"
-    filename: 2026-07-31-ms8xdpys.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Evaluate dependency policies against final bumps\n\nDependency policies (e.g. npm peer range checks) now run after the direct bumps of every changeset settled, instead of reacting to each changeset with intermediate versions. Previously, a patch changeset processed before a minor one could break a peer range that the final version satisfies, escalating dependents to an unwanted major bump.\n"
+    filename: 2026-08-02-finalbump.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Harden publish task execution and tag retries\n\nPublish task graphs now reject duplicate package publishers, reused task instances, invalid concurrency, and package tasks outside the selected release. The executor starts newly unblocked work immediately while respecting its concurrency limit, preserves required dependency edges consistently, and keeps legacy `afterPublishAll` hooks ordered.\n\nGit tag retries now push tags left locally by a partial prior attempt, keep publish status pending until requested tags reach the remote, and only accept concurrent push conflicts when the remote tags point to the expected commits.\n"
+    filename: 2026-08-02-task-hardening.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n## Introduce the publish task system\n\nPublishing now runs on a task graph. Plugins create tasks from the new `publishTasks` hook, and Tegami runs them concurrently according to their `wait` / `optionalWait` relationships, with a `link()` phase for cross-plugin dependencies and a `status()` method for resolving plan status.\n\n- Extend `PublishTask` for custom publish-time work, or `PackagePublishTask` for package providers — Tegami handles dry runs, `willPublish`/`afterPublish` hooks, and dependency ordering from preflight data.\n- Extend `GitTagPublishTask` (from `tegami/plugins/git`) for packages published through git tags: the task waits for the git plugin's tag work and reports `published` when this run created the tag, `skipped` when it already existed.\n- The `publish` and `resolvePlanStatus` plugin hooks are deprecated, they keep working through built-in compatibility tasks. Other lifecycle hooks such as `afterPublishAll` are unaffected.\n\nAll built-in plugins (npm, cargo, go, git, GitHub, GitLab) are task-based now. Notably, Go modules rely on the git plugin's actual tag creation instead of assuming tags will be created, so a failed tag surfaces as a failed module publish.\n"
+    filename: 2026-08-02-tasksys1.md
+    v: 0.0.0
+  - content: "---\npackages:\n  \"@tegami/composer\":\n    type: minor\n  \"@tegami/dart\":\n    type: minor\n  \"@tegami/gem\":\n    type: minor\n  \"@tegami/hex\":\n    type: minor\n  \"@tegami/maven\":\n    type: minor\n  \"@tegami/nuget\":\n    type: minor\n  \"@tegami/pip\":\n    type: minor\n  \"@tegami/swift\":\n    type: minor\n  \"@tegami/zig\":\n    type: minor\n---\n\n## Migrate to the Tegami publish task system\n\nThe plugin now publishes through Tegami's task graph instead of the deprecated `publish` / `resolvePlanStatus` hooks. Requires `tegami@^1.3.0`.\n\nGit-tag publishers (Composer, Swift, Zig's `git-tag` strategy) now wait for the git plugin's actual tag work: a package reports `published` when this run created its tag, `skipped` when the tag already existed, and fails when tag creation failed.\n"
+    filename: 2026-08-02-tasksys2.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,30 +20,50 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-07-28-1f3ca07d.md
-      - 2026-07-31-ms8xdpys.md
+      - 2026-08-02-denopm.md
+      - 2026-08-02-finalbump.md
+      - 2026-08-02-task-hardening.md
+      - 2026-08-02-tasksys1.md
     id: npm:tegami
     updated: true
-  - id: npm:@tegami/composer
-    updated: false
-  - id: npm:@tegami/dart
-    updated: false
-  - id: npm:@tegami/gem
-    updated: false
-  - id: npm:@tegami/hex
-    updated: false
-  - id: npm:@tegami/maven
-    updated: false
-  - id: npm:@tegami/nuget
-    updated: false
-  - id: npm:@tegami/pip
-    updated: false
-  - id: npm:@tegami/swift
-    updated: false
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/composer
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/dart
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/gem
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/hex
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/maven
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/nuget
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/pip
+    updated: true
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/swift
+    updated: true
   - id: npm:@tegami/xml-util
     updated: false
-  - id: npm:@tegami/zig
-    updated: false
+  - changelogIds:
+      - 2026-08-02-tasksys2.md
+    id: npm:@tegami/zig
+    updated: true
   - id: npm:@repo/typescript-config
     updated: false
 npm:packages:
