@@ -2,11 +2,13 @@ import { describe, expect, test } from "vitest";
 import type { TegamiContext } from "../src/context";
 import {
   PublishTask,
+  publishPlanStatus,
   runPublishTasks,
   type PublishPlan,
   type PublishTaskRunContext,
   type PublishTaskState,
 } from "../src/plans/publish";
+import type { Awaitable } from "../src/types";
 
 class TestTask extends PublishTask<string> {
   constructor(
@@ -239,4 +241,75 @@ describe("publish tasks", () => {
     await firstRun;
     expect(task.getResult()).toEqual({ status: "success", result: "done" });
   });
+});
+
+class StatusTask extends PublishTask<void> {
+  constructor(
+    public name: string,
+    private readonly check: () => Awaitable<"done" | "pending" | void>,
+  ) {
+    super();
+  }
+
+  run() {}
+
+  status() {
+    return this.check();
+  }
+}
+
+/** a plan & context whose only tasks are the given status tasks */
+function statusBase(tasks: PublishTask[], unstable_maxChunk?: number) {
+  const plan = { options: { unstable_maxChunk }, packages: new Map() } as unknown as PublishPlan;
+  const context = {
+    plugins: [{ name: "test", publishTasks: () => tasks }],
+  } as unknown as TegamiContext;
+
+  return [plan, context] as const;
+}
+
+describe("publish plan status", () => {
+  test("limits concurrently running status checks", async () => {
+    let active = 0;
+    let maxActive = 0;
+
+    const tasks = Array.from({ length: 6 }, (_, i) => {
+      return new StatusTask(`task-${i}`, async () => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await sleep(10);
+        active--;
+      });
+    });
+
+    await expect(publishPlanStatus(...statusBase(tasks, 2))).resolves.toEqual({
+      status: "success",
+    });
+    expect(maxActive).toBe(2);
+  });
+
+  test("skips the remaining checks once a task is pending", async () => {
+    const checked: string[] = [];
+    const tasks = Array.from({ length: 4 }, (_, i) => {
+      return new StatusTask(`task-${i}`, () => {
+        checked.push(`task-${i}`);
+        if (i === 1) return "pending" as const;
+      });
+    });
+
+    await expect(publishPlanStatus(...statusBase(tasks, 1))).resolves.toEqual({
+      status: "pending",
+      reason: 'Task "task-1" is pending',
+    });
+    expect(checked).toEqual(["task-0", "task-1"]);
+  });
+
+  test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid concurrency %s",
+    async (unstable_maxChunk) => {
+      await expect(
+        publishPlanStatus(...statusBase([new StatusTask("a", () => {})], unstable_maxChunk)),
+      ).rejects.toThrow(/positive integer/);
+    },
+  );
 });

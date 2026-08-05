@@ -6,7 +6,16 @@ import { parsePublishLock, PublishLock } from "./lock";
 import type { Awaitable, PublishPreflight, TegamiPlugin } from "../types";
 import { WorkspacePackage } from "../graph";
 import { handlePluginError } from "../utils/error";
-import { findPromiseIndex, somePromise } from "../utils/common";
+import { somePromise } from "../utils/common";
+
+/** default max amount of concurrently running publish tasks & status checks */
+const DEFAULT_CONCURRENCY = 5;
+
+function assertConcurrency(concurrency: number): void {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new RangeError(`Task concurrency must be a positive integer, received ${concurrency}.`);
+  }
+}
 
 export interface PublishPlan {
   options: PublishOptions;
@@ -213,7 +222,7 @@ export async function runPublishTasks(
   {
     context,
     plan,
-    concurrency = 5,
+    concurrency = DEFAULT_CONCURRENCY,
   }: {
     context: TegamiContext;
     plan: PublishPlan;
@@ -221,18 +230,17 @@ export async function runPublishTasks(
     concurrency?: number;
   },
 ): Promise<void> {
-  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
-    throw new RangeError(`Task concurrency must be a positive integer, received ${concurrency}.`);
-  }
+  assertConcurrency(concurrency);
 
   const schedule = scheduleTasks(tasks);
-  const reused = tasks.find((task) => startedTasks.has(task));
-  if (reused) {
-    throw new Error(
-      `Publish task "${reused.name}" has already been run; task instances are single-use.`,
-    );
+  for (const task of tasks) {
+    if (startedTasks.has(task)) {
+      throw new Error(
+        `Publish task "${task.name}" has already been run; task instances are single-use.`,
+      );
+    }
+    startedTasks.add(task);
   }
-  for (const task of tasks) startedTasks.add(task);
 
   const runContext: PublishTaskRunContext = { plan, context };
 
@@ -575,7 +583,7 @@ export interface PublishOptions {
   packages?: string[];
 
   /**
-   * The max amount of concurrently running publish tasks (unstable, can change in anytime).
+   * The max amount of concurrently running publish tasks & status checks (unstable, can change in anytime).
    *
    * @default 5
    */
@@ -596,7 +604,7 @@ export type PackagePublishResult =
     };
 
 export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) {
-  const { unstable_maxChunk = 5 } = plan.options;
+  const { unstable_maxChunk = DEFAULT_CONCURRENCY } = plan.options;
 
   for (const plugin of context.plugins) {
     await handlePluginError(plugin, "beforePublishAll", () =>
@@ -670,6 +678,10 @@ export async function runPreflights(context: TegamiContext, plan: PublishPlan): 
   }
 }
 
+/**
+ * Check the status of every task of the plan, running at most `unstable_maxChunk` checks
+ * at a time. Checks that have not started yet are skipped once a task reports `pending`.
+ */
 export async function publishPlanStatus(
   plan: PublishPlan,
   context: TegamiContext,
@@ -677,14 +689,22 @@ export async function publishPlanStatus(
   status: "success" | "pending";
   reason?: string;
 }> {
+  const { unstable_maxChunk = DEFAULT_CONCURRENCY } = plan.options;
+  assertConcurrency(unstable_maxChunk);
   const tasks = await collectPublishTasks(context, plan);
-  const pendingIdx = await findPromiseIndex(
-    tasks.map((task) => task.status?.({ context, plan })),
-    (check) => check === "pending",
-  );
 
-  if (pendingIdx !== -1) {
-    return { status: "pending", reason: `Task "${tasks[pendingIdx]!.name}" is pending` };
+  let next = 0;
+  let pending: PublishTask | undefined;
+  async function check() {
+    while (!pending && next < tasks.length) {
+      const task = tasks[next++]!;
+      if ((await task.status?.({ context, plan })) === "pending") pending = task;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(unstable_maxChunk, tasks.length) }, check));
+
+  if (pending) {
+    return { status: "pending", reason: `Task "${pending.name}" is pending` };
   }
 
   return { status: "success" };
