@@ -29,7 +29,15 @@ export function getPackageBumps(graph: PackageGraph, entry: ChangelogEntry) {
 
   for (const [name, config] of entry.packages) {
     if (!config.type) continue;
-    for (const pkg of graph.getByName(name)) packageBumps.set(pkg, config.type);
+    const pkgs = graph.getByName(name);
+    if (pkgs.length === 0) {
+      console.warn(
+        `[Tegami] no detected packages from name "${name}" specified by changelog "${entry.filename}", is it correct?`,
+      );
+      continue;
+    }
+
+    for (const pkg of pkgs) packageBumps.set(pkg, config.type);
   }
 
   return packageBumps;
