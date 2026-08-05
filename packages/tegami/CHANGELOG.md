@@ -1,3 +1,17 @@
+## tegami@1.3.3
+
+### Bound the checks & releases a plan runs at once
+
+Release creation, the release checks behind a plan's status, and the npm registry lookups of `npm pretrust` now run at most `unstable_maxChunk` (5 by default) at a time, instead of firing one request per package or git tag at once. Release checks also stop as soon as one is missing.
+
+### Skip version request updates that change nothing
+
+The version pull/merge request is now only updated when its title or body actually changed, removing one write request per run.
+
+### Limit concurrent status checks
+
+Publish plan status checks now respect `unstable_maxChunk` like publish tasks do, instead of checking every task at once. Remaining checks are skipped as soon as a task reports `pending`.
+
 ## tegami@1.3.2
 
 ### Fix git tag task on re-runs
