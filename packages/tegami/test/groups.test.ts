@@ -165,7 +165,7 @@ Breaking note.
     });
 
     exec.mockImplementation((_command, args = []) => {
-      if (args.at(0) === "tag") {
+      if (args.at(0) === "tag" || args.at(0) === "ls-remote") {
         return commandResult();
       }
 
@@ -174,7 +174,9 @@ Breaking note.
 
     await runPluginTasks(plugin, context, plan);
 
-    expect(exec.mock.calls.filter(([, args]) => args?.at(0) === "tag")).toHaveLength(1);
+    expect(
+      exec.mock.calls.filter(([, args]) => args?.at(0) === "tag" && args.at(1) !== "--list"),
+    ).toHaveLength(1);
   });
 
   test("clears package group references when members or groups are removed", () => {
