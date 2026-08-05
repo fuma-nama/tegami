@@ -5,10 +5,10 @@ import { intro, note, outro } from "@clack/prompts";
 import { x } from "tinyexec";
 import type { TegamiCliRegistry } from "../../cli/core";
 import type { TegamiContext } from "../../context";
-import { initPublishPlan, runPreflights } from "../../plans/publish";
+import { initPublishPlan, planConcurrency, runPreflights } from "../../plans/publish";
 import { execFailure, fetchFailure } from "../../utils/error";
 import { NpmPackage } from "../npm";
-import { joinPath } from "../../utils/common";
+import { joinPath, runConcurrent } from "../../utils/common";
 import { parsePublishLock, type PublishLock } from "../../plans/lock";
 
 const PLACEHOLDER_VERSION = "0.0.0-tegami-trusted-publish-setup";
@@ -127,14 +127,16 @@ async function resolvePretrustTargets(context: TegamiContext): Promise<NpmPackag
   await runPreflights(context, plan);
 
   return (
-    await Promise.all(
-      Array.from(plan.packages, async ([id, { preflight }]) => {
+    await runConcurrent(
+      Array.from(plan.packages),
+      planConcurrency(plan),
+      async ([id, { preflight }]) => {
         if (!preflight?.shouldPublish) return;
         const pkg = context.graph.get(id);
         if (!pkg || !(pkg instanceof NpmPackage)) return;
         if (await isPackageOnRegistry(pkg.name, pkg.getRegistry())) return;
         return pkg;
-      }),
+      },
     )
   ).filter((pkg): pkg is NpmPackage => pkg !== undefined);
 }

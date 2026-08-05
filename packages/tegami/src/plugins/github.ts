@@ -10,6 +10,7 @@ import { PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
   ReleaseTask,
+  isRequestUpToDate,
   versionRequestPlugin,
   resolveFileCommit,
   VersionRequestOptions,
@@ -198,8 +199,8 @@ export function github(options: GitHubPluginOptions = {}): TegamiPlugin[] {
             base: request.base,
             token,
           });
-        } else if (update) {
-          await updatePullRequest(repo!, openPr, {
+        } else if (update && !isRequestUpToDate(openPr, request)) {
+          await updatePullRequest(repo!, openPr.number, {
             title: request.title,
             body: request.body,
             token,

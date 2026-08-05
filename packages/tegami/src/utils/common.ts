@@ -2,48 +2,6 @@ import type { Awaitable } from "../types";
 
 export const isCI = () => Boolean(process.env.CI);
 
-/** resolve with the first index satisfying `fn` as soon as it settles, or `-1` after all settle */
-export async function findPromiseIndex<T>(
-  promises: Awaitable<T>[],
-  fn: (value: T) => boolean,
-): Promise<number> {
-  return new Promise((res, reject) => {
-    let n = promises.length;
-    if (n === 0) res(-1);
-
-    for (let i = 0; i < promises.length; i++) {
-      const promise = promises[i]!;
-      if (promise instanceof Promise) {
-        void promise
-          .then((v) => {
-            if (fn(v)) return res(i);
-
-            n--;
-            if (n === 0) res(-1);
-          })
-          .catch(reject);
-        continue;
-      }
-
-      if (fn(promise)) {
-        // keep looping so the remaining promises still get rejection handlers attached
-        res(i);
-        continue;
-      }
-
-      n--;
-      if (n === 0) res(-1);
-    }
-  });
-}
-
-export async function somePromise<T>(
-  promises: Awaitable<T>[],
-  fn: (value: T) => boolean,
-): Promise<boolean> {
-  return (await findPromiseIndex(promises, fn)) !== -1;
-}
-
 export function joinPath(...paths: string[]): string {
   let out = "";
   for (const path of paths) {
@@ -62,6 +20,59 @@ export function joinPath(...paths: string[]): string {
     out += path;
   }
   return out;
+}
+
+/**
+ * Run `fn` over the items with at most `concurrency` of them in flight.
+ *
+ * Results keep the order of `items`, the first rejection rejects like `Promise.all`.
+ */
+export async function runConcurrent<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Awaitable<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  async function work() {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!, index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, work));
+  return results;
+}
+
+/**
+ * Like {@link runConcurrent}, but resolves with the first item satisfying `fn`.
+ *
+ * Items that have not started yet are skipped once a match is found, which item wins is
+ * undefined when several match.
+ */
+export async function findConcurrent<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Awaitable<boolean>,
+): Promise<T | undefined> {
+  let next = 0;
+  let found: T | undefined;
+  let matched = false;
+
+  async function work() {
+    while (!matched && next < items.length) {
+      const index = next++;
+      if (await fn(items[index]!, index)) {
+        matched = true;
+        found = items[index];
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, work));
+  return found;
 }
 
 export function cached<Args extends unknown[], V>(

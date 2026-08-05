@@ -423,6 +423,60 @@ describe("github release plugin", () => {
     });
   });
 
+  test("limits concurrent release work to the plan's chunk size", async () => {
+    let active = 0;
+    let maxActive = 0;
+    releaseExistsByTag.mockImplementation(async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return false;
+    });
+
+    const plugins = githubPlugin(releasePluginOptions);
+    const packages = Array.from({ length: 6 }, (_, i) => testPackage(`@acme/p${i}`));
+    const context = publishContext(packages);
+    const plan = releasePlan(
+      context,
+      packages.map((pkg) => ({ name: pkg.name })),
+    );
+    plan.options.unstable_maxChunk = 2;
+
+    await runAfterPublishAll(plugins, context, plan);
+
+    expect(maxActive).toBe(2);
+    expect(createGitHubRelease).toHaveBeenCalledTimes(6);
+  });
+
+  test("checks releases with the plan's chunk size and stops at the first missing one", async () => {
+    let active = 0;
+    let maxActive = 0;
+    releaseExistsByTag.mockImplementation(async (_repo, tag) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return tag !== "@acme/p2@1.0.1";
+    });
+
+    // without the git tag task, the release task is the only one with a status
+    const plugins = githubPlugin({ ...releasePluginOptions, createTags: false });
+    const packages = Array.from({ length: 6 }, (_, i) => testPackage(`@acme/p${i}`));
+    const context = publishContext(packages);
+    const plan = releasePlan(
+      context,
+      packages.map((pkg) => ({ name: pkg.name })),
+    );
+    plan.options.unstable_maxChunk = 2;
+
+    await expect(resolvePlanStatus(plugins, context, plan)).resolves.toBe("pending");
+
+    expect(maxActive).toBe(2);
+    // the checks after the missing release never start
+    expect(releaseExistsByTag.mock.calls.length).toBeLessThan(6);
+  });
+
   test("reuses changelog commit lookups across package releases", async () => {
     exec.mockImplementation((command, args = []) => {
       if (command === "git" && args[0] === "log") {
@@ -551,7 +605,11 @@ describe("github version pull request", () => {
             return commandResult();
         }
       });
-      findOpenPullRequest.mockResolvedValue(42);
+      findOpenPullRequest.mockResolvedValue({
+        number: 42,
+        title: "Version Packages",
+        body: "outdated",
+      });
 
       await runVersionPullRequest(plugins, context, draft);
 
@@ -730,6 +788,47 @@ describe("github version pull request", () => {
           },
         ]
       `);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("skips updating a version pull request that already matches", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    exec.mockImplementation((command, args = []) => {
+      if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      if (args[0] === "status") return commandResult({ stdout: " M package.json\n" });
+      return commandResult();
+    });
+
+    async function runVersion() {
+      const context = publishContext([testPackage("@acme/core", "1.0.0")]);
+      await runVersionPullRequest(
+        githubPlugin(releasePluginOptions),
+        context,
+        versionDraft(context),
+      );
+    }
+
+    try {
+      // render the request once to learn what an up-to-date pull request holds
+      await runVersion();
+      const [, created] = createPullRequest.mock.calls[0]!;
+      createPullRequest.mockClear();
+
+      // GitHub stores bodies with CRLF line endings, the comparison must see through it
+      findOpenPullRequest.mockResolvedValue({
+        number: 42,
+        title: created.title,
+        body: created.body.replaceAll("\n", "\r\n"),
+      });
+      await runVersion();
+
+      expect(updatePullRequest).not.toHaveBeenCalled();
+      expect(createPullRequest).not.toHaveBeenCalled();
     } finally {
       if (previousCi === undefined) delete process.env.CI;
       else process.env.CI = previousCi;
@@ -1203,7 +1302,11 @@ describe("github version pull request", () => {
           return commandResult();
       }
     });
-    findOpenPullRequest.mockResolvedValue(42);
+    findOpenPullRequest.mockResolvedValue({
+      number: 42,
+      title: "Version Packages",
+      body: "outdated",
+    });
 
     const plan = releasePlan(context, [{ name: "@acme/ui" }]);
     await runInitPublishPlan(plugins, context, { lock, plan });

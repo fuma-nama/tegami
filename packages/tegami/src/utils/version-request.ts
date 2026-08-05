@@ -8,9 +8,11 @@ import type { ChangelogEntry } from "../changelog/parse";
 import type { Draft } from "../plans/draft";
 import { parsePublishLock, PublishLock } from "../plans/lock";
 import {
+  DEFAULT_CONCURRENCY,
   initPublishPlan,
   PackagePublishPlan,
   PackagePublishTask,
+  planConcurrency,
   PublishTask,
   runPreflights,
   type PublishPlan,
@@ -21,7 +23,7 @@ import { GitCreateTagsTask } from "../plugins/git";
 import type { Awaitable, TegamiPlugin } from "../types";
 import { PackageGraph, WorkspacePackage } from "../graph";
 import { execFailure } from "./error";
-import { isCI, somePromise } from "./common";
+import { findConcurrent, isCI, runConcurrent } from "./common";
 import { diffWeight, formatNpmDistTag, formatPackageVersion } from "./semver";
 import { getPackageBumps } from "../changelog/shared";
 
@@ -88,6 +90,25 @@ interface GitProvider {
   canCreate: (context: TegamiContext) => boolean;
   /** create the version request of a branch, `update` controls whether an open one is updated */
   upsert: (context: TegamiContext, request: VersionRequest, update: boolean) => Awaitable<void>;
+}
+
+/**
+ * Whether an open request already renders the given content, used by providers to skip
+ * updates that would change nothing.
+ *
+ * Newlines are normalised, GitHub & GitLab store request bodies with CRLF line endings.
+ */
+export function isRequestUpToDate(
+  existing: { title: string; body: string },
+  request: { title: string; body: string },
+): boolean {
+  return (
+    existing.title === request.title && normalizeBody(existing.body) === normalizeBody(request.body)
+  );
+}
+
+function normalizeBody(body: string): string {
+  return body.replaceAll("\r\n", "\n").trim();
 }
 
 interface PublishGroupStore {
@@ -253,7 +274,7 @@ export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
 
       let baseLock: PublishLock | undefined;
       let parent: CommitData | undefined;
-      const tasks: Awaitable<void>[] = [];
+      const tasks: (() => Awaitable<void>)[] = [];
 
       for (const { branch, packages, publishGroup } of requests) {
         const plan = await initPublishPlan(this, {
@@ -296,7 +317,7 @@ export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
               groups: newGroups,
             },
           });
-          tasks.push(provider.upsert(this, resolved, !inSync));
+          tasks.push(() => provider.upsert(this, resolved, !inSync));
           continue;
         }
 
@@ -308,7 +329,8 @@ export function versionRequestPlugin(provider: GitProvider): TegamiPlugin {
         );
         await provider.upsert(this, resolved, true);
       }
-      await Promise.all(tasks);
+      // publish group requests are upserted together, bounded so we never burst the API
+      await runConcurrent(tasks, DEFAULT_CONCURRENCY, (task) => task());
     },
     /** restore publish groups from the lock into the plan */
     initPublishPlan({ lock, plan }) {
@@ -785,11 +807,14 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
   }
 
   async status({ context, plan }: PublishTaskContext) {
-    const checks = Array.from(this.releaseGroups(context, plan).keys(), (tag) =>
-      this.provider.releaseExistsByTag.call(context, tag),
+    const tags = Array.from(this.releaseGroups(context, plan).keys());
+    const missing = await findConcurrent(
+      tags,
+      planConcurrency(plan),
+      async (tag) => !(await this.provider.releaseExistsByTag.call(context, tag)),
     );
 
-    if (await somePromise(checks, (exists) => !exists)) return "pending" as const;
+    if (missing !== undefined) return "pending" as const;
   }
 
   async run({ context, plan }: PublishTaskRunContext) {
@@ -808,8 +833,10 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
       }
     }
 
-    await Promise.all(
-      Array.from(this.releaseGroups(context, plan), async ([tag, packages]) => {
+    await runConcurrent(
+      Array.from(this.releaseGroups(context, plan)),
+      planConcurrency(plan),
+      async ([tag, packages]) => {
         const failed = packages.some(
           (pkg) => plan.packages.get(pkg.id)!.publishResult!.type === "failed",
         );
@@ -839,7 +866,7 @@ export class ReleaseTask<V extends BaseRelease> extends PublishTask<void> {
         }
 
         await this.provider.create({ input, tag, packages });
-      }),
+      },
     );
   }
 

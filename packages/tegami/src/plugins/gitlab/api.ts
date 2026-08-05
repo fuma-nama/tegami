@@ -84,13 +84,14 @@ export async function createRelease(
   }
 }
 
+/** the open merge request of a branch, including its current content so no-op updates can be skipped */
 export async function findOpenMergeRequest(
   repo: string,
   options: {
     head: string;
     base?: string;
   } & GitLabRequestOptions,
-): Promise<number | undefined> {
+): Promise<{ number: number; title: string; body: string } | undefined> {
   const { encodedProjectPath } = parseGitLabRepo(repo);
   const params = new URLSearchParams({
     source_branch: options.head,
@@ -107,8 +108,19 @@ export async function findOpenMergeRequest(
     throw await fetchFailure("Failed to check for an existing version merge request", response);
   }
 
-  const mergeRequests = (await response.json()) as Array<{ iid: number }>;
-  return mergeRequests[0]?.iid;
+  const mergeRequests = (await response.json()) as Array<{
+    iid: number;
+    title?: string;
+    description?: string | null;
+  }>;
+  const mergeRequest = mergeRequests[0];
+  if (!mergeRequest) return;
+
+  return {
+    number: mergeRequest.iid,
+    title: mergeRequest.title ?? "",
+    body: mergeRequest.description ?? "",
+  };
 }
 
 export async function updateMergeRequest(

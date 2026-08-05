@@ -578,7 +578,11 @@ describe("gitlab version merge request", () => {
             return commandResult();
         }
       });
-      findOpenMergeRequest.mockResolvedValue(42);
+      findOpenMergeRequest.mockResolvedValue({
+        number: 42,
+        title: "Version Packages",
+        body: "outdated",
+      });
 
       await runVersionMergeRequest(plugins, context, draft);
 
@@ -766,6 +770,47 @@ describe("gitlab version merge request", () => {
           },
         ]
       `);
+    } finally {
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+    }
+  });
+
+  test("skips updating a version merge request that already matches", async () => {
+    const previousCi = process.env.CI;
+    process.env.CI = "true";
+
+    exec.mockImplementation((command, args = []) => {
+      if (command !== "git") throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+      if (args[0] === "status") return commandResult({ stdout: " M package.json\n" });
+      return commandResult();
+    });
+
+    async function runVersion() {
+      const context = publishContext([testPackage("@acme/core", "1.0.0")]);
+      await runVersionMergeRequest(
+        gitlabPlugin(releasePluginOptions),
+        context,
+        versionDraft(context),
+      );
+    }
+
+    try {
+      // render the request once to learn what an up-to-date merge request holds
+      await runVersion();
+      const [, created] = createMergeRequest.mock.calls[0]!;
+      createMergeRequest.mockClear();
+
+      // GitLab stores descriptions with CRLF line endings, the comparison must see through it
+      findOpenMergeRequest.mockResolvedValue({
+        number: 42,
+        title: created.title,
+        body: created.body.replaceAll("\n", "\r\n"),
+      });
+      await runVersion();
+
+      expect(updateMergeRequest).not.toHaveBeenCalled();
+      expect(createMergeRequest).not.toHaveBeenCalled();
     } finally {
       if (previousCi === undefined) delete process.env.CI;
       else process.env.CI = previousCi;
@@ -1055,7 +1100,11 @@ describe("gitlab version merge request", () => {
           return commandResult();
       }
     });
-    findOpenMergeRequest.mockResolvedValue(42);
+    findOpenMergeRequest.mockResolvedValue({
+      number: 42,
+      title: "Version Packages",
+      body: "outdated",
+    });
 
     const plan = releasePlan(context, [{ name: "@acme/ui" }]);
     await runInitPublishPlan(plugins, context, { lock, plan });

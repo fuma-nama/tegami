@@ -9,6 +9,7 @@ import { PublishPlan } from "../plans/publish";
 import { WorkspacePackage } from "../graph";
 import {
   ReleaseTask,
+  isRequestUpToDate,
   versionRequestPlugin,
   resolveFileCommit,
   VersionRequestOptions,
@@ -216,8 +217,8 @@ export function gitlab(options: GitLabPluginOptions = {}): TegamiPlugin[] {
             base: request.base,
             ...api,
           });
-        } else if (update) {
-          await updateMergeRequest(repo, openMr, {
+        } else if (update && !isRequestUpToDate(openMr, request)) {
+          await updateMergeRequest(repo, openMr.number, {
             title: request.title,
             body: request.body,
             base: request.base,

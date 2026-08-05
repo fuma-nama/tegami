@@ -67,11 +67,12 @@ export async function createRelease(options: {
   }
 }
 
+/** the open pull request of a branch, including its current content so no-op updates can be skipped */
 export async function findOpenPullRequest(
   repo: string,
   headBranch: string,
   token?: string,
-): Promise<number | undefined> {
+): Promise<{ number: number; title: string; body: string } | undefined> {
   const { owner, repo: name } = parseGitHubRepo(repo);
   const params = new URLSearchParams({
     head: `${owner}:${headBranch}`,
@@ -83,8 +84,19 @@ export async function findOpenPullRequest(
     throw await fetchFailure("Failed to check for an existing version pull request", response);
   }
 
-  const pullRequests = (await response.json()) as Array<{ number: number }>;
-  return pullRequests[0]?.number;
+  const pullRequests = (await response.json()) as Array<{
+    number: number;
+    title?: string;
+    body?: string | null;
+  }>;
+  const pullRequest = pullRequests[0];
+  if (!pullRequest) return;
+
+  return {
+    number: pullRequest.number,
+    title: pullRequest.title ?? "",
+    body: pullRequest.body ?? "",
+  };
 }
 
 export async function updatePullRequest(

@@ -6,15 +6,25 @@ import { parsePublishLock, PublishLock } from "./lock";
 import type { Awaitable, PublishPreflight, TegamiPlugin } from "../types";
 import { WorkspacePackage } from "../graph";
 import { handlePluginError } from "../utils/error";
-import { somePromise } from "../utils/common";
+import { findConcurrent } from "../utils/common";
 
-/** default max amount of concurrently running publish tasks & status checks */
-const DEFAULT_CONCURRENCY = 5;
+/** default max amount of concurrently running publish tasks & checks */
+export const DEFAULT_CONCURRENCY = 5;
 
 function assertConcurrency(concurrency: number): void {
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     throw new RangeError(`Task concurrency must be a positive integer, received ${concurrency}.`);
   }
+}
+
+/**
+ * The max amount of work a plan may run at once, shared by its tasks and by the checks
+ * tasks make on their own (e.g. one request per git tag).
+ */
+export function planConcurrency(plan: PublishPlan): number {
+  const { unstable_maxChunk = DEFAULT_CONCURRENCY } = plan.options;
+  assertConcurrency(unstable_maxChunk);
+  return unstable_maxChunk;
 }
 
 export interface PublishPlan {
@@ -494,7 +504,9 @@ class PluginPlanStatusTask extends PublishTask<void> {
     );
 
     if (Array.isArray(status)) {
-      if (await somePromise(status, (v) => v === "pending")) return "pending" as const;
+      for await (const v of status) {
+        if (v === "pending") return "pending" as const;
+      }
       return;
     }
 
@@ -604,7 +616,7 @@ export type PackagePublishResult =
     };
 
 export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) {
-  const { unstable_maxChunk = DEFAULT_CONCURRENCY } = plan.options;
+  const concurrency = planConcurrency(plan);
 
   for (const plugin of context.plugins) {
     await handlePluginError(plugin, "beforePublishAll", () =>
@@ -613,7 +625,7 @@ export async function runPublishPlan(context: TegamiContext, plan: PublishPlan) 
   }
 
   const tasks = await collectPublishTasks(context, plan);
-  await runPublishTasks(tasks, { context, plan, concurrency: unstable_maxChunk });
+  await runPublishTasks(tasks, { context, plan, concurrency });
 
   const errors = new Set<Error>();
   for (const task of tasks) {
@@ -689,19 +701,12 @@ export async function publishPlanStatus(
   status: "success" | "pending";
   reason?: string;
 }> {
-  const { unstable_maxChunk = DEFAULT_CONCURRENCY } = plan.options;
-  assertConcurrency(unstable_maxChunk);
   const tasks = await collectPublishTasks(context, plan);
-
-  let next = 0;
-  let pending: PublishTask | undefined;
-  async function check() {
-    while (!pending && next < tasks.length) {
-      const task = tasks[next++]!;
-      if ((await task.status?.({ context, plan })) === "pending") pending = task;
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(unstable_maxChunk, tasks.length) }, check));
+  const pending = await findConcurrent(
+    tasks,
+    planConcurrency(plan),
+    async (task) => (await task.status?.({ context, plan })) === "pending",
+  );
 
   if (pending) {
     return { status: "pending", reason: `Task "${pending.name}" is pending` };
