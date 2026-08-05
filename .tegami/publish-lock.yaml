@@ -1,6 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Fix publish task system regressions\n\nDry runs no longer create GitHub/GitLab releases: release tasks now honor `dryRun`, matching the git tag task and the documented `PublishOptions.dryRun` contract.\n\n`afterPublish` hooks run again for failed publishes, restoring the documented lifecycle contract, and they can observe the outcome through the package's `publishResult` during the hook.\n\nPublish status checks no longer risk crashing on an unhandled rejection when a synchronously pending task (e.g. a waiting publish group) resolves the status before async task checks settle.\n\nThe `tegami publish` CLI reports every failed publish task with its error message and a proper exit code, instead of printing only the aggregate count.\n"
-    filename: 2026-08-02-task-fixes.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Fix git tag task on re-runs\n\nThe git plugin now resolves the local and origin state of the release tags up-front, and only creates & pushes the tags that are actually missing.\n\nRe-running a publish for versions that were already released no longer fails: tags that exist on origin are left untouched instead of being recreated at the current commit and rejected by the push.\n"
+    filename: 2026-08-05-git-tag-state.md
+    v: 0.0.0
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Warn on unknown `packages` entry in changelogs\n"
+    filename: 2026-08-05-msg7f232.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -8,7 +11,8 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-08-02-task-fixes.md
+      - 2026-08-05-git-tag-state.md
+      - 2026-08-05-msg7f232.md
     id: npm:tegami
     updated: true
   - id: npm:@tegami/composer
@@ -23,11 +27,11 @@ core:packages:
     updated: false
   - id: npm:@tegami/nuget
     updated: false
+  - id: npm:@tegami/pip
+    updated: false
   - id: npm:@tegami/swift
     updated: false
   - id: npm:@tegami/xml-util
-    updated: false
-  - id: npm:@tegami/pip
     updated: false
   - id: npm:@tegami/zig
     updated: false
@@ -43,8 +47,8 @@ npm:packages:
   - id: npm:@tegami/hex
   - id: npm:@tegami/maven
   - id: npm:@tegami/nuget
+  - id: npm:@tegami/pip
   - id: npm:@tegami/swift
   - id: npm:@tegami/xml-util
-  - id: npm:@tegami/pip
   - id: npm:@tegami/zig
   - id: npm:@repo/typescript-config
