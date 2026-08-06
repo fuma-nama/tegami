@@ -1,9 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Fix git tag task on re-runs\n\nThe git plugin now resolves the local and origin state of the release tags up-front, and only creates & pushes the tags that are actually missing.\n\nRe-running a publish for versions that were already released no longer fails: tags that exist on origin are left untouched instead of being recreated at the current commit and rejected by the push.\n"
-    filename: 2026-08-05-git-tag-state.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Bound the checks & releases a plan runs at once\n\nRelease creation, the release checks behind a plan's status, and the npm registry lookups of `npm pretrust` now run at most `unstable_maxChunk` (5 by default) at a time, instead of firing one request per package or git tag at once. Release checks also stop as soon as one is missing.\n\n### Skip version request updates that change nothing\n\nThe version pull/merge request is now only updated when its title or body actually changed, removing one write request per run.\n"
+    filename: 2026-08-06-bounded-checks.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n## Warn on unknown `packages` entry in changelogs\n"
-    filename: 2026-08-05-msg7f232.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Limit concurrent status checks\n\nPublish plan status checks now respect `unstable_maxChunk` like publish tasks do, instead of checking every task at once. Remaining checks are skipped as soon as a task reports `pending`.\n"
+    filename: 2026-08-06-status-concurrency.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,13 +11,13 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-08-05-git-tag-state.md
-      - 2026-08-05-msg7f232.md
+      - 2026-08-06-bounded-checks.md
+      - 2026-08-06-status-concurrency.md
     id: npm:tegami
     updated: true
-  - id: npm:@tegami/composer
-    updated: false
   - id: npm:@tegami/dart
+    updated: false
+  - id: npm:@tegami/composer
     updated: false
   - id: npm:@tegami/gem
     updated: false
@@ -41,8 +41,8 @@ npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
-  - id: npm:@tegami/composer
   - id: npm:@tegami/dart
+  - id: npm:@tegami/composer
   - id: npm:@tegami/gem
   - id: npm:@tegami/hex
   - id: npm:@tegami/maven
