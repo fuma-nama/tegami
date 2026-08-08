@@ -1,0 +1,107 @@
+---
+title: Gradle
+description: Gradle project support and Maven Central publishing.
+---
+
+The Gradle plugin discovers projects from `settings.gradle(.kts)`, bumps versions in `gradle.properties` or the build script, and publishes with `./gradlew publish`.
+
+```npm
+npm install @tegami/gradle
+```
+
+```ts
+import { tegami } from "tegami";
+import { gradle } from "@tegami/gradle";
+
+const paper = tegami({
+  plugins: [gradle()],
+});
+```
+
+<Callout type='warn' title="Requirements">
+
+The Gradle wrapper (`gradlew`) and a JDK must be available in CI. Repository and signing config live in your build. Tegami runs the publish task; it does not configure publishing for you.
+
+</Callout>
+
+## Discovery
+
+Starting from the root `settings.gradle(.kts)`, Tegami follows `include` declarations and applies `project(":x").projectDir` and `project(":x").name` overrides. The root project is included like any other project. Use the `packages` option to include builds that are not reachable from the root settings file.
+
+Coordinates are `group:artifactId`. The artifact id is the Gradle project name unless `POM_ARTIFACT_ID` is set.
+
+Build scripts are read as text, never executed. The group and version come from the first location that declares one literally:
+
+1. the project's own build script, `version = "1.2.3"`
+2. the project's own `gradle.properties`, `version` or `VERSION_NAME`
+3. an `allprojects {}` or `subprojects {}` block in the root build script
+4. the root `gradle.properties`
+
+Plain Gradle keys (`version`, `group`) and [gradle-maven-publish-plugin](https://vanniktech.github.io/gradle-maven-publish-plugin) keys (`VERSION_NAME`, `GROUP`, `POM_ARTIFACT_ID`) are both read by default. Override them with `propertyNames`.
+
+When projects share a version, such as a single `version` in the root `gradle.properties`, bumping any of them edits that shared location and they release together.
+
+Projects without a resolvable group and version are skipped.
+
+## Dependency bumping
+
+Inter-project dependencies are read from `project(":core")` calls in a `dependencies` block. The `project(path: ":core")` and `project(path = ":core")` spellings are matched, as are wrappers such as `testFixtures(project(":core"))`.
+
+| Configuration                          | Default dependent bump |
+| -------------------------------------- | ---------------------- |
+| `implementation`, `api`, `runtimeOnly` | patch                  |
+| `testImplementation` and other `test*` | none                   |
+
+Project dependencies carry no version, so nothing is rewritten in the dependent.
+
+## Configuration
+
+```ts
+gradle({
+  publishTask: "publishAndReleaseToMavenCentral",
+  registry: "https://repo1.maven.org/maven2",
+});
+```
+
+<auto-type-table type="import('@tegami/gradle').GradlePluginOptions" />
+
+## Publishing
+
+By default Tegami runs `./gradlew --console=plain <project>:publish` at the workspace root, one project at a time in dependency order. Point `publishTask` at another task, or replace the command with `publishCommand`. `-SNAPSHOT` versions are not publishable by default.
+
+A project is published when it has a non-`SNAPSHOT` version and its build script declares publishing: a plugin id mentioning publishing (`maven-publish`, `com.vanniktech.maven.publish`), or a `publishing {}` block.
+
+<Callout type='warn' title="Convention plugins">
+
+Publishing applied by a convention plugin, such as `id("acme.library-conventions")`, is not detected. Opt those projects in:
+
+```ts
+const paper = tegami({
+  packages: {
+    "com.acme:acme-core": { gradle: { publish: true } },
+  },
+  plugins: [gradle()],
+});
+```
+
+</Callout>
+
+Publish status is checked against Maven Central by default. Override with `registry`, or set `registry: false` for private repositories.
+
+<Callout type='info' title="Maven Central">
+
+Central has a sync delay, so a freshly published version may report as pending for a few minutes.
+
+When the [git](/plugins/git), [GitHub](/plugins/github), or [GitLab](/plugins/gitlab) plugin is configured, releases are tagged as `group/artifactId@version` (colons are not valid in git tags).
+
+</Callout>
+
+## Limitations
+
+Tegami does not evaluate build scripts, so anything resolved during Gradle's configuration phase is not visible:
+
+- Versions that are not string literals, such as `version = libs.versions.core.get()` or an interpolated string, are not read or rewritten. Declare them in `gradle.properties` instead.
+- Type-safe project accessors (`implementation(projects.core)`) are not linked. Use `project(":core")`.
+- Coordinates and publishing applied by convention plugins are not detected. Set them with `propertyNames` or the `publish` option.
+- Included builds (`includeBuild`) are not followed. Add them with the `packages` option.
+- Sibling projects referenced by coordinates, such as `implementation("com.acme:core:1.0.0")`, are not linked and their versions are left untouched.

@@ -27,6 +27,7 @@
     "@tegami/composer": "workspace:*",
     "@tegami/dart": "workspace:*",
     "@tegami/gem": "workspace:*",
+    "@tegami/gradle": "workspace:*",
     "@tegami/hex": "workspace:*",
     "@tegami/maven": "workspace:*",
     "@tegami/nuget": "workspace:*",

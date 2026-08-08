@@ -87,6 +87,9 @@ importers:
       '@tegami/gem':
         specifier: workspace:*
         version: link:../../packages/tegami-gem
+      '@tegami/gradle':
+        specifier: workspace:*
+        version: link:../../packages/tegami-gradle
       '@tegami/hex':
         specifier: workspace:*
         version: link:../../packages/tegami-hex
@@ -280,6 +283,37 @@ importers:
       typia:
         specifier: ^12.1.1
         version: 12.1.1(@types/node@26.1.1)(typescript@6.0.3)
+
+  packages/tegami-gradle:
+    dependencies:
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      tinyexec:
+        specifier: ^1.2.4
+        version: 1.2.4
+      tinyglobby:
+        specifier: ^0.2.17
+        version: 0.2.17
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
+      tegami:
+        specifier: workspace:*
+        version: link:../tegami
+      tsdown:
+        specifier: ^0.22.12
+        version: 0.22.12(typescript@6.0.3)(unrun@0.2.34(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2))
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/tegami-hex:
     dependencies:
