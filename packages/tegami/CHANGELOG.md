@@ -1,3 +1,9 @@
+## tegami@1.3.4
+
+### Fix `deno.jsonc` parsing
+
+Resolving a Deno workspace no longer fails with `failed to parse "…/deno.jsonc"`. The published bundle inlined `jsonc-parser`'s UMD build, whose internal `require("./impl/…")` calls were left as runtime requires that could not be resolved from `dist/`. The bundler now prefers the package's ESM build.
+
 ## tegami@1.3.3
 
 ### Bound the checks & releases a plan runs at once

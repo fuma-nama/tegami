@@ -1,7 +1,4 @@
----
-packages:
-  npm:@tegami/gradle: minor
----
+## @tegami/gradle@0.1.0
 
 ### Add Gradle support
 
