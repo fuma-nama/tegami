@@ -2,6 +2,15 @@ import type { Awaitable } from "../types";
 
 export const isCI = () => Boolean(process.env.CI);
 
+export function normalizePath(p: string): string {
+  return p.replaceAll("\\", "/");
+}
+
+export function normalizeDirPath(p: string): string {
+  const normalized = p.replaceAll("\\", "/");
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+}
+
 export function joinPath(...paths: string[]): string {
   let out = "";
   for (const path of paths) {
