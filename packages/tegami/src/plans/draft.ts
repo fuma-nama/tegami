@@ -374,7 +374,9 @@ export class Draft {
 
   /** {@link apply} but for `await using` syntax */
   async [Symbol.asyncDispose]() {
-    return this.apply();
+    if (this.canApply()) {
+      await this.apply();
+    }
   }
 }
 
