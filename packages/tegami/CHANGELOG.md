@@ -1,3 +1,17 @@
+## tegami@1.3.5
+
+### Encode scoped npm package names in registry lookups
+
+Publish status checks no longer request `https://registry.npmjs.org/@scope/name/…` with a raw `@`. Scoped package names are percent-encoded in the registry URL, so lookups succeed against registries that reject unescaped path segments.
+
+### Guard `await using` on drafts that were already applied
+
+`Draft`'s `Symbol.asyncDispose` now calls `apply()` only when the draft can still be applied, so disposing an already-applied draft no longer throws.
+
+### Match exit-prerelease for major and minor bumps
+
+The `exit-prerelease` draft condition now treats any move from a prerelease version to a non-prerelease version as a match. Major and minor bumps that leave a prerelease (for example `1.0.0-beta.1` → `2.0.0`) are recognized, not only patch-level `semver.inc(..., "release")` results.
+
 ## tegami@1.3.4
 
 ### Fix `deno.jsonc` parsing
