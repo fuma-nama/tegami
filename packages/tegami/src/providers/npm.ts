@@ -473,7 +473,7 @@ async function isPackagePublished(
   version: string,
   registry: string,
 ): Promise<boolean> {
-  const response = await fetch(joinPath(registry, name, version), {
+  const response = await fetch(joinPath(registry, encodeURIComponent(name), version), {
     headers: { Accept: "application/json" },
   });
 

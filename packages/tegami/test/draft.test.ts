@@ -158,6 +158,17 @@ describe("draft publish plans", () => {
     );
   });
 
+  test("asyncDispose does not throw if apply() has already been called", async () => {
+    const cwd = await createWorkspace();
+    tempDirs.push(cwd);
+
+    const paper = tegami({ cwd });
+    const draft = await paper.draft();
+    await draft.apply();
+
+    await expect(draft[Symbol.asyncDispose]()).resolves.toBeUndefined();
+  });
+
   test("omits packages without pending version changes from the draft", async () => {
     const cwd = await createWorkspace({
       changelog: false,

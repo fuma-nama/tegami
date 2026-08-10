@@ -8,7 +8,7 @@ export function npmPackageVersionUrl(
   version: string,
 ): string {
   const base = (registry ?? "https://registry.npmjs.org").replace(/\/$/, "");
-  return `${base}/${name}/${version}`;
+  return `${base}/${encodeURIComponent(name)}/${version}`;
 }
 
 export function installRegistryFetchMock(defaultStatus = 404) {
