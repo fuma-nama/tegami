@@ -586,6 +586,52 @@ Fixed something during beta.
     );
   });
 
+  test("clears exit-prerelease replay condition when package exits prerelease via major bump", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-exit-replay-"));
+    tempDirs.push(cwd);
+
+    await mkdir(join(cwd, "packages/tegami"), { recursive: true });
+    await mkdir(join(cwd, ".tegami"), { recursive: true });
+    await writeFile(
+      join(cwd, "pnpm-workspace.yaml"),
+      `packages:
+  - "packages/*"
+`,
+    );
+    await writeJson(join(cwd, "packages/tegami/package.json"), {
+      name: "tegami",
+      version: "1.0.0-beta.0",
+    });
+    await writeFile(
+      join(cwd, ".tegami/change.md"),
+      `---
+packages:
+  npm:tegami:
+    replay:
+      - exit-prerelease(npm:tegami)
+---
+
+## Release note
+
+Replayed release note.
+`,
+    );
+
+    const paper = tegami({ cwd });
+    const draft = await paper.draft();
+    draft.bumpPackage((await paper._internal.context()).graph.get("npm:tegami")!, { type: "major" });
+
+    await draft.apply();
+
+    expect(JSON.parse(await readFile(join(cwd, "packages/tegami/package.json"), "utf8"))).toEqual({
+      name: "tegami",
+      version: "1.0.0",
+    });
+    await expect(readFile(join(cwd, ".tegami/change.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   test("discovers packages with nested workspace globs", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "tegami-draft-"));
     tempDirs.push(cwd);
