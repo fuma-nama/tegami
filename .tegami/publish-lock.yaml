@@ -1,9 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Fix `deno.jsonc` parsing\n\nResolving a Deno workspace no longer fails with `failed to parse \"…/deno.jsonc\"`. The published bundle inlined `jsonc-parser`'s UMD build, whose internal `require(\"./impl/…\")` calls were left as runtime requires that could not be resolved from `dist/`. The bundler now prefers the package's ESM build.\n"
-    filename: 2026-08-08-deno-jsonc-parse.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Encode scoped npm package names in registry lookups\n\nPublish status checks no longer request `https://registry.npmjs.org/@scope/name/…` with a raw `@`. Scoped package names are percent-encoded in the registry URL, so lookups succeed against registries that reject unescaped path segments.\n\n### Guard `await using` on drafts that were already applied\n\n`Draft`'s `Symbol.asyncDispose` now calls `apply()` only when the draft can still be applied, so disposing an already-applied draft no longer throws.\n"
+    filename: 2026-08-10-3fec6b.md
     v: 0.0.0
-  - content: "---\npackages:\n  npm:@tegami/gradle:\n    type: minor\n---\n\n### Add Gradle support\n\nTegami now includes an opt-in `@tegami/gradle` plugin that discovers Gradle projects from `settings.gradle(.kts)`, resolves coordinates from build scripts and `gradle.properties`, bumps dependents through `project(\":core\")` dependencies, and publishes with `./gradlew publish`.\n\nBoth plain Gradle keys (`version`, `group`) and the `gradle-maven-publish-plugin` conventions (`VERSION_NAME`, `GROUP`, `POM_ARTIFACT_ID`) are read by default, and a version shared through the root `gradle.properties` or an `allprojects {}` block is bumped in one place so those projects release together.\n"
-    filename: 2026-08-08-gradle-plugin.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Match exit-prerelease for major and minor bumps\n\nThe `exit-prerelease` draft condition now treats any move from a prerelease version to a non-prerelease version as a match. Major and minor bumps that leave a prerelease (for example `1.0.0-beta.1` → `2.0.0`) are recognized, not only patch-level `semver.inc(..., \"release\")` results.\n"
+    filename: 2026-08-10-ef17e1.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,48 +11,47 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-08-08-deno-jsonc-parse.md
+      - 2026-08-10-3fec6b.md
+      - 2026-08-10-ef17e1.md
     id: npm:tegami
     updated: true
-  - id: npm:@tegami/composer
-    updated: false
   - id: npm:@tegami/dart
+    updated: false
+  - id: npm:@tegami/composer
     updated: false
   - id: npm:@tegami/gem
     updated: false
-  - changelogIds:
-      - 2026-08-08-gradle-plugin.md
-    id: npm:@tegami/gradle
-    updated: true
+  - id: npm:@tegami/gradle
+    updated: false
   - id: npm:@tegami/hex
     updated: false
-  - id: npm:@tegami/maven
-    updated: false
   - id: npm:@tegami/nuget
+    updated: false
+  - id: npm:@tegami/maven
     updated: false
   - id: npm:@tegami/pip
     updated: false
   - id: npm:@tegami/swift
     updated: false
+  - id: npm:@tegami/zig
+    updated: false
   - id: npm:@tegami/xml-util
     updated: false
   - id: npm:@repo/typescript-config
-    updated: false
-  - id: npm:@tegami/zig
     updated: false
 npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
-  - id: npm:@tegami/composer
   - id: npm:@tegami/dart
+  - id: npm:@tegami/composer
   - id: npm:@tegami/gem
   - id: npm:@tegami/gradle
   - id: npm:@tegami/hex
-  - id: npm:@tegami/maven
   - id: npm:@tegami/nuget
+  - id: npm:@tegami/maven
   - id: npm:@tegami/pip
   - id: npm:@tegami/swift
+  - id: npm:@tegami/zig
   - id: npm:@tegami/xml-util
   - id: npm:@repo/typescript-config
-  - id: npm:@tegami/zig
