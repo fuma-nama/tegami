@@ -307,7 +307,10 @@ export class Draft {
             const previous = snapshots.get(pkg.id);
             if (!pkg.version || !previous?.version) return false;
 
-            return semver.prerelease(previous.version) !== null && semver.prerelease(pkg.version) === null;
+            return (
+              semver.prerelease(previous.version) !== null &&
+              semver.prerelease(pkg.version) === null
+            );
           });
         case "version":
           return graph.getByName(condition.name).some((pkg) => pkg.version === condition.version);

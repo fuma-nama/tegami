@@ -9,7 +9,11 @@ import { cargo, CargoPackage } from "../src/plugins/cargo";
 import { assertCargoManifest } from "../src/plugins/cargo/schema";
 import { parsePublishLock } from "../src/plans/lock";
 import { getPendingPackageIds } from "./helpers/draft";
-import { installRegistryFetchMock, mockRegistryMissing } from "./helpers/registry-fetch";
+import {
+  installRegistryFetchMock,
+  mockRegistryMissing,
+  npmPackageVersionUrl,
+} from "./helpers/registry-fetch";
 
 initSync();
 
@@ -242,7 +246,7 @@ acme_core = { path = "../core", version = "1.1.0" } # linked crate
       },
     ]);
     expect(fetch).toHaveBeenCalledWith(
-      "https://registry.npmjs.org/@acme/js/1.1.0",
+      npmPackageVersionUrl(undefined, "@acme/js", "1.1.0"),
       expect.objectContaining({ headers: { Accept: "application/json" } }),
     );
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_core/1.1.0");

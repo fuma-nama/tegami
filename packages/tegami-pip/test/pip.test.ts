@@ -12,6 +12,7 @@ import { parsePublishLock } from "../../tegami/src/plans/lock";
 import {
   installRegistryFetchMock,
   mockRegistryMissing,
+  npmPackageVersionUrl,
 } from "../../tegami/test/helpers/registry-fetch";
 
 initSync();
@@ -466,7 +467,7 @@ acme-core = { workspace = true }
       ]),
     );
     expect(fetch).toHaveBeenCalledWith(
-      "https://registry.npmjs.org/@acme/js/1.1.0",
+      npmPackageVersionUrl(undefined, "@acme/js", "1.1.0"),
       expect.objectContaining({ headers: { Accept: "application/json" } }),
     );
     expect(fetch).toHaveBeenCalledWith(

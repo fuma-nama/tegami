@@ -619,7 +619,9 @@ Replayed release note.
 
     const paper = tegami({ cwd });
     const draft = await paper.draft();
-    draft.bumpPackage((await paper._internal.context()).graph.get("npm:tegami")!, { type: "major" });
+    draft.bumpPackage((await paper._internal.context()).graph.get("npm:tegami")!, {
+      type: "major",
+    });
 
     await draft.apply();
 
