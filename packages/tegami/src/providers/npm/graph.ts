@@ -10,7 +10,6 @@ import type { AgentName } from "package-manager-detector";
 import { WorkspacePackage } from "../../graph";
 import type { PackageDraft } from "../../plans/draft";
 import type { ParseError } from "jsonc-parser";
-import { normalizeDirPath } from "../../utils/common";
 
 export class NpmPackage extends WorkspacePackage {
   readonly manager = "npm";
@@ -261,10 +260,10 @@ export async function resolveNpmGraph(cwd: string, client: AgentName): Promise<N
   const catalogSources: CatalogSource[] = [];
 
   function addPackage(packagePath: string, manifest: PackageManifest) {
-    const normalized = normalizeDirPath(packagePath);
-    const pkg = new NpmPackage(normalized, manifest);
+    const resolvedPath = path.resolve(packagePath);
+    const pkg = new NpmPackage(resolvedPath, manifest);
     packages.set(pkg.name, pkg);
-    packagesByPath.set(normalized, pkg);
+    packagesByPath.set(resolvedPath, pkg);
   }
 
   const patterns: string[] = [];
@@ -419,7 +418,7 @@ function findPackageByPath(graph: NpmGraph, from: string, target: string): NpmPa
   if (path.basename(absolute) === "package.json") {
     absolute = path.dirname(absolute);
   }
-  return graph.packagesByPath.get(normalizeDirPath(absolute));
+  return graph.packagesByPath.get(absolute);
 }
 
 async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise<string[]> {
@@ -433,7 +432,7 @@ async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise
     onlyFiles: false,
   });
 
-  return results.map(normalizeDirPath);
+  return results.map((item) => path.resolve(item));
 }
 
 interface DenoConfig {

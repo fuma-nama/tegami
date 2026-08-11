@@ -43,19 +43,15 @@ export interface TegamiContext {
   };
 }
 
-import { normalizePath } from "./utils/common";
-
 export async function createTegamiContext(options: TegamiOptions = {}): Promise<TegamiContext> {
-  const cwd = normalizePath(options.cwd ? path.resolve(options.cwd) : process.cwd());
-  const changelogDir = normalizePath(path.resolve(cwd, options.changelogDir ?? ".tegami"));
+  const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
+  const changelogDir = path.resolve(cwd, options.changelogDir ?? ".tegami");
   const ctx: TegamiContext = {
     cwd,
     changelogDir,
-    lockPath: normalizePath(
-      options.lockPath
-        ? path.resolve(cwd, options.lockPath)
-        : path.join(changelogDir, "publish-lock.yaml"),
-    ),
+    lockPath: options.lockPath
+      ? path.resolve(cwd, options.lockPath)
+      : path.join(changelogDir, "publish-lock.yaml"),
     options,
     plugins: resolvePlugins([npm(options.npm), ...(options.plugins ?? [])]),
     graph: new PackageGraph(),
