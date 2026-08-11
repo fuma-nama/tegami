@@ -260,9 +260,10 @@ export async function resolveNpmGraph(cwd: string, client: AgentName): Promise<N
   const catalogSources: CatalogSource[] = [];
 
   function addPackage(packagePath: string, manifest: PackageManifest) {
-    const pkg = new NpmPackage(packagePath, manifest);
+    const resolvedPath = path.resolve(packagePath);
+    const pkg = new NpmPackage(resolvedPath, manifest);
     packages.set(pkg.name, pkg);
-    packagesByPath.set(packagePath, pkg);
+    packagesByPath.set(resolvedPath, pkg);
   }
 
   const patterns: string[] = [];
@@ -431,7 +432,7 @@ async function expandWorkspacePatterns(cwd: string, patterns: string[]): Promise
     onlyFiles: false,
   });
 
-  return results.map((item) => (item.endsWith(path.sep) ? item.slice(0, -1) : item));
+  return results.map((item) => path.resolve(item));
 }
 
 interface DenoConfig {

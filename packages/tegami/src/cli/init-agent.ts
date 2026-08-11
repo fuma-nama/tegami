@@ -29,8 +29,10 @@ export async function initAgent(
 }
 
 export function renderAgentsMd(context: TegamiContext): string {
-  const changelogDir = path.relative(context.cwd, context.changelogDir) || "project root";
-  const lockPath = path.relative(context.cwd, context.lockPath) || "project root";
+  const changelogDir =
+    path.relative(context.cwd, context.changelogDir).replaceAll("\\", "/") || "project root";
+  const lockPath =
+    path.relative(context.cwd, context.lockPath).replaceAll("\\", "/") || "project root";
 
   return [
     "# Release workflow",
