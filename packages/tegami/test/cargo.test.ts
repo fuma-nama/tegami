@@ -12,7 +12,9 @@ import { getPendingPackageIds } from "./helpers/draft";
 import {
   installRegistryFetchMock,
   mockRegistryMissing,
-  npmPackageVersionUrl,
+  npmPackumentUrl,
+  fetchedRequests,
+  PACKUMENT_ACCEPT,
 } from "./helpers/registry-fetch";
 
 initSync();
@@ -207,7 +209,7 @@ acme_core = { path = "../core", version = "1.1.0" } # linked crate
       "fetch",
       vi.fn(async (url: string) => {
         if (url.includes("registry.npmjs.org")) {
-          return new Response(JSON.stringify({ version: "1.1.0" }), { status: 200 });
+          return new Response(JSON.stringify({ versions: { "1.1.0": {} } }), { status: 200 });
         }
 
         return new Response("not found", { status: 404 });
@@ -245,10 +247,10 @@ acme_core = { path = "../core", version = "1.1.0" } # linked crate
         cwd: normalizeDirPath(join(cwd, "crates/binding")),
       },
     ]);
-    expect(fetch).toHaveBeenCalledWith(
-      npmPackageVersionUrl(undefined, "@acme/js", "1.1.0"),
-      expect.objectContaining({ headers: { Accept: "application/json" } }),
-    );
+    expect(fetchedRequests(vi.mocked(fetch))).toContainEqual({
+      url: npmPackumentUrl(undefined, "@acme/js"),
+      headers: { accept: PACKUMENT_ACCEPT },
+    });
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_core/1.1.0");
     expect(fetch).toHaveBeenCalledWith("https://crates.io/api/v1/crates/acme_binding/1.0.1");
   });

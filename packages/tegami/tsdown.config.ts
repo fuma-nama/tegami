@@ -17,7 +17,7 @@ export default defineConfig({
   },
   exports: true,
   deps: {
-    onlyBundle: ["typia", "@typia/interface", "package-manager-detector", "jsonc-parser"],
+    onlyBundle: ["typia", "@typia/interface", "package-manager-detector", "jsonc-parser", "ini"],
   },
   inputOptions: {
     resolve: {

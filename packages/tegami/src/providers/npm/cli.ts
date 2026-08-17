@@ -6,9 +6,10 @@ import { x } from "tinyexec";
 import type { TegamiCliRegistry } from "../../cli/core";
 import type { TegamiContext } from "../../context";
 import { initPublishPlan, planConcurrency, runPreflights } from "../../plans/publish";
-import { execFailure, fetchFailure } from "../../utils/error";
+import { execFailure } from "../../utils/error";
 import { NpmPackage } from "../npm";
-import { joinPath, runConcurrent } from "../../utils/common";
+import { fetchPackument } from "./registry";
+import { runConcurrent } from "../../utils/common";
 import { parsePublishLock, type PublishLock } from "../../plans/lock";
 
 const PLACEHOLDER_VERSION = "0.0.0-tegami-trusted-publish-setup";
@@ -65,9 +66,16 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
         throw new Error(`Invalid npm trusted publishing provider: ${options.provider}`);
       }
 
-      const targets = await resolvePretrustTargets(context);
+      const { targets, unsupported } = await resolvePretrustTargets(context);
+      if (unsupported.length > 0) {
+        note(
+          `${unsupported.join("\n")}\n\nnpm trusted publishing only exists on registry.npmjs.org.`,
+          "Skipped",
+        );
+      }
+
       if (targets.length === 0) {
-        outro("All publishable packages in the publish lock already exist on npm.");
+        outro("Every remaining package already exists on npm.");
         return;
       }
 
@@ -116,7 +124,14 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
     });
 }
 
-async function resolvePretrustTargets(context: TegamiContext): Promise<NpmPackage[]> {
+interface PretrustTargets {
+  /** publishable packages npm does not know yet */
+  targets: NpmPackage[];
+  /** packages left out because their registry has no trusted publishing */
+  unsupported: string[];
+}
+
+async function resolvePretrustTargets(context: TegamiContext): Promise<PretrustTargets> {
   const plan = await initPublishPlan(context, {});
   if (!plan) {
     throw new Error(
@@ -126,38 +141,30 @@ async function resolvePretrustTargets(context: TegamiContext): Promise<NpmPackag
 
   await runPreflights(context, plan);
 
-  return (
-    await runConcurrent(
-      Array.from(plan.packages),
-      planConcurrency(plan),
-      async ([id, { preflight }]) => {
-        if (!preflight?.shouldPublish) return;
-        const pkg = context.graph.get(id);
-        if (!pkg || !(pkg instanceof NpmPackage)) return;
-        if (await isPackageOnRegistry(pkg.name, pkg.getRegistry())) return;
-        return pkg;
-      },
-    )
-  ).filter((pkg): pkg is NpmPackage => pkg !== undefined);
-}
+  const candidates: NpmPackage[] = [];
+  const unsupported: string[] = [];
+  for (const [id, { preflight }] of plan.packages) {
+    if (!preflight?.shouldPublish) continue;
+    const pkg = context.graph.get(id);
+    if (!(pkg instanceof NpmPackage)) continue;
 
-async function isPackageOnRegistry(
-  name: string,
-  registry = "https://registry.npmjs.org",
-): Promise<boolean> {
-  const response = await fetch(joinPath(registry, name), {
-    headers: { Accept: "application/json" },
-  });
-
-  if (response.status === 404) return false;
-  if (!response.ok) {
-    throw await fetchFailure(
-      `Unable to check whether ${name} exists on the npm registry${registry ? ` "${registry}"` : ""}`,
-      response,
-    );
+    switch (pkg.getRegistry()) {
+      case "https://registry.npmjs.org":
+      case "http://registry.npmjs.org":
+        candidates.push(pkg);
+        break;
+      default:
+        unsupported.push(pkg.name);
+    }
   }
 
-  return true;
+  const targets = (
+    await runConcurrent(candidates, planConcurrency(plan), async (pkg) =>
+      (await fetchPackument(pkg)) ? undefined : pkg,
+    )
+  ).filter((pkg) => pkg !== undefined);
+
+  return { targets, unsupported };
 }
 
 async function publishPlaceholder(pkg: NpmPackage): Promise<void> {

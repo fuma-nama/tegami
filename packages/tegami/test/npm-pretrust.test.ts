@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { x } from "tinyexec";
+import { note } from "@clack/prompts";
 import { tegami } from "../src";
 import { createCli } from "../src/cli";
 import { github } from "../src/plugins/github";
@@ -101,7 +102,7 @@ describe("npm pretrust", () => {
   test("skips packages already on the registry", async () => {
     const cwd = await createFixture();
     fetchMock.mockImplementation(async (url) => {
-      if (String(url).includes("@acme/core")) {
+      if (String(url).includes(encodeURIComponent("@acme/core"))) {
         return new Response(JSON.stringify({ name: "@acme/core" }), { status: 200 });
       }
       return new Response("Not found", { status: 404 });
@@ -137,6 +138,26 @@ describe("npm pretrust", () => {
     ).parseAsync(["npm", "pretrust", "--dry-run"]);
 
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  test("skips packages published outside registry.npmjs.org", async () => {
+    const cwd = await createFixture({ registry: "https://npm.pkg.github.com" });
+    exec.mockResolvedValue(execResult());
+
+    await createCli(
+      tegami({
+        cwd,
+        npm: { trustedPublish: { provider: "github", workflow: "publish.yml" } },
+        plugins: [github({ repo: "acme/widgets" })],
+      }),
+    ).parseAsync(["npm", "pretrust"]);
+
+    expect(exec).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(note)).toHaveBeenCalledWith(
+      expect.stringContaining("@acme/core\n@acme/ui"),
+      "Skipped",
+    );
   });
 
   test("requires a publish lock", async () => {
@@ -177,7 +198,7 @@ describe("npm pretrust", () => {
   });
 });
 
-async function createFixture(options: { lock?: boolean } = {}) {
+async function createFixture(options: { lock?: boolean; registry?: string } = {}) {
   const cwd = await mkdtemp(join(tmpdir(), "tegami-npm-pretrust-"));
   tempDirs.push(cwd);
 
@@ -185,30 +206,13 @@ async function createFixture(options: { lock?: boolean } = {}) {
   await mkdir(join(cwd, "packages/ui"), { recursive: true });
   await mkdir(join(cwd, ".tegami"), { recursive: true });
   await writeFile(join(cwd, "pnpm-workspace.yaml"), `packages:\n  - "packages/*"\n`);
-  await writeFile(
-    join(cwd, "packages/core/package.json"),
-    `${JSON.stringify(
-      {
-        name: "@acme/core",
-        version: "1.0.0",
-        publishConfig: { access: "public" },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  await writeFile(
-    join(cwd, "packages/ui/package.json"),
-    `${JSON.stringify(
-      {
-        name: "@acme/ui",
-        version: "1.0.0",
-        publishConfig: { access: "public" },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  const publishConfig = { access: "public", registry: options.registry };
+  for (const name of ["core", "ui"]) {
+    await writeFile(
+      join(cwd, `packages/${name}/package.json`),
+      `${JSON.stringify({ name: `@acme/${name}`, version: "1.0.0", publishConfig }, null, 2)}\n`,
+    );
+  }
 
   if (options.lock !== false) {
     await writePublishLock(cwd, {

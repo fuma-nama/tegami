@@ -12,7 +12,9 @@ import { parsePublishLock } from "../../tegami/src/plans/lock";
 import {
   installRegistryFetchMock,
   mockRegistryMissing,
-  npmPackageVersionUrl,
+  npmPackumentUrl,
+  fetchedRequests,
+  PACKUMENT_ACCEPT,
 } from "../../tegami/test/helpers/registry-fetch";
 
 initSync();
@@ -424,7 +426,7 @@ acme-core = { workspace = true }
       "fetch",
       vi.fn(async (url: string) => {
         if (url.includes("registry.npmjs.org")) {
-          return new Response(JSON.stringify({ version: "1.1.0" }), { status: 200 });
+          return new Response(JSON.stringify({ versions: { "1.1.0": {} } }), { status: 200 });
         }
 
         return new Response("not found", { status: 404 });
@@ -466,10 +468,10 @@ acme-core = { workspace = true }
         },
       ]),
     );
-    expect(fetch).toHaveBeenCalledWith(
-      npmPackageVersionUrl(undefined, "@acme/js", "1.1.0"),
-      expect.objectContaining({ headers: { Accept: "application/json" } }),
-    );
+    expect(fetchedRequests(vi.mocked(fetch))).toContainEqual({
+      url: npmPackumentUrl(undefined, "@acme/js"),
+      headers: { accept: PACKUMENT_ACCEPT },
+    });
     expect(fetch).toHaveBeenCalledWith(
       "https://pypi.org/simple/acme-core/",
       expect.objectContaining({ headers: { Accept: "application/vnd.pypi.simple.v1+json" } }),

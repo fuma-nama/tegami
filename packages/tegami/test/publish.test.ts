@@ -20,7 +20,9 @@ import {
   installRegistryFetchMock,
   mockRegistryMissing,
   mockRegistryPublished,
-  npmPackageVersionUrl,
+  npmPackumentUrl,
+  fetchedRequests,
+  PACKUMENT_ACCEPT,
   uninstallRegistryFetchMock,
 } from "./helpers/registry-fetch";
 
@@ -73,10 +75,10 @@ describe("publish plans", () => {
       }).publish({ dryRun: false }),
     ).resolves.toBe("skipped");
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
-      { headers: { Accept: "application/json" } },
-    );
+    expect(fetchedRequests()).toContainEqual({
+      url: npmPackumentUrl("https://registry.example.test", "@acme/core"),
+      headers: { accept: PACKUMENT_ACCEPT },
+    });
     expect(exec).not.toHaveBeenCalled();
   });
 
@@ -278,8 +280,9 @@ Some description.
     const result = plan.packages.get("npm:@acme/core");
 
     expect(result?.publishResult).toEqual({ type: "published" });
-    expect(fetchMock).toHaveBeenCalledWith(npmPackageVersionUrl(undefined, "@acme/core", "1.0.1"), {
-      headers: { Accept: "application/json" },
+    expect(fetchedRequests()).toContainEqual({
+      url: npmPackumentUrl(undefined, "@acme/core"),
+      headers: { accept: PACKUMENT_ACCEPT },
     });
     expect(exec.mock.calls[0]?.[0]).toBe("pnpm");
     expect(exec.mock.calls[0]?.[1]).toEqual(["publish", "--tag", "latest", "--no-git-checks"]);

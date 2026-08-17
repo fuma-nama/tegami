@@ -10,11 +10,12 @@ import {
   type PublishTaskRunContext,
 } from "../plans/publish";
 import type { Awaitable, TegamiPlugin } from "../types";
-import { execFailure, fetchFailure } from "../utils/error";
+import { execFailure } from "../utils/error";
 import type { BumpType } from "../utils/semver";
 import type { DraftPolicy } from "../plans/draft";
 import { registerNpmCli, type TrustedPublishOptions } from "./npm/cli";
-import { isCI, joinPath } from "../utils/common";
+import { isVersionPublished } from "./npm/registry";
+import { isCI } from "../utils/common";
 import {
   type DependencySpec,
   type DepField,
@@ -114,8 +115,7 @@ export class NpmPublishTask extends PackagePublishTask<NpmPackage> {
   async status() {
     const { pkg } = this;
     if (!pkg.version) return;
-    if (!(await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry())))
-      return "pending" as const;
+    if (!(await isVersionPublished(pkg, pkg.version))) return "pending" as const;
   }
 }
 
@@ -389,7 +389,7 @@ async function publish(
   pkg: NpmPackage,
   distTag?: string,
 ): Promise<PackagePublishTaskResult> {
-  if (!pkg.version || (await isPackagePublished(pkg.name, pkg.version, pkg.getRegistry()))) {
+  if (!pkg.version || (await isVersionPublished(pkg, pkg.version))) {
     return { type: "skipped" };
   }
 
@@ -466,24 +466,4 @@ async function publish(
   }
 
   return { type: "published" };
-}
-
-async function isPackagePublished(
-  name: string,
-  version: string,
-  registry: string,
-): Promise<boolean> {
-  const response = await fetch(joinPath(registry, encodeURIComponent(name), version), {
-    headers: { Accept: "application/json" },
-  });
-
-  if (response.status === 404) return false;
-  if (!response.ok) {
-    throw await fetchFailure(
-      `Unable to validate ${name}@${version} against the npm registry${registry ? ` "${registry}"` : ""}`,
-      response,
-    );
-  }
-
-  return true;
 }

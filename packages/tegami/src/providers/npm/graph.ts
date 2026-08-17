@@ -10,6 +10,7 @@ import type { AgentName } from "package-manager-detector";
 import { WorkspacePackage } from "../../graph";
 import type { PackageDraft } from "../../plans/draft";
 import type { ParseError } from "jsonc-parser";
+import { loadNpmrc, type Npmrc, resolveRegistry } from "./registry";
 
 export class NpmPackage extends WorkspacePackage {
   readonly manager = "npm";
@@ -18,6 +19,7 @@ export class NpmPackage extends WorkspacePackage {
   constructor(
     readonly path: string,
     readonly manifest: PackageManifest,
+    readonly npmrc: Npmrc,
   ) {
     super();
   }
@@ -47,7 +49,7 @@ export class NpmPackage extends WorkspacePackage {
   }
 
   getRegistry(): string {
-    return this.manifest.publishConfig?.registry ?? "https://registry.npmjs.org";
+    return this.manifest.publishConfig?.registry ?? resolveRegistry(this.npmrc, this.name);
   }
 
   configureDraft({ draft }: { draft: PackageDraft }): void {
@@ -259,15 +261,18 @@ export async function resolveNpmGraph(cwd: string, client: AgentName): Promise<N
   const packagesByPath = new Map<string, NpmPackage>();
   const catalogSources: CatalogSource[] = [];
 
+  const [npmrc, rootManifest] = await Promise.all([
+    loadNpmrc(cwd),
+    readManifest(cwd).catch(() => undefined),
+  ]);
+
   function addPackage(packagePath: string, manifest: PackageManifest) {
-    const resolvedPath = path.resolve(packagePath);
-    const pkg = new NpmPackage(resolvedPath, manifest);
+    const pkg = new NpmPackage(packagePath, manifest, npmrc);
     packages.set(pkg.name, pkg);
-    packagesByPath.set(resolvedPath, pkg);
+    packagesByPath.set(packagePath, pkg);
   }
 
   const patterns: string[] = [];
-  const rootManifest = await readManifest(cwd).catch(() => undefined);
   if (rootManifest) {
     catalogSources.push(createRootCatalogSource(rootManifest));
     if (rootManifest.name) {

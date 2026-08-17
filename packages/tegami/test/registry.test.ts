@@ -6,13 +6,17 @@ import { x } from "tinyexec";
 import { createTegamiContext, resolveGraph } from "../src/context";
 import { initPublishPlan, runPreflights, publishPlanStatus } from "../src/plans/publish";
 import { NpmPackage } from "../src/providers/npm";
+import { loadNpmrc, registryAuth, resolveRegistry } from "../src/providers/npm/registry";
 import { writePublishLock } from "./helpers/lock";
 import { runPluginTasks } from "./helpers/tasks";
 import {
+  fetchedRequests,
   fetchMock,
   installRegistryFetchMock,
   mockRegistryMissing,
-  npmPackageVersionUrl,
+  mockRegistryPublished,
+  npmPackumentUrl,
+  PACKUMENT_ACCEPT,
   uninstallRegistryFetchMock,
 } from "./helpers/registry-fetch";
 
@@ -31,24 +35,134 @@ beforeEach(() => {
 
 afterEach(async () => {
   uninstallRegistryFetchMock();
+  vi.unstubAllEnvs();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
+});
+
+describe("npmrc", () => {
+  test("resolves scoped registries, falling back to the default one", async () => {
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir(`registry=https://internal.example.test
+@acme:registry=https://npm.pkg.github.com`),
+    );
+
+    expect(resolveRegistry(npmrc, "@acme/core")).toBe("https://npm.pkg.github.com");
+    expect(resolveRegistry(npmrc, "@other/core")).toBe("https://internal.example.test");
+    expect(resolveRegistry(npmrc, "core")).toBe("https://internal.example.test");
+  });
+
+  test("defaults to the public registry", async () => {
+    const npmrc = await loadNpmrc(await createNpmrcDir(""));
+
+    expect(resolveRegistry(npmrc, "@acme/core")).toBe("https://registry.npmjs.org");
+  });
+
+  test("expands environment variables in tokens", async () => {
+    vi.stubEnv("GH_TOKEN", "secret-token");
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir("//npm.pkg.github.com/:_authToken=${GH_TOKEN}"),
+    );
+
+    expect(registryAuth(npmrc, "https://npm.pkg.github.com")).toBe("Bearer secret-token");
+  });
+
+  test("drops entries whose environment variable is unset", async () => {
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir("//npm.pkg.github.com/:_authToken=${MISSING_TOKEN}"),
+    );
+
+    expect(registryAuth(npmrc, "https://npm.pkg.github.com")).toBeUndefined();
+  });
+
+  test("reads basic credentials and ignores comments", async () => {
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir(`# a comment=with an equals sign
+; another one
+registry=https://internal.example.test # trailing comment
+//internal.example.test/:_auth="ZW5jb2RlZA=="`),
+    );
+
+    expect(resolveRegistry(npmrc, "core")).toBe("https://internal.example.test");
+    expect(registryAuth(npmrc, "https://internal.example.test")).toBe("Basic ZW5jb2RlZA==");
+  });
+
+  test("reads files written with CRLF line endings", async () => {
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir(
+        "registry=https://internal.example.test\r\n//internal.example.test/:_authToken=abc\r\n",
+      ),
+    );
+
+    expect(resolveRegistry(npmrc, "core")).toBe("https://internal.example.test");
+    expect(registryAuth(npmrc, "https://internal.example.test")).toBe("Bearer abc");
+  });
+
+  test("ignores config values that are not strings", async () => {
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir(`strict-ssl=false
+//internal.example.test/:_authToken=abc`),
+    );
+
+    expect(registryAuth(npmrc, "https://internal.example.test")).toBe("Bearer abc");
+  });
+
+  test("falls back to a shorter path prefix", async () => {
+    const npmrc = await loadNpmrc(await createNpmrcDir("//gitlab.example.test/:_authToken=glpat"));
+
+    expect(registryAuth(npmrc, "https://gitlab.example.test/api/v4/projects/7/packages/npm/")).toBe(
+      "Bearer glpat",
+    );
+    expect(registryAuth(npmrc, "https://other.example.test")).toBeUndefined();
+  });
+
+  test("prefers the deepest matching path prefix", async () => {
+    const npmrc = await loadNpmrc(
+      await createNpmrcDir(`//gitlab.example.test/:_authToken=root
+//gitlab.example.test/api/v4/projects/7/packages/npm/:_authToken=project`),
+    );
+
+    expect(registryAuth(npmrc, "https://gitlab.example.test/api/v4/projects/7/packages/npm/")).toBe(
+      "Bearer project",
+    );
+  });
+
+  test("sends the configured token when reading a package", async () => {
+    vi.stubEnv("GH_TOKEN", "secret-token");
+    const cwd = await createNpmrcDir(`@acme:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=\${GH_TOKEN}`);
+    await mkdir(join(cwd, "packages/core"), { recursive: true });
+    await writeNpmWorkspaceRoot(cwd);
+    await writeFile(
+      join(cwd, "packages/core/package.json"),
+      `${JSON.stringify({ name: "@acme/core", version: "1.0.1" }, null, 2)}\n`,
+    );
+
+    const context = await createResolvedContext({ cwd, npm: { client: "pnpm" } });
+    mockRegistryPublished();
+
+    await expect(publishPlanStatus(await loadPlan(context), context)).resolves.toEqual({
+      status: "success",
+    });
+    expect(fetchedRequests()).toContainEqual({
+      url: npmPackumentUrl("https://npm.pkg.github.com", "@acme/core"),
+      headers: { accept: PACKUMENT_ACCEPT, authorization: "Bearer secret-token" },
+    });
+  });
 });
 
 describe("npm registry preflight", () => {
   test("reads the registry from the graph during resolvePlanStatus", async () => {
     const context = await createContext("pnpm", "https://registry.example.test");
 
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
-    );
+    mockRegistryPublished();
 
     const plan = await loadPlan(context);
 
     await expect(publishPlanStatus(plan, context)).resolves.toEqual({ status: "success" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
-      { headers: { Accept: "application/json" } },
-    );
+    expect(fetchedRequests()).toContainEqual({
+      url: npmPackumentUrl("https://registry.example.test", "@acme/core"),
+      headers: { accept: PACKUMENT_ACCEPT },
+    });
   });
 
   test("returns shouldPublish true for missing package versions", async () => {
@@ -162,16 +276,14 @@ describe("publish plan status", () => {
 
   test("returns success when publishable packages are on the registry", async () => {
     const context = await createTestContext();
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ version: "1.0.1" }), { status: 200 }),
-    );
+    mockRegistryPublished();
     const plan = await loadPlan(context);
 
     await expect(publishPlanStatus(plan, context)).resolves.toEqual({ status: "success" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      npmPackageVersionUrl("https://registry.example.test", "@acme/core", "1.0.1"),
-      { headers: { Accept: "application/json" } },
-    );
+    expect(fetchedRequests()).toContainEqual({
+      url: npmPackumentUrl("https://registry.example.test", "@acme/core"),
+      headers: { accept: PACKUMENT_ACCEPT },
+    });
   });
 
   test("returns pending when a publishable package is missing from the registry", async () => {
@@ -261,6 +373,13 @@ async function createResolvedContext(options: Parameters<typeof createTegamiCont
   const context = await createTegamiContext(options);
   await resolveGraph(context);
   return context;
+}
+
+async function createNpmrcDir(content: string) {
+  const cwd = await mkdtemp(join(tmpdir(), "tegami-npmrc-"));
+  tempDirs.push(cwd);
+  await writeFile(join(cwd, ".npmrc"), content);
+  return cwd;
 }
 
 async function writeNpmWorkspaceRoot(cwd: string) {

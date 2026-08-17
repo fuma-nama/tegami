@@ -1,3 +1,4 @@
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig(async () => {
@@ -5,5 +6,11 @@ export default defineConfig(async () => {
 
   return {
     plugins: [UnpluginTypia()],
+    test: {
+      env: {
+        // keep the developer's own ~/.npmrc out of registry resolution
+        NPM_CONFIG_USERCONFIG: path.join(import.meta.dirname, "no-such.npmrc"),
+      },
+    },
   };
 });

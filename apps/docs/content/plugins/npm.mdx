@@ -55,6 +55,8 @@ const paper = tegami({
 
 Use `provider: "gitlab"` with the [GitLab plugin](/plugins/gitlab) for GitLab CI. The `workflow` value is the filename passed to `npm trust --file`.
 
+Trusted publishing only exists on `registry.npmjs.org`. Packages pointed at [another registry](#private-registries) are listed as skipped and left untouched.
+
 #### One-time setup for new packages
 
 Run this locally:
@@ -106,3 +108,45 @@ tegami({
   },
 });
 ```
+
+## Private registries
+
+Tegami resolves a package's registry the way npm does, taking the first of:
+
+1. `publishConfig.registry` in the package manifest.
+2. `@scope:registry` in `.npmrc`.
+3. `registry` in `.npmrc`.
+4. `https://registry.npmjs.org`.
+
+Both your user-level & project-level `.npmrc` are read.
+
+Registries other than npm usually need credentials to be read as well, so Tegami sends the token you configured for the host:
+
+```ini title=".npmrc"
+@acme:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+`${VAR}` is read from the environment, and an entry pointing at an unset variable is dropped instead of being sent empty.
+
+`actions/setup-node` already writes that file for you in GitHub Actions:
+
+```yaml
+- uses: actions/setup-node@v6
+  with:
+    node-version: 24
+    registry-url: https://npm.pkg.github.com
+    scope: "@acme"
+
+- name: Version & publish packages
+  run: pnpm tegami ci
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    NODE_AUTH_TOKEN: ${{ github.token }}
+```
+
+<Callout type='warn' title="GitHub Packages">
+
+Publishing to GitHub Packages needs `packages: write` on top of the [permissions](/ci) the workflow already has. It answers a rejected read with `404` rather than `401`, so a missing or wrong token makes a package look unpublished. Check the token first when publish then fails on authentication.
+
+</Callout>
