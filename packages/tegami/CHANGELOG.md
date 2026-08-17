@@ -1,3 +1,19 @@
+## tegami@1.4.0
+
+### Support private npm registries
+
+Registry lookups now read `.npmrc` for credentials, so publishing to GitHub Packages, GitLab, Verdaccio, or Artifactory works without patching Tegami. `_authToken` is sent as a bearer token and `_auth` as a basic one, `${VAR}` is expanded from the environment, and credentials configured for a host also cover paths below it.
+
+The registry of a package is resolved like npm does it: `publishConfig.registry`, then `@scope:registry`, then `registry`, then `https://registry.npmjs.org`. Previously only `publishConfig.registry` was read, so a workspace configuring its registry in `.npmrc` published to one registry while Tegami checked another.
+
+### Check published versions against the packument
+
+Whether a version exists is now read from `GET /{name}` instead of `GET /{name}/{version}`. GitHub Packages does not implement the version route and answers `405`, which failed every publish against it before it started.
+
+### Skip trusted publishing for packages outside npm
+
+`tegami npm pretrust` lists packages published to another registry as skipped instead of trying to configure them. `npm trust` only exists on `registry.npmjs.org`.
+
 ## tegami@1.3.5
 
 ### Encode scoped npm package names in registry lookups

@@ -1,9 +1,6 @@
 core:changelogs:
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Encode scoped npm package names in registry lookups\n\nPublish status checks no longer request `https://registry.npmjs.org/@scope/name/…` with a raw `@`. Scoped package names are percent-encoded in the registry URL, so lookups succeed against registries that reject unescaped path segments.\n\n### Guard `await using` on drafts that were already applied\n\n`Draft`'s `Symbol.asyncDispose` now calls `apply()` only when the draft can still be applied, so disposing an already-applied draft no longer throws.\n"
-    filename: 2026-08-10-3fec6b.md
-    v: 0.0.0
-  - content: "---\npackages:\n  npm:tegami:\n    type: patch\n---\n\n### Match exit-prerelease for major and minor bumps\n\nThe `exit-prerelease` draft condition now treats any move from a prerelease version to a non-prerelease version as a match. Major and minor bumps that leave a prerelease (for example `1.0.0-beta.1` → `2.0.0`) are recognized, not only patch-level `semver.inc(..., \"release\")` results.\n"
-    filename: 2026-08-10-ef17e1.md
+  - content: "---\npackages:\n  npm:tegami:\n    type: minor\n---\n\n### Support private npm registries\n\nRegistry lookups now read `.npmrc` for credentials, so publishing to GitHub Packages, GitLab, Verdaccio, or Artifactory works without patching Tegami. `_authToken` is sent as a bearer token and `_auth` as a basic one, `${VAR}` is expanded from the environment, and credentials configured for a host also cover paths below it.\n\nThe registry of a package is resolved like npm does it: `publishConfig.registry`, then `@scope:registry`, then `registry`, then `https://registry.npmjs.org`. Previously only `publishConfig.registry` was read, so a workspace configuring its registry in `.npmrc` published to one registry while Tegami checked another.\n\n### Check published versions against the packument\n\nWhether a version exists is now read from `GET /{name}` instead of `GET /{name}/{version}`. GitHub Packages does not implement the version route and answers `405`, which failed every publish against it before it started.\n\n### Skip trusted publishing for packages outside npm\n\n`tegami npm pretrust` lists packages published to another registry as skipped instead of trying to configure them. `npm trust` only exists on `registry.npmjs.org`.\n"
+    filename: 2026-08-17-a41c7d.md
     v: 0.0.0
 core:packages:
   - id: npm:root
@@ -11,13 +8,12 @@ core:packages:
   - id: npm:docs
     updated: false
   - changelogIds:
-      - 2026-08-10-3fec6b.md
-      - 2026-08-10-ef17e1.md
+      - 2026-08-17-a41c7d.md
     id: npm:tegami
     updated: true
-  - id: npm:@tegami/dart
-    updated: false
   - id: npm:@tegami/composer
+    updated: false
+  - id: npm:@tegami/dart
     updated: false
   - id: npm:@tegami/gem
     updated: false
@@ -25,17 +21,17 @@ core:packages:
     updated: false
   - id: npm:@tegami/hex
     updated: false
-  - id: npm:@tegami/nuget
-    updated: false
   - id: npm:@tegami/maven
+    updated: false
+  - id: npm:@tegami/nuget
     updated: false
   - id: npm:@tegami/pip
     updated: false
   - id: npm:@tegami/swift
     updated: false
-  - id: npm:@tegami/zig
-    updated: false
   - id: npm:@tegami/xml-util
+    updated: false
+  - id: npm:@tegami/zig
     updated: false
   - id: npm:@repo/typescript-config
     updated: false
@@ -43,15 +39,15 @@ npm:packages:
   - id: npm:root
   - id: npm:docs
   - id: npm:tegami
-  - id: npm:@tegami/dart
   - id: npm:@tegami/composer
+  - id: npm:@tegami/dart
   - id: npm:@tegami/gem
   - id: npm:@tegami/gradle
   - id: npm:@tegami/hex
-  - id: npm:@tegami/nuget
   - id: npm:@tegami/maven
+  - id: npm:@tegami/nuget
   - id: npm:@tegami/pip
   - id: npm:@tegami/swift
-  - id: npm:@tegami/zig
   - id: npm:@tegami/xml-util
+  - id: npm:@tegami/zig
   - id: npm:@repo/typescript-config
