@@ -32,11 +32,13 @@ export class NpmPackage extends WorkspacePackage {
     return this.manifest.version;
   }
 
-  async write(): Promise<void> {
-    await writeFile(
-      path.join(this.path, "package.json"),
-      `${JSON.stringify(this.manifest, null, 2)}\n`,
-    );
+  async write(manifest: PackageManifest = this.manifest): Promise<void> {
+    await writeFile(path.join(this.path, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  /** every name the package is published under: its own name, then the configured aliases */
+  listNames(): string[] {
+    return [this.name, ...(this.options.npm?.alias ?? [])];
   }
 
   initDraft() {
@@ -48,8 +50,9 @@ export class NpmPackage extends WorkspacePackage {
     return defaults;
   }
 
-  getRegistry(): string {
-    return this.manifest.publishConfig?.registry ?? resolveRegistry(this.npmrc, this.name);
+  /** the registry `name` (the package name or one of its aliases) is published to */
+  getRegistry(name = this.name): string {
+    return this.manifest.publishConfig?.registry ?? resolveRegistry(this.npmrc, name);
   }
 
   configureDraft({ draft }: { draft: PackageDraft }): void {

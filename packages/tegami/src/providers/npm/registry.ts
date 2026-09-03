@@ -107,20 +107,25 @@ interface Packument {
  *
  * GitHub Packages only implements the packument route, `GET /{name}/{version}` answers 405 there,
  * so existence is always read from the full document.
+ *
+ * `name` is the package name or one of its aliases.
  */
-export async function fetchPackument(pkg: NpmPackage): Promise<Packument | undefined> {
-  const registry = pkg.getRegistry();
+export async function fetchPackument(
+  pkg: NpmPackage,
+  name = pkg.name,
+): Promise<Packument | undefined> {
+  const registry = pkg.getRegistry(name);
   const auth = registryAuth(pkg.npmrc, registry);
   const headers = new Headers({
     Accept: "application/vnd.npm.install-v1+json, application/json",
   });
   if (auth) headers.set("Authorization", auth);
 
-  const response = await fetch(joinPath(registry, encodeURIComponent(pkg.name)), { headers });
+  const response = await fetch(joinPath(registry, encodeURIComponent(name)), { headers });
   if (response.status === 404) return;
   if (!response.ok) {
     throw await fetchFailure(
-      `Unable to read ${pkg.name} from the npm registry "${registry}"`,
+      `Unable to read ${name} from the npm registry "${registry}"`,
       response,
     );
   }
@@ -128,7 +133,11 @@ export async function fetchPackument(pkg: NpmPackage): Promise<Packument | undef
   return response.json();
 }
 
-export async function isVersionPublished(pkg: NpmPackage, version: string): Promise<boolean> {
-  const packument = await fetchPackument(pkg);
+export async function isVersionPublished(
+  pkg: NpmPackage,
+  version: string,
+  name?: string,
+): Promise<boolean> {
+  const packument = await fetchPackument(pkg, name);
   return packument?.versions?.[version] !== undefined;
 }

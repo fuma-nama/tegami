@@ -109,6 +109,30 @@ tegami({
 });
 ```
 
+### Aliases
+
+Publish a package under extra names, for example to keep an unscoped name alive after moving to a scope:
+
+```ts
+tegami({
+  packages: {
+    "@acme/ui": {
+      npm: {
+        alias: ["acme-ui"],
+      },
+    },
+  },
+});
+```
+
+An alias is not a separate package. It shares the version, changelog, git tag, and dist-tag of `@acme/ui`, changelog files keep referencing `@acme/ui`, and so do workspace dependents.
+
+Each name is published from the package directory, with `name` in `package.json` swapped to the alias for the duration of the publish. Lifecycle scripts such as `prepublishOnly` run again for every name on purpose: a build that imports `package.json` picks up the alias, and a bundler config can branch on the name to ship a different build under each one. Plugin `willPublish` hooks run once per package before any swap, so builds that differ per name belong in lifecycle scripts.
+
+Names the registry already has are skipped, so a failed alias publish can be retried on its own.
+
+The registry of an alias is resolved from its own name, so a scoped alias follows the `@scope:registry` entry of its scope. `tegami npm pretrust` sets up [trusted publishing](#trusted-publishing) for aliases as well.
+
 ## Private registries
 
 Tegami resolves a package's registry the way npm does, taking the first of:

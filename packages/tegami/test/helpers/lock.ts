@@ -25,6 +25,8 @@ export async function writePublishLock(
     changelogs?: LockChangelog[];
     packages?: LockPackage[];
     npm?: LockNpmPackage[];
+    /** package ids to mark as latest once published */
+    markLatest?: string[];
     path?: string;
   } = {},
 ): Promise<string> {
@@ -57,6 +59,12 @@ export async function writePublishLock(
         id: pkg.id,
         ...(pkg.distTag ? { distTag: pkg.distTag } : {}),
       });
+    }
+  }
+
+  if (options.markLatest?.length) {
+    for (const id of options.markLatest) {
+      lock.write("npm:mark-latest", { id });
     }
   }
 

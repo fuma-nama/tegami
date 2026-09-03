@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -8,6 +8,7 @@ import { tegami } from "../src";
 import { createCli } from "../src/cli";
 import { github } from "../src/plugins/github";
 import { gitlab } from "../src/plugins/gitlab";
+import { parsePublishLock } from "../src/plans/lock";
 import { writePublishLock } from "./helpers/lock";
 import {
   fetchMock,
@@ -69,6 +70,34 @@ describe("npm pretrust", () => {
       expect.arrayContaining(["trust", "github", "@acme/core", "--repo", "acme/widgets"]),
       expect.anything(),
     );
+  });
+
+  test("configures trusted publishing for aliases", async () => {
+    const cwd = await createFixture();
+    exec.mockResolvedValue(execResult());
+
+    await createCli(
+      tegami({
+        cwd,
+        npm: { trustedPublish: { provider: "github", workflow: "publish.yml" } },
+        packages: { "@acme/core": { npm: { alias: ["acme-core"] } } },
+        plugins: [github({ repo: "acme/widgets" })],
+      }),
+    ).parseAsync(["npm", "pretrust"]);
+
+    expect(exec).toHaveBeenCalledTimes(6);
+    expect(exec).toHaveBeenCalledWith(
+      "npm",
+      expect.arrayContaining(["trust", "github", "acme-core", "--repo", "acme/widgets"]),
+      expect.anything(),
+    );
+    expect(vi.mocked(note)).toHaveBeenCalledWith(
+      expect.stringContaining("configured acme-core"),
+      "Result",
+    );
+
+    const lock = parsePublishLock(await readFile(join(cwd, ".tegami/publish-lock.yaml"), "utf8"));
+    expect(lock.size("npm:mark-latest")).toBe(2);
   });
 
   test("uses gitlab project and npm trust gitlab", async () => {

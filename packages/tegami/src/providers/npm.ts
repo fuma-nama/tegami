@@ -76,7 +76,7 @@ const validateNpmPackageLock: (input: unknown) => typia.IValidation<NpmPackageLo
 const validateNpmMarkLatestLock: (input: unknown) => typia.IValidation<NpmMarkLatestLock> =
   typia.createValidate<NpmMarkLatestLock>();
 
-/** publishes an npm package (and its dist tags) to the registry */
+/** publishes an npm package (and its dist tags) to the registry, under its name and every alias */
 export class NpmPublishTask extends PackagePublishTask<NpmPackage> {
   constructor(
     pkg: NpmPackage,
@@ -87,35 +87,45 @@ export class NpmPublishTask extends PackagePublishTask<NpmPackage> {
 
   async publish({ plan }: PublishTaskRunContext): Promise<PackagePublishTaskResult> {
     const pkg = this.pkg;
+    if (!pkg.version) return { type: "skipped" };
     const { distTag, markLatest } = plan.packages.get(pkg.id)?.npm ?? {};
+    let published = false;
 
-    const result = await publish(this.client, pkg, distTag);
-    if (result.type === "published" && markLatest) {
+    // names already on the registry are skipped, so a retry only publishes what is missing
+    for (const name of pkg.listNames()) {
+      if (await isVersionPublished(pkg, pkg.version, name)) continue;
+
+      await publish(this.client, pkg, name, distTag);
+      published = true;
+      if (!markLatest) continue;
+
       const tagResult = await x(
         "npm",
         [
           "dist-tag",
           "add",
-          `${pkg.name}@${pkg.version}`,
+          `${name}@${pkg.version}`,
           "latest",
           "--registry",
-          pkg.getRegistry(),
+          pkg.getRegistry(name),
         ],
         { nodeOptions: { cwd: pkg.path } },
       );
 
       if (tagResult.exitCode !== 0) {
-        throw execFailure("Failed to mark package as latest", tagResult);
+        throw execFailure(`Failed to mark ${name} as latest`, tagResult);
       }
     }
 
-    return result;
+    return { type: published ? "published" : "skipped" };
   }
 
   async status() {
     const { pkg } = this;
     if (!pkg.version) return;
-    if (!(await isVersionPublished(pkg, pkg.version))) return "pending" as const;
+    for (const name of pkg.listNames()) {
+      if (!(await isVersionPublished(pkg, pkg.version, name))) return "pending" as const;
+    }
   }
 }
 
@@ -384,15 +394,24 @@ function depsPolicy(
   };
 }
 
-async function publish(
+/** publish the package directory as `name`, aliases swap the manifest name for the duration of the publish */
+async function publish(client: AgentName, pkg: NpmPackage, name: string, distTag?: string) {
+  if (name === pkg.name) return runPublish(client, pkg, name, distTag);
+
+  await pkg.write({ ...pkg.manifest, name });
+  try {
+    await runPublish(client, pkg, name, distTag);
+  } finally {
+    await pkg.write();
+  }
+}
+
+async function runPublish(
   client: AgentName,
   pkg: NpmPackage,
+  name: string,
   distTag?: string,
-): Promise<PackagePublishTaskResult> {
-  if (!pkg.version || (await isVersionPublished(pkg, pkg.version))) {
-    return { type: "skipped" };
-  }
-
+): Promise<void> {
   // TODO: remove it when https://github.com/oven-sh/bun/issues/15601 is merged
   if (client === "bun") {
     // `npm publish tarball.tgz` does not run lifecycle scripts, we must run it to align with default behaviours
@@ -402,7 +421,7 @@ async function publish(
       const result = await x("bun", ["run", script], { nodeOptions: { cwd: pkg.path } });
       if (result.exitCode === 0) continue;
 
-      throw execFailure(`Failed to run ${script} script for ${pkg.name}@${pkg.version}.`, result);
+      throw execFailure(`Failed to run ${script} script for ${name}@${pkg.version}.`, result);
     }
 
     const tarballPath = path.resolve(pkg.path, "pkg.tgz");
@@ -410,7 +429,7 @@ async function publish(
       nodeOptions: { cwd: pkg.path },
     });
     if (packResult.exitCode !== 0) {
-      throw execFailure(`Failed to pack ${pkg.name}@${pkg.version}.`, packResult);
+      throw execFailure(`Failed to pack ${name}@${pkg.version}.`, packResult);
     }
 
     const publishArgs = ["publish", tarballPath];
@@ -424,11 +443,11 @@ async function publish(
     });
     if (publishResult.exitCode !== 0) {
       throw execFailure(
-        `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+        `Failed to publish ${name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
         publishResult,
       );
     }
-    return { type: "published" };
+    return;
   }
 
   let command: string;
@@ -460,10 +479,8 @@ async function publish(
   });
   if (result.exitCode !== 0) {
     throw execFailure(
-      `Failed to publish ${pkg.name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
+      `Failed to publish ${name}@${pkg.version}${distTag ? ` with dist-tag "${distTag}"` : ""}.`,
       result,
     );
   }
-
-  return { type: "published" };
 }

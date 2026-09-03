@@ -82,9 +82,9 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
       const prepareLines: string[] = [
         "Make sure to run login command first, it will publish empty packages.",
       ];
-      for (const pkg of targets) {
+      for (const { name } of targets) {
         prepareLines.push(
-          `${pkg.name}: will publish a placeholder under dist-tag "${PLACEHOLDER_DIST_TAG}", then configure trusted publishing.`,
+          `${name}: will publish a placeholder under dist-tag "${PLACEHOLDER_DIST_TAG}", then configure trusted publishing.`,
         );
       }
       note(prepareLines.join("\n"), dryRun ? "Dry run" : "Configure trusted publishing");
@@ -96,22 +96,26 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
           lock = parsePublishLock(await fs.readFile(context.lockPath, "utf8"));
         } catch {}
 
-      for (const pkg of targets) {
+      const marked = new Set<string>();
+      for (const target of targets) {
+        const { pkg, name } = target;
         if (dryRun) {
           lines.push(
-            `would configure ${pkg.name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
+            `would configure ${name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
           );
           continue;
         }
 
-        await publishPlaceholder(pkg);
-        await npmTrust(context, pkg, options, repo);
+        await publishPlaceholder(target);
+        await npmTrust(context, target, options, repo);
         lines.push(
-          `configured ${pkg.name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
+          `configured ${name} (placeholder ${PLACEHOLDER_VERSION}@${PLACEHOLDER_DIST_TAG})`,
         );
-        lock?.write("npm:mark-latest", {
-          id: pkg.id,
-        });
+        // a package with several new names is marked once
+        if (lock && !marked.has(pkg.id)) {
+          marked.add(pkg.id);
+          lock.write("npm:mark-latest", { id: pkg.id });
+        }
       }
 
       if (lock) await fs.writeFile(context.lockPath, lock.serialize());
@@ -124,10 +128,16 @@ export function registerNpmCli(cli: TegamiCliRegistry, options: TrustedPublishOp
     });
 }
 
+interface PretrustTarget {
+  pkg: NpmPackage;
+  /** the package name or one of its aliases */
+  name: string;
+}
+
 interface PretrustTargets {
-  /** publishable packages npm does not know yet */
-  targets: NpmPackage[];
-  /** packages left out because their registry has no trusted publishing */
+  /** publishable names npm does not know yet */
+  targets: PretrustTarget[];
+  /** names left out because their registry has no trusted publishing */
   unsupported: string[];
 }
 
@@ -141,34 +151,36 @@ async function resolvePretrustTargets(context: TegamiContext): Promise<PretrustT
 
   await runPreflights(context, plan);
 
-  const candidates: NpmPackage[] = [];
+  const candidates: PretrustTarget[] = [];
   const unsupported: string[] = [];
   for (const [id, { preflight }] of plan.packages) {
     if (!preflight?.shouldPublish) continue;
     const pkg = context.graph.get(id);
     if (!(pkg instanceof NpmPackage)) continue;
 
-    switch (pkg.getRegistry()) {
-      case "https://registry.npmjs.org":
-      case "http://registry.npmjs.org":
-        candidates.push(pkg);
-        break;
-      default:
-        unsupported.push(pkg.name);
+    for (const name of pkg.listNames()) {
+      switch (pkg.getRegistry(name)) {
+        case "https://registry.npmjs.org":
+        case "http://registry.npmjs.org":
+          candidates.push({ pkg, name });
+          break;
+        default:
+          unsupported.push(name);
+      }
     }
   }
 
   const targets = (
-    await runConcurrent(candidates, planConcurrency(plan), async (pkg) =>
-      (await fetchPackument(pkg)) ? undefined : pkg,
+    await runConcurrent(candidates, planConcurrency(plan), async (target) =>
+      (await fetchPackument(target.pkg, target.name)) ? undefined : target,
     )
-  ).filter((pkg) => pkg !== undefined);
+  ).filter((target) => target !== undefined);
 
   return { targets, unsupported };
 }
 
-async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
-  const registry = pkg.getRegistry();
+async function publishPlaceholder({ pkg, name }: PretrustTarget): Promise<void> {
+  const registry = pkg.getRegistry(name);
   const access = pkg.manifest.publishConfig?.access;
 
   const dir = await fs.mkdtemp(join(tmpdir(), "tegami-npm-placeholder-"));
@@ -178,7 +190,7 @@ async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
         join(dir, "package.json"),
         `${JSON.stringify(
           {
-            name: pkg.name,
+            name,
             version: PLACEHOLDER_VERSION,
             description: "Placeholder published by Tegami for npm trusted publishing setup.",
           },
@@ -215,7 +227,7 @@ async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
         ? " Complete npm 2FA in the terminal, or publish with an OTP-capable session."
         : "";
       throw execFailure(
-        `Failed to publish placeholder ${pkg.name}@${PLACEHOLDER_VERSION} with dist-tag "${PLACEHOLDER_DIST_TAG}".${hint}`,
+        `Failed to publish placeholder ${name}@${PLACEHOLDER_VERSION} with dist-tag "${PLACEHOLDER_DIST_TAG}".${hint}`,
         result,
       );
     }
@@ -226,14 +238,14 @@ async function publishPlaceholder(pkg: NpmPackage): Promise<void> {
 
 async function npmTrust(
   context: TegamiContext,
-  pkg: NpmPackage,
+  { pkg, name }: PretrustTarget,
   options: TrustedPublishOptions,
   repo: string,
 ): Promise<void> {
   const args = [
     "trust",
     options.provider,
-    pkg.name,
+    name,
     PROJECT_FLAG[options.provider],
     repo,
     "--file",
@@ -241,7 +253,7 @@ async function npmTrust(
     "--allow-publish",
     "-y",
     "--registry",
-    pkg.getRegistry(),
+    pkg.getRegistry(name),
   ];
 
   const result = await x("npm", args, {
@@ -251,6 +263,6 @@ async function npmTrust(
     const hint = result.stderr.includes("EOTP")
       ? " Complete npm 2FA in the terminal when prompted."
       : "";
-    throw execFailure(`Failed to configure trusted publishing for ${pkg.name}.${hint}`, result);
+    throw execFailure(`Failed to configure trusted publishing for ${name}.${hint}`, result);
   }
 }

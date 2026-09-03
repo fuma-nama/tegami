@@ -260,8 +260,12 @@ async function publishPackages(
 
     let message = `${result.type} ${pkg.id} - ${pkg.version}`;
 
+    const details: string[] = [];
     const distTag = packagePlan.npm?.distTag;
-    if (distTag) message += ` (npm dist-tag: ${distTag})`;
+    const alias = pkg.options.npm?.alias;
+    if (distTag) details.push(`npm dist-tag: ${distTag}`);
+    if (alias?.length) details.push(`alias: ${alias.join(", ")}`);
+    if (details.length > 0) message += ` (${details.join(", ")})`;
     if (result.type === "failed" && result.error) message += `: ${result.error}`;
     lines.push(message);
   }

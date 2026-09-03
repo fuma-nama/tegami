@@ -64,6 +64,15 @@ interface SharedNpmOptions {
   distTag?: string;
 }
 
+interface NpmPackageOptions extends SharedNpmOptions {
+  /**
+   * Extra names to publish the package under, e.g. an unscoped mirror of a scoped package.
+   *
+   * Aliases share the version, changelog, git tag, and dist-tag of the package.
+   */
+  alias?: string[];
+}
+
 export interface GroupOptions {
   /** Prerelease identifier appended to bumped versions (e.g. `alpha` → `1.1.0-alpha.0`). */
   prerelease?: string;
@@ -88,7 +97,7 @@ export interface PackageOptions<Group extends string = string> {
   group?: Group;
 
   /** npm-specific options. */
-  npm?: SharedNpmOptions;
+  npm?: NpmPackageOptions;
 
   /** go-specific options. */
   go?: SharedGoOptions;

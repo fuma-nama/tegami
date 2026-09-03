@@ -569,6 +569,105 @@ Included again on 2.0.0.
   });
 });
 
+describe("npm aliases", () => {
+  const alias = { packages: { "@acme/core": { npm: { alias: ["acme-core"] } } } };
+
+  /** the primary name is on the registry, the alias is not */
+  function mockAliasMissing() {
+    fetchMock.mockImplementation(async (url) =>
+      String(url).endsWith("/acme-core")
+        ? new Response("Not found", { status: 404 })
+        : new Response(JSON.stringify({ versions: { "1.0.1": {} } }), { status: 200 }),
+    );
+  }
+
+  /** records the manifest name each publish command sees, in call order */
+  function mockPublish(failing?: string): string[] {
+    const names: string[] = [];
+    exec.mockImplementation((async (
+      _command: string,
+      args: string[] = [],
+      options: { nodeOptions?: { cwd?: string } } = {},
+    ) => {
+      if (args.at(0) === "dist-tag") return execResult();
+      if (args.at(0) !== "publish") throw new Error(`Unexpected command: ${args.join(" ")}`);
+
+      const cwd = String(options.nodeOptions?.cwd);
+      const manifest = JSON.parse(await readFile(join(cwd, "package.json"), "utf8"));
+      names.push(manifest.name);
+      if (manifest.name === failing) return execResult({ exitCode: 1, stderr: "publish failed" });
+      return execResult();
+    }) as unknown as typeof x);
+    return names;
+  }
+
+  async function manifestName(packagePath: string): Promise<string> {
+    return JSON.parse(await readFile(join(packagePath, "package.json"), "utf8")).name;
+  }
+
+  test("publishes every name from the package directory, restoring the manifest", async () => {
+    const { cwd, packagePath, lockPath } = await createPublishFixture();
+    await writePublishLock(cwd, {
+      path: lockPath,
+      packages: [{ id: "npm:@acme/core", updated: true }],
+      npm: [{ id: "npm:@acme/core", distTag: "latest" }],
+      markLatest: ["npm:@acme/core"],
+    });
+    const names = mockPublish();
+
+    const context = await createResolvedContext({ cwd, lockPath, ...alias });
+    const plan = await publishFixture(context, { dryRun: false });
+
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(names).toEqual(["@acme/core", "acme-core"]);
+    await expect(manifestName(packagePath)).resolves.toBe("@acme/core");
+    expect(fetchedRequests().map((request) => request.url)).toEqual([
+      npmPackumentUrl(undefined, "@acme/core"),
+      npmPackumentUrl(undefined, "acme-core"),
+    ]);
+    expect(exec).toHaveBeenCalledWith(
+      "npm",
+      ["dist-tag", "add", "acme-core@1.0.1", "latest", "--registry", "https://registry.npmjs.org"],
+      { nodeOptions: { cwd: packagePath } },
+    );
+  });
+
+  test("only publishes the names missing from the registry", async () => {
+    const { cwd, lockPath } = await createPublishFixture();
+    mockAliasMissing();
+    const names = mockPublish();
+
+    const context = await createResolvedContext({ cwd, lockPath, ...alias });
+    const plan = await publishFixture(context, { dryRun: false });
+
+    expect(plan.packages.get("npm:@acme/core")?.publishResult).toEqual({ type: "published" });
+    expect(names).toEqual(["acme-core"]);
+  });
+
+  test("restores the manifest when an alias publish fails", async () => {
+    const { cwd, packagePath, lockPath } = await createPublishFixture();
+    const names = mockPublish("acme-core");
+
+    const context = await createResolvedContext({ cwd, lockPath, ...alias });
+    await expect(publishFixture(context, { dryRun: false })).rejects.toThrow(
+      'Failed to publish acme-core@1.0.1 with dist-tag "latest".',
+    );
+
+    expect(names).toEqual(["@acme/core", "acme-core"]);
+    await expect(manifestName(packagePath)).resolves.toBe("@acme/core");
+  });
+
+  test("keeps the publish lock until every name is published", async () => {
+    const { cwd, lockPath } = await createPublishFixture();
+    mockAliasMissing();
+
+    await expect(tegami({ cwd, lockPath, ...alias }).cleanup()).resolves.toEqual({
+      state: "skipped",
+      reason: "pending",
+    });
+  });
+});
+
 describe("cleanup publish plan", () => {
   test("removes the publish plan when publishing has finished", async () => {
     const { cwd, lockPath } = await createPublishFixture({
